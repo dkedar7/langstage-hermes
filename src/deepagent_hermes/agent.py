@@ -222,8 +222,14 @@ def create_hermes_agent(
 
     # ── checkpointer ─────────────────────────────────────────────────────
     # Shares the state.db file with the FTS store (disjoint table namespaces).
-    saver_cm = SqliteSaver.from_conn_string(str(db_path))
-    checkpointer = saver_cm.__enter__()
+    # We hold a long-lived connection ourselves rather than using
+    # ``SqliteSaver.from_conn_string`` (which is a context manager and would
+    # close the connection on GC of the temporary). ``check_same_thread=False``
+    # lets the graph stream from a different thread than the constructor.
+    import sqlite3
+
+    saver_conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    checkpointer = SqliteSaver(saver_conn)
 
     # ── compile ──────────────────────────────────────────────────────────
     # System prompt is set by PromptAssemblyMiddleware via wrap_model_call,
@@ -243,6 +249,8 @@ def create_hermes_agent(
     compiled.deepagent_hermes_store = store  # type: ignore[attr-defined]
     compiled.deepagent_hermes_library = library  # type: ignore[attr-defined]
     compiled.deepagent_hermes_provider = provider  # type: ignore[attr-defined]
+    # Keep the checkpointer connection alive for the lifetime of the graph.
+    compiled._deepagent_hermes_saver_conn = saver_conn  # type: ignore[attr-defined]
 
     return compiled
 

@@ -29,10 +29,23 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from typing_extensions import NotRequired
 
 from deepagent_hermes.store.sqlite_fts import SqliteFtsStore
+
+
+class _RecorderStateExt(AgentState):
+    """Schema extension so ``session_id`` / ``parent_session_id`` returned from
+    ``before_agent`` actually propagate to subsequent hooks. Without this,
+    LangGraph rejects unknown state keys and the recorder's manufactured
+    ``session_id`` is silently dropped, leading to FK violations in
+    ``record_message``.
+    """
+
+    session_id: NotRequired[str]
+    parent_session_id: NotRequired[str | None]
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +149,8 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
     temp-dir-backed instance and so the agent factory stays in charge
     of where state.db lives.
     """
+
+    state_schema = _RecorderStateExt
 
     def __init__(self, store: SqliteFtsStore) -> None:
         super().__init__()
