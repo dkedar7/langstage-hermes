@@ -29,11 +29,20 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from typing import Annotated
+
 from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from typing_extensions import NotRequired
 
 from deepagent_hermes.store.sqlite_fts import SqliteFtsStore
+
+
+def _take_last_str(_a: str | None, b: str | None) -> str | None:
+    """Last-write-wins reducer for session lineage fields. Tolerates parallel
+    writes when parent + subagent fire ``before_agent`` in the same superstep.
+    """
+    return b
 
 
 class _RecorderStateExt(AgentState):
@@ -42,10 +51,12 @@ class _RecorderStateExt(AgentState):
     LangGraph rejects unknown state keys and the recorder's manufactured
     ``session_id`` is silently dropped, leading to FK violations in
     ``record_message``.
+
+    Reducer-annotated for safe parallel writes from subagent dispatches.
     """
 
-    session_id: NotRequired[str]
-    parent_session_id: NotRequired[str | None]
+    session_id: NotRequired[Annotated[str, _take_last_str]]
+    parent_session_id: NotRequired[Annotated[str | None, _take_last_str]]
 
 logger = logging.getLogger(__name__)
 

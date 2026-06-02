@@ -35,6 +35,8 @@ from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from typing import Annotated
+
 from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
@@ -43,18 +45,33 @@ from langgraph.types import Command
 from typing_extensions import NotRequired
 
 
+def _take_last(_existing: Any, new: Any) -> Any:
+    """Last-write-wins reducer for fields that may be updated by parallel
+    middleware branches in the same LangGraph superstep (e.g. parent agent
+    + subagent both touching the counter). Without this, LangGraph raises
+    ``InvalidUpdateError: At key 'X': Can receive only one value per step``.
+
+    Surfaced live during the 2026-06-02 dogfood run when the review subagent
+    dispatch landed on the same step as a counter increment.
+    """
+    return new
+
+
 class _ReflectionStateExt(AgentState):
     """Schema extension so the counter / coordination fields the reflection
     middleware emits actually persist across hooks. Without this, the field
     updates returned from ``wrap_tool_call`` / ``before_model`` / ``after_model``
     are silently dropped by LangGraph (same failure mode as the recorder's
     session_id bug from 2026-06-02).
+
+    Reducer-annotated to tolerate parallel writes from the parent agent and
+    spawned subagents in the same superstep.
     """
 
-    iters_since_skill: NotRequired[int]
-    turns_since_memory: NotRequired[int]
-    pending_review_kind: NotRequired[Literal["memory", "skills", "combined"] | None]
-    last_review_started_at: NotRequired[float]
+    iters_since_skill: NotRequired[Annotated[int, _take_last]]
+    turns_since_memory: NotRequired[Annotated[int, _take_last]]
+    pending_review_kind: NotRequired[Annotated[Literal["memory", "skills", "combined"] | None, _take_last]]
+    last_review_started_at: NotRequired[Annotated[float, _take_last]]
 
 if TYPE_CHECKING:
     from typing_extensions import TypedDict

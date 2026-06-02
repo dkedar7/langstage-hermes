@@ -15,6 +15,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
+from typing import Annotated
+
 from langchain.agents.middleware.types import AgentMiddleware, AgentState, ModelRequest
 from typing_extensions import NotRequired
 
@@ -29,13 +31,28 @@ __all__ = ["SkillLoaderMiddleware"]
 _BANNER = "## Loaded skills"
 
 
+def _union_active_skills(a: list[str] | None, b: list[str] | None) -> list[str]:
+    seen: dict[str, None] = {}
+    for src in (a or []), (b or []):
+        for name in src:
+            seen.setdefault(name, None)
+    return list(seen.keys())
+
+
+def _merge_loaded_bodies(a: dict[str, str] | None, b: dict[str, str] | None) -> dict[str, str]:
+    return {**(a or {}), **(b or {})}
+
+
 class _SkillLoaderStateExt(AgentState):
     """Declare ``active_skills`` + ``loaded_skill_bodies`` on the merged graph
     state schema so the ``skill_view`` tool's state updates persist.
+
+    Reducer-annotated so parallel ``skill_view`` calls from different
+    middleware paths in the same superstep accumulate rather than crash.
     """
 
-    active_skills: NotRequired[list[str]]
-    loaded_skill_bodies: NotRequired[dict[str, str]]
+    active_skills: NotRequired[Annotated[list[str], _union_active_skills]]
+    loaded_skill_bodies: NotRequired[Annotated[dict[str, str], _merge_loaded_bodies]]
 
 
 class SkillLoaderMiddleware(AgentMiddleware):

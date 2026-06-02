@@ -100,9 +100,9 @@ class MemoryStateExt(AgentState):
       the reflection middleware can decide when to nudge.
     """
 
-    memory_snapshot: NotRequired[str]
-    user_snapshot: NotRequired[str]
-    turns_since_memory: NotRequired[int]
+    memory_snapshot: NotRequired[Annotated[str, lambda _a, b: b]]
+    user_snapshot: NotRequired[Annotated[str, lambda _a, b: b]]
+    turns_since_memory: NotRequired[Annotated[int, lambda _a, b: b]]
 
 
 # ── Disk helpers ─────────────────────────────────────────────────────

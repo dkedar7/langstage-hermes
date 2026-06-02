@@ -25,7 +25,7 @@ programmatic tools).
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Annotated, Any
 
 from langchain.agents.middleware import hook_config
 from langchain.agents.middleware.types import (
@@ -40,12 +40,28 @@ from typing_extensions import NotRequired
 _DEFAULT_REFUND_TOOLS: tuple[str, ...] = ("execute_code",)
 
 
+def _take_last_int(_existing: int | None, new: int | None) -> int | None:
+    """Last-write-wins reducer. LangGraph calls reducers with ``(None, None)``
+    to derive the initial value, so we must return ``None`` (not 0) for that
+    case or the seed turns into "budget exhausted" before the first turn —
+    surfaced live during the 2026-06-02 dogfood run.
+
+    Parallel decrements (parent + subagent in the same superstep) compose to
+    the last write; a brief over-spend by 1-2 iterations is acceptable in
+    exchange for not crashing the agent.
+    """
+    return new
+
+
 class _BudgetStateExt(AgentState):
     """Declare ``iteration_budget_remaining`` on the merged graph state schema
     so the middleware's seed + decrement actually persist across hooks.
+
+    Reducer-annotated to tolerate parallel writes from parent + subagent
+    paths in the same LangGraph superstep.
     """
 
-    iteration_budget_remaining: NotRequired[int]
+    iteration_budget_remaining: NotRequired[Annotated[int, _take_last_int]]
 
 
 def _state_get(state: Any, key: str, default: Any = None) -> Any:
@@ -84,13 +100,18 @@ class IterationBudgetMiddleware(AgentMiddleware):
     def before_agent(
         self, state: Any, runtime: Runtime[Any] | None = None
     ) -> dict[str, Any] | None:
-        """Seed ``iteration_budget_remaining`` to ``max_iterations`` if unset.
+        """Seed ``iteration_budget_remaining`` to ``max_iterations`` when
+        the current value is missing, None, or 0.
 
-        Idempotent: if a caller (e.g. a resumed thread) already has a non-None
-        remaining value we leave it alone.
+        LangGraph's schema-merge step coerces ``NotRequired[int]`` to 0 on the
+        first invocation in some configurations, which made the strict
+        ``current is None`` check skip seeding and immediately exhaust the
+        budget. Treating 0 as "unset" is safe because a real prior session
+        that genuinely exhausted will be re-seeded on the next agent run —
+        the right behaviour for a fresh invocation, not a regression.
         """
         current = _state_get(state, "iteration_budget_remaining", None)
-        if current is None:
+        if not current:  # None, 0, or missing
             return {"iteration_budget_remaining": self.max_iterations}
         return None
 
