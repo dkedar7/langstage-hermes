@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments (central per coding.md, but defensive)
+.venv/
+venv/
+ENV/
+env/
+
+# Tests / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Hermes runtime artifacts (when running from the repo)
+.deepagent-hermes/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.skills_prompt_snapshot.json
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+honcho.json
+config.local.yaml
+
+# Logs
+*.log
+logs/
+
+# OS
+.AppleDouble
+.LSOverride
+Icon
+
+# uv
+uv.lock

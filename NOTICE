@@ -1,0 +1,38 @@
+deepagent-hermes
+Copyright (c) 2026 Kedar Dabhadkar
+
+This project is a faithful reproduction of the design ideas in Nous Research's
+Hermes Agent (https://github.com/nousresearch/hermes-agent), released by Nous
+Research under the MIT License.
+
+The following design decisions, prompt structures, configuration defaults, file
+formats, and architectural patterns are adapted directly from the Hermes Agent
+codebase (v0.15.1):
+
+- The closed reflection loop with 10-iteration / 10-turn nudge intervals.
+- The three-layer (stable / context / volatile) system prompt assembly with
+  byte-stable prefix-cache discipline.
+- The "system_and_3" Anthropic prompt-caching strategy.
+- The 13-section context-compression summary template.
+- The 90 / 50 parent / subagent iteration budget defaults.
+- The frozen-snapshot pattern for MEMORY.md / USER.md files (loaded once at
+  session start, mid-session writes do not change the system prompt).
+- The agentskills.io–compatible SKILL.md format and progressive-disclosure
+  loading via skill_view.
+- The SQLite FTS5 schema with messages_fts (unicode61) and messages_fts_trigram
+  (CJK) virtual tables, BM25 ranking, and the DISCOVERY / SCROLL / BROWSE
+  session_search modes.
+- The cron job JSON shape including the skills / script / no_agent /
+  context_from / enabled_toolsets fields, the 60-second tick interval, and the
+  [SILENT] suppression marker.
+- The 4-source plugin discovery order (bundled, user, project, pip entry-points)
+  and the 17 lifecycle-hook names.
+- The curator skill-lifecycle state machine (active → stale at 30 days →
+  archived at 90 days; pinned skills immune).
+
+Where prompt text is reproduced verbatim, the source file in the Hermes Agent
+repository is cited inline in the corresponding .md file under prompts/.
+
+Nous Research is the originator of these ideas; this project's contribution is
+the reproduction on a different framework substrate (LangGraph + deepagents +
+langgraph-stream-parser instead of Hermes's native runtime).

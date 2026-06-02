@@ -1,0 +1,267 @@
+"""The compiled Hermes agent.
+
+This module is the entry point hosts target via
+``DEEPAGENT_AGENT_SPEC=deepagent_hermes.agent:graph``. It owns the
+**middleware stack ordering** (see SPEC §4) and is the only place that
+knows how the subsystems fit together.
+
+Two public surfaces:
+
+* :func:`create_hermes_agent` — build a fresh compiled graph from a
+  :class:`~deepagent_hermes.config.HermesConfig`. Each call returns an
+  independent ``CompiledStateGraph`` with its own checkpointer + store
+  references; callers can swap models or workspaces per agent.
+* :data:`graph` — a module-level instance built from
+  ``HermesConfig.resolve()`` for hosts that want a ready-to-use graph.
+  Constructed lazily on first attribute access so ``import``-time has
+  no side effects.
+
+Per SPEC §1 (D8), we deliberately do NOT use ``deepagents.create_deep_agent``
+because it appends user middleware *after* the defaults and always prepends
+``BASE_AGENT_PROMPT``. We need to own the middleware list end-to-end and
+own the system prompt, so we call ``langchain.agents.create_agent`` directly
+and assemble the middleware ourselves.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import uuid
+from pathlib import Path
+from typing import Any
+
+from deepagent_hermes.budget import IterationBudgetMiddleware
+from deepagent_hermes.caching import AnthropicCachingS3Middleware
+from deepagent_hermes.compression import HermesCompressionMiddleware
+from deepagent_hermes.config import HermesConfig
+from deepagent_hermes.curator import CuratorMiddleware
+from deepagent_hermes.memory.provider import get_provider
+from deepagent_hermes.memory.tool import MemoryToolMiddleware
+from deepagent_hermes.prompts import PromptAssemblyMiddleware
+from deepagent_hermes.reflection import ReflectionMiddleware, build_review_subagent
+from deepagent_hermes.search.session_search import make_session_search_tool
+from deepagent_hermes.skills.library import SkillLibrary
+from deepagent_hermes.skills.loader import SkillLoaderMiddleware
+from deepagent_hermes.skills.tools import make_skill_tools
+from deepagent_hermes.store.recorder import HermesStateRecorderMiddleware
+from deepagent_hermes.store.sqlite_fts import SqliteFtsStore
+from deepagent_hermes.tools.registry import HermesToolRegistry
+from deepagent_hermes.tools.toolsets import resolve_enabled
+
+log = logging.getLogger(__name__)
+
+
+def _default_skill_dirs(cfg: HermesConfig) -> list[Path]:
+    """Resolution order matches SPEC §10.2 — later wins on name collision."""
+    dirs: list[Path] = []
+    # Bundled (shipped with the package; usually empty in v0.1.0a0).
+    pkg_root = Path(__file__).resolve().parent.parent.parent
+    bundled = pkg_root / "skills"
+    if bundled.is_dir():
+        dirs.append(bundled)
+    # User-global.
+    dirs.append(cfg.hermes_home / "skills")
+    # Project shadow.
+    project = Path.cwd() / ".deepagent-hermes" / "skills"
+    if project.is_dir():
+        dirs.append(project)
+    # Extra dirs from config.
+    for extra in cfg.skills_external_dirs:
+        dirs.append(Path(extra).expanduser())
+    return dirs
+
+
+def _init_chat_model(model_id: str | None) -> Any:
+    """Wrap ``langchain.chat_models.init_chat_model`` so a ``None`` returns a sentinel default."""
+    from langchain.chat_models import init_chat_model
+
+    if not model_id:
+        model_id = "anthropic:claude-sonnet-4-5-20250929"
+    return init_chat_model(model_id)
+
+
+def create_hermes_agent(
+    config: HermesConfig | None = None,
+    *,
+    workspace: str | Path | None = None,
+    session_id: str | None = None,
+    extra_middleware: list[Any] | None = None,
+) -> Any:
+    """Build a fresh Hermes agent graph.
+
+    Args:
+        config: Resolved configuration; defaults to ``HermesConfig.resolve()``.
+        workspace: Filesystem root for the file toolset; defaults to ``cwd``.
+        session_id: Optional session id; auto-generated UUID if not provided.
+        extra_middleware: Additional middleware appended after the standard
+            stack — useful for hosts that want to inject tracing or auth.
+
+    Returns:
+        A compiled LangGraph ``CompiledStateGraph`` ready for ``.invoke()`` /
+        ``.stream()``. The graph carries a SQLite checkpointer and FTS5 store
+        rooted at ``<HERMES_HOME>/state.db``.
+    """
+    from langchain.agents import create_agent
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    cfg = config or HermesConfig.resolve()
+    sid = session_id or f"sess-{uuid.uuid4().hex[:12]}"
+    ws = Path(workspace).resolve() if workspace else Path.cwd()
+
+    # ── shared resources ─────────────────────────────────────────────────
+    db_path = cfg.hermes_home / "state.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    store = SqliteFtsStore(db_path=str(db_path))
+    library = SkillLibrary(_default_skill_dirs(cfg))
+
+    main_model = _init_chat_model(cfg.model_default)
+    aux_model = _init_chat_model(cfg.model_aux) if cfg.model_aux else main_model
+
+    # ── memory provider plugin (single-select) ───────────────────────────
+    provider_name = cfg.memory_provider or ""
+    provider_cls = get_provider(provider_name)
+    provider = provider_cls() if provider_cls else None
+
+    # ── enabled toolsets (after disabled_toolsets filter) ────────────────
+    enabled_toolsets = resolve_enabled(
+        disabled_toolsets=set(cfg.agent_disabled_toolsets),
+        platform=os.getenv("HERMES_PLATFORM", "cli"),
+    )
+
+    # ── tools (kept as a flat list; deepagents'/langchain's create_agent merges from middleware too) ──
+    skill_tools = make_skill_tools(library)
+    session_search_tool = make_session_search_tool(store, current_session_id_getter=lambda: sid)
+    # FilesystemBackend tools come in via the FilesystemMiddleware (below).
+    tools: list[Any] = [*skill_tools, session_search_tool]
+
+    # ── deepagents middleware (filesystem + subagents + todos) ───────────
+    from deepagents.backends.filesystem import FilesystemBackend
+    from deepagents.middleware.filesystem import FilesystemMiddleware
+    from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
+    from deepagents.middleware.subagents import SubAgentMiddleware
+    from langchain.agents.middleware import HumanInTheLoopMiddleware, TodoListMiddleware
+
+    fs_backend = FilesystemBackend(root_dir=str(ws), virtual_mode=False)
+
+    # ── review subagent (reflection target) ──────────────────────────────
+    review_subagent = build_review_subagent(library=library, store=store, aux_model=aux_model)
+
+    # ── compose the middleware stack (SPEC §4 order) ─────────────────────
+    # Note: deepagents inserts TodoList + Filesystem + SubAgent earlier in
+    # its own create_deep_agent; we do it ourselves to control ordering.
+    middleware: list[Any] = [
+        # Budget first — it can short-circuit before anything else runs.
+        IterationBudgetMiddleware(max_iterations=cfg.agent_max_iterations),
+        # Prompt assembly owns the system prompt (outermost wrap so the
+        # skill loader's mutation lands on top of the assembled prompt).
+        PromptAssemblyMiddleware(
+            enabled_toolsets=list(enabled_toolsets),
+            platform=os.getenv("HERMES_PLATFORM", "cli"),
+            workspace_root=ws,
+        ),
+        SkillLoaderMiddleware(library),
+        # Memory snapshot loader / writer.
+        MemoryToolMiddleware(
+            memory_char_limit=cfg.memory_char_limit,
+            user_char_limit=cfg.memory_user_char_limit,
+        ),
+        # FTS5 recorder — writes every turn to the SQLite store.
+        HermesStateRecorderMiddleware(store=store),
+        # Reflection — counts tool calls, spawns review subagent on threshold.
+        ReflectionMiddleware(
+            skill_nudge_interval=cfg.skills_creation_nudge_interval,
+            memory_nudge_interval=cfg.memory_nudge_interval,
+            library=library,
+            store=store,
+            model=main_model,
+            aux_model=aux_model,
+        ),
+        # Curator — runs on session start if idle gates open.
+        CuratorMiddleware(
+            library,
+            store,
+            interval_hours=cfg.curator_interval_hours,
+            min_idle_hours=cfg.curator_min_idle_hours,
+            stale_days=cfg.curator_stale_after_days,
+            archive_days=cfg.curator_archive_after_days,
+            enabled=cfg.curator_enabled,
+        ),
+        # Deepagents built-ins.
+        TodoListMiddleware(),
+        FilesystemMiddleware(backend=fs_backend),
+        SubAgentMiddleware(
+            backend=fs_backend,
+            subagents=[review_subagent],
+        ),
+        # Compression near the end so it sees the fully-assembled prompt + state.
+        HermesCompressionMiddleware(
+            model=main_model,
+            aux_model=aux_model,
+            threshold_percent=cfg.compression_threshold,
+            protect_first_n=cfg.compression_protect_first_n,
+            protect_last_n=cfg.compression_protect_last_n,
+            summary_target_ratio=cfg.compression_target_ratio,
+            abort_on_summary_failure=cfg.compression_abort_on_summary_failure,
+        ),
+        # Caching wraps the actual model call — must be near the inner edge.
+        AnthropicCachingS3Middleware(ttl="5m"),
+        # PatchToolCalls fixes orphaned tool_call ids after interrupted runs.
+        PatchToolCallsMiddleware(),
+    ]
+
+    # Optional human-in-the-loop (only added if any tool is gated).
+    # Hosts can override via DEEPAGENT_HERMES_INTERRUPT_ON env (CSV of tool names).
+    interrupt_csv = os.getenv("DEEPAGENT_HERMES_INTERRUPT_ON", "")
+    if interrupt_csv:
+        interrupt_on = {name.strip(): True for name in interrupt_csv.split(",") if name.strip()}
+        middleware.append(HumanInTheLoopMiddleware(interrupt_on=interrupt_on))
+
+    if extra_middleware:
+        middleware.extend(extra_middleware)
+
+    # ── checkpointer ─────────────────────────────────────────────────────
+    # Shares the state.db file with the FTS store (disjoint table namespaces).
+    saver_cm = SqliteSaver.from_conn_string(str(db_path))
+    checkpointer = saver_cm.__enter__()
+
+    # ── compile ──────────────────────────────────────────────────────────
+    # System prompt is set by PromptAssemblyMiddleware via wrap_model_call,
+    # so we pass an empty string here — the middleware will replace it.
+    compiled = create_agent(
+        main_model,
+        system_prompt="",
+        tools=tools,
+        middleware=middleware,
+        checkpointer=checkpointer,
+        store=store,
+    ).with_config({"recursion_limit": 1000, "configurable": {"thread_id": sid}})
+
+    # Attach references the hosts may want to introspect.
+    compiled.deepagent_hermes_config = cfg  # type: ignore[attr-defined]
+    compiled.deepagent_hermes_session_id = sid  # type: ignore[attr-defined]
+    compiled.deepagent_hermes_store = store  # type: ignore[attr-defined]
+    compiled.deepagent_hermes_library = library  # type: ignore[attr-defined]
+    compiled.deepagent_hermes_provider = provider  # type: ignore[attr-defined]
+
+    return compiled
+
+
+# ── module-level lazy graph for host adoption ────────────────────────────
+
+
+_graph: Any = None
+
+
+def __getattr__(name: str) -> Any:
+    """Lazy ``graph`` instantiation so ``import deepagent_hermes.agent`` is cheap.
+
+    Hosts using ``DEEPAGENT_AGENT_SPEC=deepagent_hermes.agent:graph`` will
+    trigger the build on first attribute access.
+    """
+    global _graph
+    if name == "graph":
+        if _graph is None:
+            _graph = create_hermes_agent()
+        return _graph
+    raise AttributeError(f"module 'deepagent_hermes.agent' has no attribute {name!r}")

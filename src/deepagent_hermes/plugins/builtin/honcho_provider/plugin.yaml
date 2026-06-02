@@ -1,0 +1,6 @@
+name: honcho-provider
+version: 0.1.0
+description: Honcho dialectic user-model memory provider.
+hooks: []
+provides:
+  - memory_provider: honcho
