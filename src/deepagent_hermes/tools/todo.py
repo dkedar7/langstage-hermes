@@ -66,4 +66,4 @@ def _rename_tool(tool: Any, new_name: str) -> Any:
     return tool
 
 
-__all__ = ["make_todo_tool", "make_todo_middleware"]
+__all__ = ["make_todo_middleware", "make_todo_tool"]

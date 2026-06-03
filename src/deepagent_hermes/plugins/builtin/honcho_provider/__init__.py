@@ -211,7 +211,7 @@ class HonchoProvider(MemoryProvider):
         ``client.session(id)`` which are get-or-create under the hood.
         """
         try:
-            from honcho import Honcho  # noqa: PLC0415  — lazy import is the point
+            from honcho import Honcho
         except ImportError as e:
             raise ImportError(
                 "HonchoProvider requires honcho-ai SDK. "
@@ -249,7 +249,7 @@ class HonchoProvider(MemoryProvider):
                     self._session_id,
                     peers=[self._user_peer, self._ai_peer],
                 )
-            except Exception as e:  # noqa: BLE001 — log + degrade, don't crash the agent
+            except Exception as e:
                 logger.warning("HonchoProvider: client init failed: %s", e)
                 self._client = None
                 self._user_peer = None
@@ -295,7 +295,7 @@ class HonchoProvider(MemoryProvider):
                         )
                         if text and text.strip():
                             results.append(text.strip())
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     logger.debug("HonchoProvider.recall: peer.chat() failed: %s", e)
 
             # --- short-term context (hybrid + context) ---
@@ -315,9 +315,9 @@ class HonchoProvider(MemoryProvider):
                         snippet = f"[{peer_id}] {text}".strip() if peer_id else text.strip()
                         if snippet and snippet not in results:
                             results.append(snippet)
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     logger.debug("HonchoProvider.recall: session.messages() failed: %s", e)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("HonchoProvider.recall: unexpected error: %s", e)
             return []
 
@@ -356,7 +356,7 @@ class HonchoProvider(MemoryProvider):
             # Lazy-import MessageCreateParams here — if the import fails (SDK
             # missing/drifted) we want the existing except to swallow it
             # rather than crashing record_turn.
-            from honcho import MessageCreateParams  # noqa: PLC0415
+            from honcho import MessageCreateParams
         except ImportError as e:
             logger.debug("HonchoProvider.record_turn: MessageCreateParams import failed: %s", e)
             return
@@ -365,7 +365,7 @@ class HonchoProvider(MemoryProvider):
             try:
                 params = MessageCreateParams(peer_id=peer_id, content=content)
                 self._session.add_messages(params)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.debug("HonchoProvider.record_turn: %s", e)
 
     def teardown(self) -> None:
@@ -394,7 +394,7 @@ class HonchoProvider(MemoryProvider):
                 if callable(close):
                     try:
                         close()
-                    except Exception as e:  # noqa: BLE001
+                    except Exception as e:
                         logger.debug("HonchoProvider.teardown: close() failed: %s", e)
 
             self._client = None

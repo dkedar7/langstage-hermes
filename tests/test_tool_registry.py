@@ -8,7 +8,6 @@ import pytest
 
 from deepagent_hermes.tools.registry import HermesToolRegistry, registry
 
-
 # ── Test doubles ─────────────────────────────────────────────────────
 
 
@@ -49,7 +48,7 @@ def test_register_requires_name(reg: HermesToolRegistry) -> None:
     class NoName:
         pass
 
-    with pytest.raises(ValueError, match="non-empty .name"):
+    with pytest.raises(ValueError, match=r"non-empty \.name"):
         reg.register(NoName(), toolset="terminal")
 
 

@@ -20,7 +20,6 @@ from deepagent_hermes.skills.library import SkillLibrary
 from deepagent_hermes.skills.loader import SkillLoaderMiddleware
 from deepagent_hermes.skills.prompt import clear_prompt_cache
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -85,7 +84,6 @@ def test_skills_block_appended_to_system_prompt(library):
 
     def handler(req: ModelRequest):
         captured["request"] = req
-        return None
 
     mw.wrap_model_call(request, handler)
     final_prompt = captured["request"].system_prompt

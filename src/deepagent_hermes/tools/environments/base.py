@@ -318,7 +318,7 @@ class BaseEnvironment(ABC):
                 try:
                     stdout_b, _ = proc.communicate(timeout=2)
                 except subprocess.TimeoutExpired:
-                    stdout_b = b"" if isinstance(proc.stdout, type(None)) else b""
+                    stdout_b = b""
                 output = _decode(stdout_b) + f"\n[Command timed out after {timeout}s]"
                 return output, 124
             return _decode(stdout_b), proc.returncode if proc.returncode is not None else -1
@@ -400,6 +400,6 @@ def _decode(data: bytes | str | None) -> str:
 
 __all__ = [
     "BaseEnvironment",
-    "ProcessHandle",
     "ExecuteResponse",
+    "ProcessHandle",
 ]

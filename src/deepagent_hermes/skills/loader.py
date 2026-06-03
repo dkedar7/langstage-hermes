@@ -13,12 +13,10 @@ whatever the upstream ``PromptAssemblyMiddleware`` produced.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
-
-from typing import Annotated
+from collections.abc import Callable
+from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware.types import AgentMiddleware, AgentState, ModelRequest
-from typing_extensions import NotRequired
 
 from deepagent_hermes.skills.library import SkillLibrary
 from deepagent_hermes.skills.prompt import build_skills_system_prompt
@@ -97,7 +95,7 @@ class SkillLoaderMiddleware(AgentMiddleware):
         """Return the skills block + loaded bodies, or empty string."""
         try:
             skills_block = build_skills_system_prompt(self.library)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("failed to build skills system prompt; skipping")
             skills_block = ""
 

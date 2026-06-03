@@ -263,7 +263,7 @@ class AgentMailDeliverer(Deliverer):
         data = json.dumps(payload).encode("utf-8")
         req = _urlrequest.Request(url, data=data, headers=headers, method="POST")
         try:
-            with _urlrequest.urlopen(req, timeout=30) as r:  # noqa: S310 - trusted URL
+            with _urlrequest.urlopen(req, timeout=30) as r:
                 _ = r.read()
         except _urlerror.HTTPError as e:
             body = ""

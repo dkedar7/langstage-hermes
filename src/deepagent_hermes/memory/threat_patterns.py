@@ -32,7 +32,6 @@ suggestion`` is legitimate disagreement.
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 # Each entry: (regex, pattern_id, scope). Patterns compiled lazily at module load.
 # scope ∈ {"all", "context", "strict"}.
@@ -131,7 +130,7 @@ _PATTERNS: list[tuple[str, str, str]] = [
 # Invisible / bidirectional unicode characters used in injection attacks.
 INVISIBLE_CHARS: frozenset[str] = frozenset(
     {
-        "​",  # zero-width space
+        "\u200b",  # zero-width space
         "‌",  # zero-width non-joiner
         "‍",  # zero-width joiner
         "⁠",  # word joiner
@@ -207,7 +206,7 @@ def _compile() -> None:
 _compile()
 
 
-def _combining_mark_hits(text: str) -> Optional[str]:
+def _combining_mark_hits(text: str) -> str | None:
     """Return an attack id if combining-mark density is suspiciously high."""
     if len(text) < _COMBINING_MARK_MIN_LENGTH:
         return None
@@ -260,7 +259,7 @@ def scan_for_threats(text: str, *, scope: str = "memory") -> list[str]:
     return findings
 
 
-def scan(text: str, *, scope: str = "memory") -> Optional[str]:
+def scan(text: str, *, scope: str = "memory") -> str | None:
     """Return a single human-readable reason if ``text`` matches, else ``None``.
 
     Convenience wrapper for the most common case — first-hit blocking. The

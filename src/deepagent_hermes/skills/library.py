@@ -17,16 +17,19 @@ import logging
 import os
 import shutil
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import frontmatter
 
 from deepagent_hermes.skills.validator import (
     MAX_DESCRIPTION_LENGTH,
     MAX_NAME_LENGTH,
+)
+from deepagent_hermes.skills.validator import (
     validate as validate_frontmatter,
 )
 
@@ -297,7 +300,7 @@ class SkillLibrary:
 
         archive_root = origin_search_dir / "_archived"
         archive_root.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         dest = archive_root / f"{skill.name}-{stamp}"
         shutil.move(str(skill.directory), str(dest))
         return True
@@ -318,7 +321,7 @@ class SkillLibrary:
                 try:
                     post = frontmatter.load(skill_md)
                     meta = dict(post.metadata)
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     results[f"__error__/{parent_name}"] = [f"parse failure: {exc}"]
                     continue
                 errors = validate_frontmatter(meta, parent_dir_name=parent_name)
@@ -359,7 +362,7 @@ class SkillLibrary:
         for skill_md in self._iter_skill_md_files(directory):
             try:
                 skill = self._load_skill(skill_md, base_dir=directory)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.debug("skipping unparseable skill at %s: %s", skill_md, exc)
                 continue
             if skill is not None:

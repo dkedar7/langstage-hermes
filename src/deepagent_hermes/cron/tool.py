@@ -207,4 +207,4 @@ else:  # pragma: no cover - exercised only without langchain-core
     cronjob = _cronjob_impl  # type: ignore[assignment]
 
 
-__all__ = ["cronjob", "_cronjob_impl"]
+__all__ = ["_cronjob_impl", "cronjob"]

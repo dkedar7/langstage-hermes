@@ -36,7 +36,7 @@ import sqlite3
 import threading
 import time
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -328,10 +328,10 @@ class SqliteFtsStore(BaseStore):
     _WRITE_RETRY_MAX_S = 0.150
 
     __slots__ = (
-        "_db_path",
         "_conn",
-        "_lock",
+        "_db_path",
         "_fts_enabled",
+        "_lock",
         "_trigram_enabled",
     )
 
@@ -411,7 +411,7 @@ class SqliteFtsStore(BaseStore):
 
     # ── write helper with jitter retry ──────────────────────────────
 
-    def _execute_write(self, fn):  # noqa: ANN001
+    def _execute_write(self, fn):
         last_err: Exception | None = None
         for attempt in range(self._WRITE_MAX_RETRIES):
             try:
@@ -485,7 +485,7 @@ class SqliteFtsStore(BaseStore):
         if isinstance(clean.get("model_config"), dict):
             clean["model_config"] = json.dumps(clean["model_config"])
 
-        cols = ["id", "source", "started_at"] + list(clean.keys())
+        cols = ["id", "source", "started_at", *list(clean.keys())]
         placeholders = ",".join("?" for _ in cols)
         col_sql = ",".join(cols)
         values: list[Any] = [session_id, source, time.time()]
@@ -721,8 +721,7 @@ class SqliteFtsStore(BaseStore):
         we returned on each side — when one is < ``window`` the caller
         has reached a session boundary.
         """
-        if window < 0:
-            window = 0
+        window = max(window, 0)
         with self._lock:
             anchor = self._conn.execute(
                 "SELECT 1 FROM messages WHERE id = ? AND session_id = ? LIMIT 1",
@@ -952,7 +951,7 @@ class SqliteFtsStore(BaseStore):
             if not row:
                 return None
             now = datetime.fromtimestamp(
-                row["started_at"] or time.time(), tz=timezone.utc
+                row["started_at"] or time.time(), tz=UTC
             )
             return Item(
                 value=dict(row),
@@ -1074,7 +1073,7 @@ class SqliteFtsStore(BaseStore):
         for i, match in enumerate(matches):
             ns = ("messages", match["session_id"], match.get("role") or "")
             ts = match.get("timestamp") or time.time()
-            created = datetime.fromtimestamp(ts, tz=timezone.utc)
+            created = datetime.fromtimestamp(ts, tz=UTC)
             value = {
                 "id": match["id"],
                 "session_id": match["session_id"],
@@ -1179,7 +1178,7 @@ def _row_to_item(
     row: sqlite3.Row, namespace: tuple[str, ...]
 ) -> Item:
     ts = row["timestamp"] or time.time()
-    when = datetime.fromtimestamp(ts, tz=timezone.utc)
+    when = datetime.fromtimestamp(ts, tz=UTC)
     value = _hydrate_message(row)
     return Item(
         value=value,
@@ -1197,7 +1196,7 @@ def _row_to_search_item(
     score: float | None,
 ) -> SearchItem:
     ts = row["timestamp"] or time.time()
-    when = datetime.fromtimestamp(ts, tz=timezone.utc)
+    when = datetime.fromtimestamp(ts, tz=UTC)
     value = _hydrate_message(row)
     role = value.get("role") or ""
     session_id = value.get("session_id") or (
@@ -1239,9 +1238,9 @@ def _match_namespace(ns: tuple[str, ...], cond: MatchCondition) -> bool:
 
 
 __all__ = [
+    "InvalidNamespaceError",  # re-export for callers
     "SqliteFtsStore",
+    "contains_cjk",
     "default_db_path",
     "resolve_hermes_home",
-    "contains_cjk",
-    "InvalidNamespaceError",  # re-export for callers
 ]

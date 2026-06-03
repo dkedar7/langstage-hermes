@@ -22,10 +22,10 @@ from deepagent_hermes.plugins.loader import (
 
 __all__ = [
     "ENTRY_POINTS_GROUP",
+    "VALID_HOOKS",
     "HermesPluginLoader",
     "LoadedPlugin",
     "PluginContext",
     "PluginEventBus",
-    "VALID_HOOKS",
     "get_global_hook_registry",
 ]

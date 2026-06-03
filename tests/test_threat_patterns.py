@@ -66,7 +66,7 @@ def test_bidi_override_detected() -> None:
 def test_invisible_chars_set_includes_zwsp() -> None:
     """Smoke-test that the public ``INVISIBLE_CHARS`` set is non-empty and
     contains the canonical zero-width space."""
-    assert "​" in INVISIBLE_CHARS  # zero-width space
+    assert "\u200b" in INVISIBLE_CHARS  # zero-width space
     assert "‮" in INVISIBLE_CHARS  # right-to-left override
 
 

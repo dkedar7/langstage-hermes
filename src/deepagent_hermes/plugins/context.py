@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ class LoadedPlugin:
     description: str = ""
     source: Literal["bundled", "user", "project", "entry_point"] = "bundled"
     path: Path | None = None
-    register_fn: Callable[["PluginContext"], None] | None = None
+    register_fn: Callable[[PluginContext], None] | None = None
     error: str | None = None
     enabled: bool = True
 
@@ -297,8 +298,8 @@ class PluginContext:
 
 
 __all__ = [
+    "VALID_HOOKS",
     "LoadedPlugin",
     "PluginContext",
-    "VALID_HOOKS",
     "get_global_hook_registry",
 ]

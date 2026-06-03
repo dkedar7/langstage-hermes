@@ -21,7 +21,6 @@ import tempfile
 import time
 from pathlib import Path
 
-
 PROMPTS = [
     # 1. Establish a preference — this is the kind of signal the review prompt
     # explicitly asks reviewers to capture under "Has the user expressed

@@ -40,7 +40,6 @@ from deepagent_hermes.tools.environments.base import (
     ProcessHandle,
 )
 
-
 _INSTALL_HINT = (
     "ModalEnvironment requires the 'modal' package. "
     "Install with: pip install deepagent-hermes[modal]"
@@ -132,7 +131,7 @@ class _ModalProcessHandle:
                     pass
                 return
 
-    def wait(self, timeout: float | None = None) -> int:  # noqa: ARG002 - SDK doesn't accept timeout here
+    def wait(self, timeout: float | None = None) -> int:
         # TODO(modal-api-verify): ``process.wait()`` returns int exit code in
         # current SDK; some snapshots return a Result object with .exit_code.
         raw = self._process.wait()
@@ -250,8 +249,8 @@ class ModalEnvironment(BaseEnvironment):
         cmd: str,
         *,
         login: bool = False,
-        timeout: int = 60,  # noqa: ARG002 - Modal exec doesn't accept timeout per-call
-        stdin_data: str | None = None,  # noqa: ARG002 - caller embeds heredoc
+        timeout: int = 60,
+        stdin_data: str | None = None,
     ) -> ProcessHandle:
         """Spawn ``sandbox.exec("bash", "-l", "-c", cmd)`` and adapt the handle."""
         if self._sandbox is None:

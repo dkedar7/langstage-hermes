@@ -24,7 +24,6 @@ from deepagent_hermes.plugins.context import (
 )
 from deepagent_hermes.plugins.event_bus import PluginEventBus
 
-
 # ── helpers ─────────────────────────────────────────────────────────
 
 
@@ -122,7 +121,7 @@ def test_pre_llm_call_fires():
     """Registering a hook on ``pre_llm_call`` causes it to fire with the request."""
     ctx = _make_ctx()
     seen: list[Any] = []
-    ctx.register_hook("pre_llm_call", lambda req: seen.append(req))
+    ctx.register_hook("pre_llm_call", seen.append)
 
     bus = PluginEventBus()
     request = _MockModelRequest()
@@ -161,7 +160,7 @@ def test_transform_llm_output_replaces_messages():
 
     def append_marker(messages):
         # Plugins mutate by returning a new list — the bus chains the result.
-        return list(messages) + [AIMessage("[plugin appended]")]
+        return [*list(messages), AIMessage("[plugin appended]")]
 
     ctx.register_hook("transform_llm_output", append_marker)
 
@@ -287,13 +286,13 @@ def test_multiple_plugins_chain():
 
     def first(messages):
         # Append a marker tagged "1".
-        return list(messages) + [AIMessage("[1]")]
+        return [*list(messages), AIMessage("[1]")]
 
     def second(messages):
         # Append another marker tagged "2" — must see the "[1]" the first
         # plugin appended.
         assert any(isinstance(m, AIMessage) and m.content == "[1]" for m in messages)
-        return list(messages) + [AIMessage("[2]")]
+        return [*list(messages), AIMessage("[2]")]
 
     ctx.register_hook("transform_llm_output", first)
     ctx.register_hook("transform_llm_output", second)
@@ -403,12 +402,12 @@ def test_explicit_registry_bypasses_global():
     """Passing ``hook_registry=`` to the constructor pins the bus to that dict."""
     explicit: dict[str, list] = {}
     seen: list[Any] = []
-    explicit.setdefault("pre_llm_call", []).append(lambda req: seen.append(req))
+    explicit.setdefault("pre_llm_call", []).append(seen.append)
 
     # Also register a hook on the GLOBAL registry — must NOT be seen by this bus.
     ctx = _make_ctx()
     global_seen: list[Any] = []
-    ctx.register_hook("pre_llm_call", lambda req: global_seen.append(req))
+    ctx.register_hook("pre_llm_call", global_seen.append)
 
     bus = PluginEventBus(hook_registry=explicit)
     response = _MockModelResponse(result=[AIMessage("ok")])

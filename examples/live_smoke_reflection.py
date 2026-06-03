@@ -50,11 +50,6 @@ def main() -> int:
     ]
 
     config = {"configurable": {"thread_id": sid}}
-    state: dict = {
-        "messages": [],
-        "session_id": sid,
-        "iteration_budget_remaining": cfg.agent_max_iterations,
-    }
 
     for i, prompt in enumerate(prompts, 1):
         print(f"=== Turn {i}: {prompt[:60]}{'...' if len(prompt) > 60 else ''} ===")
@@ -80,7 +75,6 @@ def main() -> int:
             f"pending_review_kind={result.get('pending_review_kind', None)!r} "
             f"messages={len(msgs)}"
         )
-        state = result
 
     print()
     print("--- Skill library inspection ---")
@@ -88,7 +82,11 @@ def main() -> int:
     bundled = library.list()
     print(f"Total skills in library: {len(bundled)}")
     # Filter to user-created (not under the bundled dir)
-    user_skills = [s for s in bundled if "deepagent-hermes\\skills" not in str(s.path) and "deepagent-hermes/skills" not in str(s.path)]
+    user_skills = [
+        s for s in bundled
+        if "deepagent-hermes\\skills" not in str(s.path)
+        and "deepagent-hermes/skills" not in str(s.path)
+    ]
     print(f"User-created skills: {len(user_skills)}")
     for s in user_skills:
         print(f"  - {s.name}: {s.description[:80]}")

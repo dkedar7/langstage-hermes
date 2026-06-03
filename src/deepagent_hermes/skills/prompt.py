@@ -24,7 +24,6 @@ import threading
 from collections import OrderedDict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
 
 from deepagent_hermes.skills.library import Skill, SkillLibrary
 
@@ -60,7 +59,7 @@ _EMPTY_PROMPT = ""  # returned when the library has no visible skills
 
 # OrderedDict keyed on the manifest hash. Holds at most one entry — this is the
 # in-process LRU layer.
-_PROMPT_CACHE: "OrderedDict[str, str]" = OrderedDict()
+_PROMPT_CACHE: OrderedDict[str, str] = OrderedDict()
 _PROMPT_CACHE_LOCK = threading.Lock()
 _PROMPT_CACHE_MAX = 1
 

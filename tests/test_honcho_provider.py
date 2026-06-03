@@ -17,12 +17,11 @@ import importlib
 import sys
 import types
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from deepagent_hermes.memory.provider import MemoryProvider, get_provider
-
 
 # ── Fake SDK plumbing ────────────────────────────────────────────────
 

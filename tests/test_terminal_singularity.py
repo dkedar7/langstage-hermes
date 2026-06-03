@@ -27,7 +27,6 @@ from deepagent_hermes.tools.environments.singularity import (
     _find_singularity,
 )
 
-
 # ── Module-level gate ─────────────────────────────────────────────────
 
 if _find_singularity() is None:

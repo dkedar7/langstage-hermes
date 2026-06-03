@@ -23,7 +23,7 @@ Until upstreamed, hosts can register them manually::
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, ClassVar
 
 
 def _parse_json_content(content: Any) -> dict[str, Any] | None:
@@ -55,7 +55,7 @@ class SkillManageExtractor:
     tool_name = "skill_manage"
     extracted_type = "skill_event"
 
-    _ACTION_TO_TYPE = {
+    _ACTION_TO_TYPE: ClassVar[dict[str, str]] = {
         "create": "skill_created",
         "patch": "skill_updated",
         "write_file": "skill_updated",
@@ -142,7 +142,7 @@ class MemoryExtractor:
     tool_name = "memory"
     extracted_type = "memory_updated"
 
-    _ACTION_TO_TYPE = {
+    _ACTION_TO_TYPE: ClassVar[dict[str, str]] = {
         "add": "memory_added",
         "replace": "memory_replaced",
         "remove": "memory_removed",

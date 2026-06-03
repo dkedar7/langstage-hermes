@@ -85,4 +85,4 @@ def make_clarify_tool() -> Any:
     return clarify
 
 
-__all__ = ["CLARIFY_TAG", "make_clarify_tool", "_clarify_impl", "_format_clarify"]
+__all__ = ["CLARIFY_TAG", "_clarify_impl", "_format_clarify", "make_clarify_tool"]

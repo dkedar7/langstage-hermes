@@ -155,7 +155,7 @@ def resolve_enabled(
 
 
 def register_implemented_tools(
-    registry: "HermesToolRegistry",
+    registry: HermesToolRegistry,
     *,
     file_tools: list | None = None,
     todo_tool=None,
@@ -198,11 +198,11 @@ def register_implemented_tools(
 
 
 __all__ = [
-    "TOOLSETS",
     "IMPLEMENTED_TOOLSETS",
+    "TOOLSETS",
     "all_toolset_names",
-    "tools_for",
     "is_implemented",
-    "resolve_enabled",
     "register_implemented_tools",
+    "resolve_enabled",
+    "tools_for",
 ]

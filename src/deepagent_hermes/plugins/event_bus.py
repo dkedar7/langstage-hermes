@@ -230,7 +230,7 @@ class PluginEventBus(AgentMiddleware):
         for fn in list(self._registry().get(hook_name, [])):
             try:
                 fn(*args, **kwargs)
-            except Exception as exc:  # noqa: BLE001 — must not kill agent
+            except Exception as exc:
                 logger.warning(
                     "plugin hook %s raised: %s", hook_name, exc, exc_info=True
                 )
@@ -248,7 +248,7 @@ class PluginEventBus(AgentMiddleware):
         for fn in list(self._registry().get(hook_name, [])):
             try:
                 result = fn(current, *extra_args, **kwargs)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning(
                     "plugin hook %s raised: %s", hook_name, exc, exc_info=True
                 )
@@ -344,7 +344,7 @@ class PluginEventBus(AgentMiddleware):
         for fn in list(self._registry().get(hook_name, [])):
             try:
                 result = fn(current)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning(
                     "plugin hook %s raised: %s", hook_name, exc, exc_info=True
                 )
@@ -364,7 +364,7 @@ class PluginEventBus(AgentMiddleware):
         for fn in list(self._registry().get(hook_name, [])):
             try:
                 result = fn(request, current)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning(
                     "plugin hook %s raised: %s", hook_name, exc, exc_info=True
                 )

@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from typing import Any
 
 # Default TTL for cached check_fn results. Hermes uses 30 s; we keep parity so
 # downstream `deepagent-hermes tools` CLI behavior matches user expectations.

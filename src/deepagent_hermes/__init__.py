@@ -3,15 +3,15 @@
 Faithful reproduction of Nous Research's Hermes Agent design ideas. See SPEC.md and NOTICE.
 """
 
-__version__ = "0.1.0a1"
+__version__ = "0.1.0"
 
 # Re-exports populated by submodule integration (see agent.py).
 # Subagents wire these in; importing here would create circular deps during build.
 __all__ = [
-    "__version__",
-    "create_hermes_agent",
     "HermesConfig",
     "HermesState",
+    "__version__",
+    "create_hermes_agent",
 ]
 
 

@@ -58,13 +58,12 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NotRequired
 
 from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command
-from typing_extensions import NotRequired, TypedDict
 
 from deepagent_hermes.memory import threat_patterns
 
@@ -368,7 +367,7 @@ def _make_memory_tool(
                         target, entries, "Entry already exists (no duplicate added)."
                     )
                 else:
-                    new_entries = entries + [clean]
+                    new_entries = [*entries, clean]
                     new_total = _char_count(new_entries)
                     if new_total > limit:
                         payload = _format_error(

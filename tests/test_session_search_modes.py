@@ -12,7 +12,6 @@ from deepagent_hermes.search.session_search import (
 )
 from deepagent_hermes.store.sqlite_fts import SqliteFtsStore
 
-
 # ---------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------

@@ -33,16 +33,13 @@ import time
 from collections.abc import Awaitable, Callable
 from importlib import resources
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
-
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NotRequired
 
 from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from typing_extensions import NotRequired
 
 
 def _take_last(_existing: Any, new: Any) -> Any:
@@ -401,7 +398,7 @@ class ReflectionMiddleware(AgentMiddleware):
                 "messages": [*history, HumanMessage(content=review_prompt)]
             }
             self._review_graph.invoke(sub_state)
-        except Exception as exc:  # noqa: BLE001 — review failure must not break the turn
+        except Exception as exc:
             logger.warning("Reflection: review subagent failed: %s", exc)
 
         return reset

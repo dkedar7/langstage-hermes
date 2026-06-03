@@ -14,20 +14,20 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import frontmatter
 from langchain_core.messages import ToolMessage
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import BaseTool, InjectedToolCallId, tool
 from langgraph.types import Command
 
-from deepagent_hermes.skills.library import Skill, SkillLibrary
+from deepagent_hermes.skills.library import SkillLibrary
 from deepagent_hermes.skills.prompt import clear_prompt_cache
 from deepagent_hermes.skills.validator import validate as validate_frontmatter
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["make_skill_tools", "skills_list", "skill_view", "skill_manage"]
+__all__ = ["make_skill_tools", "skill_manage", "skill_view", "skills_list"]
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +55,10 @@ def skills_list(query: str = "", category: str = "") -> str:
 
 
 @tool
-def skill_view(name: str) -> Command:
+def skill_view(
+    name: str,
+    tool_call_id: Annotated[str, InjectedToolCallId] = "",
+) -> Command:
     """Load the full SKILL.md body for ``name`` and pin it into session context.
 
     The body is appended to ``state.loaded_skill_bodies[name]`` so the next
@@ -63,7 +66,7 @@ def skill_view(name: str) -> Command:
     ``SkillLoaderMiddleware``). Returns a ``Command`` so the state update is
     applied atomically with the tool result.
     """
-    return _skill_view_impl(_default_library(), name=name, tool_call_id="")
+    return _skill_view_impl(_default_library(), name=name, tool_call_id=tool_call_id)
 
 
 @tool
@@ -76,6 +79,7 @@ def skill_manage(
     old_str: str = "",
     new_str: str = "",
     frontmatter_data: dict[str, Any] | None = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = "",
 ) -> Command:
     """Curate the skill library.
 
@@ -101,7 +105,7 @@ def skill_manage(
         old_str=old_str,
         new_str=new_str,
         frontmatter_data=frontmatter_data,
-        tool_call_id="",
+        tool_call_id=tool_call_id,
     )
 
 
@@ -128,13 +132,16 @@ def make_skill_tools(library: SkillLibrary) -> list[BaseTool]:
         return _render_list(library, query=query, category=category)
 
     @tool("skill_view")
-    def _skill_view(name: str) -> Command:
+    def _skill_view(
+        name: str,
+        tool_call_id: Annotated[str, InjectedToolCallId] = "",
+    ) -> Command:
         """Load the full SKILL.md body for ``name`` and pin it into session context.
 
         Args:
             name: The skill name (as reported by ``skills_list``).
         """
-        return _skill_view_impl(library, name=name, tool_call_id="")
+        return _skill_view_impl(library, name=name, tool_call_id=tool_call_id)
 
     @tool("skill_manage")
     def _skill_manage(
@@ -146,6 +153,7 @@ def make_skill_tools(library: SkillLibrary) -> list[BaseTool]:
         old_str: str = "",
         new_str: str = "",
         frontmatter_data: dict[str, Any] | None = None,
+        tool_call_id: Annotated[str, InjectedToolCallId] = "",
     ) -> Command:
         """Curate the skill library (create/patch/write_file/delete/pin/unpin)."""
         return _skill_manage_impl(
@@ -158,7 +166,7 @@ def make_skill_tools(library: SkillLibrary) -> list[BaseTool]:
             old_str=old_str,
             new_str=new_str,
             frontmatter_data=frontmatter_data,
-            tool_call_id="",
+            tool_call_id=tool_call_id,
         )
 
     return [_skills_list, _skill_view, _skill_manage]
@@ -273,7 +281,7 @@ def _skill_manage_impl(
                 json.dumps({"success": False, "error": f"unknown action {action!r}"}),
                 tool_call_id=tool_call_id,
             )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.exception("skill_manage action %s failed for %s", action, name)
         return _command_with_tool_message(
             json.dumps({"success": False, "action": action, "error": str(exc)}),
@@ -351,7 +359,7 @@ def _action_write_file(
     if existing is not None:
         category = existing.category
         # Place under the same search dir
-        search_dir = library._find_search_dir_for(existing.path)  # noqa: SLF001
+        search_dir = library._find_search_dir_for(existing.path)
         target_dir = search_dir
     return library.write(name, fm, body, category=category, target_dir=target_dir)
 

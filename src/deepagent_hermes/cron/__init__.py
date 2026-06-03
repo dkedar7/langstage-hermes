@@ -29,11 +29,11 @@ from deepagent_hermes.cron.jobs import (
 from deepagent_hermes.cron.scheduler import SILENT_MARKER, HermesCron, run_job
 
 __all__ = [
+    "SILENT_MARKER",
     "AgentMailDeliverer",
     "Deliverer",
     "HermesCron",
     "LocalDeliverer",
-    "SILENT_MARKER",
     "StdoutDeliverer",
     "create_job",
     "delete_job",

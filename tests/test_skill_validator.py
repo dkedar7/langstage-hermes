@@ -5,8 +5,6 @@ Covers every agentskills.io rule plus the Hermes extensions.
 
 from __future__ import annotations
 
-import pytest
-
 from deepagent_hermes.skills.validator import (
     MAX_COMPATIBILITY_LENGTH,
     MAX_DESCRIPTION_LENGTH,
@@ -14,7 +12,6 @@ from deepagent_hermes.skills.validator import (
     is_valid,
     validate,
 )
-
 
 # ---------------------------------------------------------------------------
 # Happy-path

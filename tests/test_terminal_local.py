@@ -15,7 +15,6 @@ import pytest
 from deepagent_hermes.tools.environments.base import ExecuteResponse
 from deepagent_hermes.tools.environments.local import LocalEnvironment, _find_bash
 
-
 # ── Fixture ──────────────────────────────────────────────────────────
 
 

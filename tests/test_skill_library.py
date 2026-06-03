@@ -8,8 +8,7 @@ from pathlib import Path
 import frontmatter
 import pytest
 
-from deepagent_hermes.skills.library import Skill, SkillLibrary
-
+from deepagent_hermes.skills.library import SkillLibrary
 
 # ---------------------------------------------------------------------------
 # Helpers

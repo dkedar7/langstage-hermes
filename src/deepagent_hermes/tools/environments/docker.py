@@ -44,10 +44,8 @@ from __future__ import annotations
 
 import os
 import re
-import shlex
 import shutil
 import subprocess
-import time
 from pathlib import Path
 
 from deepagent_hermes.tools.environments.base import (

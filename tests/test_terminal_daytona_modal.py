@@ -16,7 +16,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-
 # Convenience for cleanly reloading the backend module under test after we
 # poke at sys.modules. Both backends do lazy ``import daytona_sdk`` / ``import
 # modal`` inside the constructor, so a fresh module-level reload isn't even

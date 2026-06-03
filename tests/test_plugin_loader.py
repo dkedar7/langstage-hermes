@@ -13,7 +13,6 @@ import pytest
 from deepagent_hermes.plugins.context import VALID_HOOKS, PluginContext
 from deepagent_hermes.plugins.loader import HermesPluginLoader
 
-
 # ── fixtures ────────────────────────────────────────────────────────
 
 

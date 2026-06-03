@@ -24,16 +24,12 @@ import json
 import logging
 import os
 import sqlite3
-import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any
-
-from typing import Annotated
+from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
-from typing_extensions import NotRequired
 
 from deepagent_hermes.store.sqlite_fts import SqliteFtsStore
 
@@ -145,7 +141,8 @@ def _message_id_key(msg: BaseMessage) -> str:
     if mid:
         return f"id:{mid}"
     # Fallback: hash content+type — sufficient for in-process dedupe.
-    return f"{type(msg).__name__}:{hash((msg.content if isinstance(msg.content, str) else json.dumps(msg.content, default=str), getattr(msg, 'name', None)))}"
+    content = msg.content if isinstance(msg.content, str) else json.dumps(msg.content, default=str)
+    return f"{type(msg).__name__}:{hash((content, getattr(msg, 'name', None)))}"
 
 
 # ---------------------------------------------------------------------------

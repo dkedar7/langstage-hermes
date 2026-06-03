@@ -11,7 +11,6 @@ Mark all tests with ``needs_docker`` so CI / local runs can opt out via
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 
 import pytest
@@ -22,7 +21,6 @@ from deepagent_hermes.tools.environments.docker import (
     _docker_available,
     _sanitize_container_name,
 )
-
 
 # ── module-level skip when docker is unusable ────────────────────────
 

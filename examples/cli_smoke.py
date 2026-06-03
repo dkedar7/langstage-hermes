@@ -14,9 +14,10 @@ Needs: ``ANTHROPIC_API_KEY`` (default model is anthropic:claude-sonnet-4-6).
 
 from __future__ import annotations
 
-from deepagent_hermes import HermesConfig, create_hermes_agent
 from langgraph_stream_parser import StreamParser
 from langgraph_stream_parser.adapters import PrintAdapter
+
+from deepagent_hermes import HermesConfig, create_hermes_agent
 
 
 def main() -> None:

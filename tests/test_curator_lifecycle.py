@@ -24,7 +24,6 @@ from deepagent_hermes.curator import (
     mark_stale_and_archive,
 )
 
-
 # ── tiny fake library ────────────────────────────────────────────────
 
 
@@ -187,7 +186,7 @@ def test_pinned_skills_are_immune(library: FakeLibrary):
         library,
         stale_days=30,
         archive_days=90,
-        state_meta_get=lambda n: state_meta.get(n),
+        state_meta_get=state_meta.get,
         now=now,
     )
 

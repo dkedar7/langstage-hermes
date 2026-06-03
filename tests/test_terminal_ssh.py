@@ -11,10 +11,9 @@ opens a socket.
 from __future__ import annotations
 
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -197,7 +196,7 @@ def test_cwd_persists_via_marker_file(monkeypatch):
     marker = "deepagent-hermes-cwd-t4"
     for c in user_calls:
         cmd = c.args[0]
-        assert f"cat " in cmd and marker in cmd, (
+        assert "cat " in cmd and marker in cmd, (
             f"call should read cwd marker via cat, got: {cmd!r}"
         )
         assert "pwd -P" in cmd and marker in cmd, (
@@ -287,7 +286,7 @@ def test_reconnect_on_broken_pipe(monkeypatch):
     assert call_log["connects"] == 1
 
     # This call should fail once, reconnect, then succeed.
-    stdin, stdout, stderr = env._exec("bash -c 'echo hi'", timeout=10.0, stdin_data=None)
+    _stdin, stdout, _stderr = env._exec("bash -c 'echo hi'", timeout=10.0, stdin_data=None)
     assert call_log["execs"] == 2
     assert call_log["connects"] == 2  # one initial + one retry-reconnect
     assert stdout is not None

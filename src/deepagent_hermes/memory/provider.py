@@ -142,19 +142,19 @@ class NoopMemoryProvider(MemoryProvider):
     a ``None`` check.
     """
 
-    def setup_session(self, session_id: str, user_id: str | None = None) -> None:  # noqa: D401
+    def setup_session(self, session_id: str, user_id: str | None = None) -> None:
         """No-op."""
         return None
 
-    def recall(self, query: str, mode: RecallMode = "hybrid") -> list[str]:  # noqa: D401
+    def recall(self, query: str, mode: RecallMode = "hybrid") -> list[str]:
         """Return ``[]`` — nothing to recall without a backing provider."""
         return []
 
-    def record_turn(self, role: str, content: str) -> None:  # noqa: D401
+    def record_turn(self, role: str, content: str) -> None:
         """No-op."""
         return None
 
-    def teardown(self) -> None:  # noqa: D401
+    def teardown(self) -> None:
         """No-op."""
         return None
 

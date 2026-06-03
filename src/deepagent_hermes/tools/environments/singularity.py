@@ -33,7 +33,6 @@ you correctness and isolation; persistence is a follow-up.
 from __future__ import annotations
 
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -41,7 +40,6 @@ import tempfile
 from pathlib import Path
 
 from deepagent_hermes.tools.environments.base import BaseEnvironment, ProcessHandle
-
 
 _DEFAULT_IMAGE = "docker://python:3.13-slim"
 _WORKSPACE_MOUNT = "/workspace"

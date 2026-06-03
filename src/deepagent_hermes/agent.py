@@ -47,7 +47,6 @@ from deepagent_hermes.skills.loader import SkillLoaderMiddleware
 from deepagent_hermes.skills.tools import make_skill_tools
 from deepagent_hermes.store.recorder import HermesStateRecorderMiddleware
 from deepagent_hermes.store.sqlite_fts import SqliteFtsStore
-from deepagent_hermes.tools.registry import HermesToolRegistry
 from deepagent_hermes.tools.toolsets import resolve_enabled
 
 log = logging.getLogger(__name__)
@@ -143,7 +142,13 @@ def create_hermes_agent(
     from deepagents.middleware.subagents import SubAgentMiddleware
     from langchain.agents.middleware import HumanInTheLoopMiddleware, TodoListMiddleware
 
-    fs_backend = FilesystemBackend(root_dir=str(ws), virtual_mode=False)
+    # virtual_mode=True so the agent's '/workspace/foo.py' (its natural
+    # absolute-path convention from the system prompt) resolves under our
+    # configured root rather than literal C:\workspace\foo.py. Without this,
+    # the agent silently writes to / reads from a path the user can't
+    # introspect — surfaced in the 2026-06-02 dogfood when reported file
+    # writes didn't appear on disk.
+    fs_backend = FilesystemBackend(root_dir=str(ws), virtual_mode=True)
 
     # ── review subagent (reflection target) ──────────────────────────────
     # Wire the memory + skill_manage tools so the review fork can actually

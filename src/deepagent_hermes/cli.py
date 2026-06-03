@@ -27,8 +27,8 @@ import importlib
 import os
 import shutil
 import sys
-from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import click
 

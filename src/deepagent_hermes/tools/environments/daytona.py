@@ -41,7 +41,6 @@ from deepagent_hermes.tools.environments.base import (
     ProcessHandle,
 )
 
-
 _INSTALL_HINT = (
     "DaytonaEnvironment requires the 'daytona-sdk' package. "
     "Install with: pip install deepagent-hermes[daytona]"
@@ -102,7 +101,7 @@ class _BlockingResultHandle:
     def kill(self) -> None:  # pragma: no cover - nothing to kill, call already returned
         pass
 
-    def wait(self, timeout: float | None = None) -> int:  # noqa: ARG002 - timeout unused
+    def wait(self, timeout: float | None = None) -> int:
         return self._exit_code
 
     @property
@@ -214,7 +213,7 @@ class DaytonaEnvironment(BaseEnvironment):
         *,
         login: bool = False,
         timeout: int = 60,
-        stdin_data: str | None = None,  # noqa: ARG002 - heredoc embedded by caller
+        stdin_data: str | None = None,
     ) -> ProcessHandle:
         """Execute ``cmd`` in the sandbox and return a finished-process handle.
 

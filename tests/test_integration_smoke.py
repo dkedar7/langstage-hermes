@@ -10,7 +10,6 @@ network access; covered by examples/cli_smoke.py for manual testing).
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -47,8 +46,9 @@ def test_create_hermes_agent_builds(integration_env):
 
 def test_state_db_created_under_hermes_home(integration_env):
     """The SQLite state.db lands at <HERMES_HOME>/state.db and has the FTS5 tables."""
-    from deepagent_hermes.agent import create_hermes_agent
     import sqlite3
+
+    from deepagent_hermes.agent import create_hermes_agent
 
     home, ws = integration_env
     create_hermes_agent(workspace=ws)

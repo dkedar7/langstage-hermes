@@ -25,7 +25,7 @@ programmatic tools).
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any
+from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware import hook_config
 from langchain.agents.middleware.types import (
@@ -35,7 +35,6 @@ from langchain.agents.middleware.types import (
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.runtime import Runtime
 from langgraph.types import Command
-from typing_extensions import NotRequired
 
 _DEFAULT_REFUND_TOOLS: tuple[str, ...] = ("execute_code",)
 

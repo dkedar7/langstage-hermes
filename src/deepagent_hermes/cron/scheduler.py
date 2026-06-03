@@ -30,10 +30,11 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from deepagent_hermes.cron import jobs as cron_jobs
 from deepagent_hermes.cron.deliverers import get_deliverer
@@ -380,4 +381,4 @@ class HermesCron:
                 self._stop.wait(self.tick_seconds)
 
 
-__all__ = ["HermesCron", "SILENT_MARKER", "run_job"]
+__all__ = ["SILENT_MARKER", "HermesCron", "run_job"]

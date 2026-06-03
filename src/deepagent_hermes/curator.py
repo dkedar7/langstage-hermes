@@ -31,7 +31,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -145,7 +145,7 @@ def mark_stale_and_archive(
             try:
                 library.delete(name)
                 archived.append(name)
-            except Exception as exc:  # noqa: BLE001 — best-effort cleanup
+            except Exception as exc:
                 logger.warning("curator: archive of %r failed: %s", name, exc)
             continue
 
@@ -166,7 +166,7 @@ def mark_stale_and_archive(
                         pass
                 library.write(skill)
                 marked_stale.append(name)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("curator: stale mark on %r failed: %s", name, exc)
 
     return {
@@ -183,7 +183,7 @@ def _load_curator_state(store: Any) -> dict[str, Any]:
     """Read curator-state JSON from the store. Returns ``{}`` on miss."""
     try:
         item = store.get(_CURATOR_NS, _CURATOR_KEY)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return {}
     if item is None:
         return {}
@@ -204,7 +204,7 @@ def _save_curator_state(store: Any, state: dict[str, Any]) -> None:
     """Persist curator-state JSON back to the store."""
     try:
         store.put(_CURATOR_NS, _CURATOR_KEY, state)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("curator: failed to persist state: %s", exc)
 
 
@@ -406,7 +406,7 @@ class CuratorMiddleware(AgentMiddleware):
 
     def _run_pass(self, cstate: dict[str, Any], now: float) -> None:
         """Run lifecycle + LLM consolidation. Persist state and write a report."""
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         t0 = time.perf_counter()
         error: str | None = None
         llm_summary: str | None = None
@@ -414,7 +414,7 @@ class CuratorMiddleware(AgentMiddleware):
         def _meta_get(name: str) -> float | None:
             try:
                 item = self.store.get(_STATE_META_NS, f"skill_last_used:{name}")
-            except Exception:  # noqa: BLE001
+            except Exception:
                 return None
             if item is None:
                 return None
@@ -433,7 +433,7 @@ class CuratorMiddleware(AgentMiddleware):
                 state_meta_get=_meta_get,
                 now=now,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("curator: lifecycle pass failed: %s", exc)
             lifecycle_result = {"marked_stale": [], "archived": [], "skipped_pinned": []}
             error = f"lifecycle: {exc}"
@@ -451,7 +451,7 @@ class CuratorMiddleware(AgentMiddleware):
                 if msgs:
                     last = msgs[-1]
                     llm_summary = getattr(last, "content", None) or str(last)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("curator: LLM consolidation failed: %s", exc)
                 error = f"{error + '; ' if error else ''}llm: {exc}"
 

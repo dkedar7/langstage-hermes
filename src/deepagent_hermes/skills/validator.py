@@ -14,9 +14,9 @@ not forbid that.
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable
+from typing import Any
 
-__all__ = ["validate", "is_valid", "ValidationError"]
+__all__ = ["ValidationError", "is_valid", "validate"]
 
 
 # agentskills.io constants
