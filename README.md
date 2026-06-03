@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/header.svg" alt="deepagent-hermes — closed-loop reflection &amp; skill creation on LangGraph + deepagents" />
+</p>
+
 # deepagent-hermes
 
 [![PyPI](https://img.shields.io/pypi/v/deepagent-hermes.svg)](https://pypi.org/project/deepagent-hermes/)

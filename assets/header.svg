@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" role="img" aria-label="deepagent-hermes — closed-loop reflection and skill creation on LangGraph + deepagents">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1221"/>
+      <stop offset="1" stop-color="#121226"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7C5CFF"/>
+      <stop offset="1" stop-color="#34D6C8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.82" cy="0.15" r="0.6">
+      <stop offset="0" stop-color="#7C5CFF" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#7C5CFF" stop-opacity="0"/>
+    </radialGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#34D6C8"/>
+    </marker>
+    <marker id="arrow-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#7C5CFF" fill-opacity="0.75"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="340" rx="20" fill="url(#bg)"/>
+  <rect width="1280" height="340" rx="20" fill="url(#glow)"/>
+  <rect x="1" y="1" width="1278" height="338" rx="19" fill="none" stroke="#26284A" stroke-width="1.5"/>
+
+  <!-- ===== left: identity ===== -->
+  <g transform="translate(72,68)">
+    <rect width="156" height="34" rx="17" fill="#1A1535" stroke="url(#accent)" stroke-width="1.5"/>
+    <circle cx="22" cy="17" r="5" fill="url(#accent)"/>
+    <text x="38" y="23" font-family="'SF Mono','JetBrains Mono','Consolas',monospace" font-size="13" fill="#C9BEFF">closed-loop agent</text>
+  </g>
+
+  <text x="70" y="180" font-family="'SF Mono','JetBrains Mono','Consolas',monospace" font-size="50" font-weight="700" fill="#F2F6FC" letter-spacing="-1">deepagent<tspan fill="url(#accent)">-hermes</tspan></text>
+
+  <text x="72" y="224" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="22" fill="#A6AECB">Reflection &#38; skill creation that compound across sessions.</text>
+  <text x="72" y="254" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="22" fill="#A6AECB">Built on LangGraph, deepagents, langgraph-stream-parser.</text>
+
+  <g font-family="'SF Mono','JetBrains Mono','Consolas',monospace" font-size="13" fill="#7C7FA6">
+    <text x="72" y="298">reflection</text>
+    <text x="172" y="298" fill="#45487A">&#8226;</text>
+    <text x="190" y="298">skills</text>
+    <text x="248" y="298" fill="#45487A">&#8226;</text>
+    <text x="266" y="298">memory</text>
+    <text x="338" y="298" fill="#45487A">&#8226;</text>
+    <text x="356" y="298">FTS5 recall</text>
+    <text x="448" y="298" fill="#45487A">&#8226;</text>
+    <text x="466" y="298">cron</text>
+  </g>
+
+  <!-- ===== right: closed-loop diagram ===== -->
+  <!-- Layout: a square cycle with four nodes, arrows clockwise. -->
+  <!-- Anchor the group on the right half. -->
+  <g transform="translate(820,52)">
+
+    <!-- Section title -->
+    <text x="0" y="6" font-family="'SF Mono','Consolas',monospace" font-size="12" fill="#7C7FA6" letter-spacing="1">CLOSED LOOP</text>
+
+    <!-- Top node: TURN -->
+    <g transform="translate(28,32)">
+      <rect width="150" height="40" rx="10" fill="#10243A" stroke="#2F9BFF" stroke-width="1.5"/>
+      <circle cx="18" cy="20" r="5" fill="#2F9BFF"/>
+      <text x="32" y="25" font-family="'SF Mono','Consolas',monospace" font-size="13" fill="#8FC4FF">user &#43; tool turn</text>
+    </g>
+
+    <!-- Right node: REFLECT (highlighted - the differentiator) -->
+    <g transform="translate(252,124)">
+      <rect width="146" height="40" rx="10" fill="#1A1535" stroke="url(#accent)" stroke-width="2"/>
+      <circle cx="18" cy="20" r="5" fill="url(#accent)"/>
+      <text x="32" y="25" font-family="'SF Mono','Consolas',monospace" font-size="13" font-weight="600" fill="#C9BEFF">reflect (every 10)</text>
+    </g>
+
+    <!-- Bottom node: SKILL.md + MEMORY.md -->
+    <g transform="translate(28,216)">
+      <rect width="150" height="40" rx="10" fill="#0C2A22" stroke="#34D6C8" stroke-width="1.5"/>
+      <circle cx="18" cy="20" r="5" fill="#34D6C8"/>
+      <text x="32" y="25" font-family="'SF Mono','Consolas',monospace" font-size="13" fill="#7FE3D6">SKILL &#183; MEMORY</text>
+    </g>
+
+    <!-- Left node: SYSTEM PROMPT (next session) -->
+    <g transform="translate(-148,124)">
+      <rect width="160" height="40" rx="10" fill="#241A33" stroke="#7C5CFF" stroke-width="1.5"/>
+      <circle cx="18" cy="20" r="5" fill="#7C5CFF"/>
+      <text x="32" y="25" font-family="'SF Mono','Consolas',monospace" font-size="13" fill="#C9BEFF">next-session prompt</text>
+    </g>
+
+    <!-- Curved arrows clockwise -->
+    <!-- TURN (top) -> REFLECT (right) -->
+    <path d="M 178 60
+             C 240 64, 290 90, 305 122"
+          stroke="url(#accent)" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+
+    <!-- REFLECT (right) -> WRITE (bottom) -->
+    <path d="M 305 166
+             C 290 198, 240 220, 180 232"
+          stroke="url(#accent)" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+
+    <!-- WRITE (bottom) -> PROMPT (left) [the persistence handoff] -->
+    <path d="M 28 232
+             C -40 220, -88 198, -100 166"
+          stroke="#34D6C8" stroke-width="2" stroke-dasharray="4 3" fill="none" marker-end="url(#arrow)" opacity="0.85"/>
+
+    <!-- PROMPT (left) -> TURN (top) [loaded back in] -->
+    <path d="M -100 122
+             C -88 90, -40 64, 28 60"
+          stroke="url(#accent)" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+
+    <!-- Center label so the loop reads as a unit -->
+    <text x="103" y="146" font-family="'SF Mono','Consolas',monospace" font-size="11" fill="#5b5e7e" text-anchor="middle">compounds</text>
+    <text x="103" y="160" font-family="'SF Mono','Consolas',monospace" font-size="11" fill="#5b5e7e" text-anchor="middle">across sessions</text>
+  </g>
+</svg>
