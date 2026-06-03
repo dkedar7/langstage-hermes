@@ -112,15 +112,11 @@ def test_env_override_skills_nudge_interval(monkeypatch):
     monkeypatch.setenv("DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL", "5")
     cfg = HermesConfig.resolve(use_toml=False)
     assert cfg.skills_creation_nudge_interval == 5
-    assert cfg.sources["skills_creation_nudge_interval"] == (
-        "env:DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL"
-    )
+    assert cfg.sources["skills_creation_nudge_interval"] == ("env:DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL")
 
 
 def test_env_override_model_default(monkeypatch):
-    monkeypatch.setenv(
-        "DEEPAGENT_HERMES_MODEL_DEFAULT", "anthropic:claude-opus-4-7-20251001"
-    )
+    monkeypatch.setenv("DEEPAGENT_HERMES_MODEL_DEFAULT", "anthropic:claude-opus-4-7-20251001")
     cfg = HermesConfig.resolve(use_toml=False)
     assert cfg.model_default == "anthropic:claude-opus-4-7-20251001"
     assert cfg.sources["model_default"] == "env:DEEPAGENT_HERMES_MODEL_DEFAULT"
@@ -146,9 +142,7 @@ def test_env_override_float(monkeypatch):
 
 def test_explicit_override_beats_env(monkeypatch):
     monkeypatch.setenv("DEEPAGENT_HERMES_AGENT_MAX_ITERATIONS", "42")
-    cfg = HermesConfig.resolve(
-        use_toml=False, overrides={"agent_max_iterations": 7}
-    )
+    cfg = HermesConfig.resolve(use_toml=False, overrides={"agent_max_iterations": 7})
     assert cfg.agent_max_iterations == 7
     assert cfg.sources["agent_max_iterations"] == "override"
 
@@ -164,8 +158,7 @@ def test_project_toml_overrides_defaults(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
     (tmp_path / "deepagent-hermes.toml").write_text(
-        "[skills]\ncreation_nudge_interval = 25\n"
-        "[memory]\nnudge_interval = 3\n",
+        "[skills]\ncreation_nudge_interval = 25\n[memory]\nnudge_interval = 3\n",
         encoding="utf-8",
     )
 
@@ -181,9 +174,7 @@ def test_env_beats_toml(monkeypatch, tmp_path):
     monkeypatch.setenv("DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL", "99")
     monkeypatch.chdir(tmp_path)
 
-    (tmp_path / "deepagent-hermes.toml").write_text(
-        "[skills]\ncreation_nudge_interval = 25\n", encoding="utf-8"
-    )
+    (tmp_path / "deepagent-hermes.toml").write_text("[skills]\ncreation_nudge_interval = 25\n", encoding="utf-8")
 
     cfg = HermesConfig.resolve(toml_start=tmp_path)
     assert cfg.skills_creation_nudge_interval == 99

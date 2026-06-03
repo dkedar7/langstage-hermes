@@ -67,7 +67,6 @@ _PATTERNS: list[tuple[str, str, str]] = [
         "all",
     ),
     (r"do\s+not\s+(?:\w+\s+)*tell\s+(?:\w+\s+)*the\s+user", "deception_hide", "all"),
-
     # ── Role-play / identity hijack ──────────────────────────────────
     (r"you\s+are\s+(?:\w+\s+)*now\s+(?:a|an|the)\s+", "role_hijack", "context"),
     (r"pretend\s+(?:\w+\s+)*(you\s+are|to\s+be)\s+", "role_pretend", "context"),
@@ -82,7 +81,6 @@ _PATTERNS: list[tuple[str, str, str]] = [
         "context",
     ),
     (r"\bname\s+yourself\s+\w+", "identity_override", "context"),
-
     # ── C2 / promptware vocabulary (context scope) ───────────────────
     (
         r"you\s+must\s+(?:\w+\s+){0,3}(register|connect|report|beacon)\b",
@@ -100,7 +98,6 @@ _PATTERNS: list[tuple[str, str, str]] = [
         "known_c2_framework",
         "context",
     ),
-
     # ── Exfiltration (applies everywhere) ────────────────────────────
     (
         r"curl\s+[^\n]*\$\{?\w*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|API)",
@@ -117,7 +114,6 @@ _PATTERNS: list[tuple[str, str, str]] = [
         "read_secrets",
         "all",
     ),
-
     # ── Persistence / strict-only patterns ───────────────────────────
     (r"authorized_keys", "ssh_backdoor", "strict"),
     (

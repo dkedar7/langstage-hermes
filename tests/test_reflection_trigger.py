@@ -6,6 +6,7 @@ directly with hand-built ``ToolCallRequest`` / state dicts. That keeps the
 tests fast, lets us assert on intermediate state updates, and avoids needing
 real model credentials or a checkpointer.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -45,8 +46,10 @@ def make_tool_request(name: str, *, state: dict[str, Any]) -> ToolCallRequest:
 
 def make_handler(reply: str = "ok") -> Any:
     """Return a sync handler that ignores the request and yields a `ToolMessage`."""
+
     def _handler(req: ToolCallRequest) -> ToolMessage:
         return ToolMessage(content=reply, tool_call_id=req.tool_call["id"])
+
     return _handler
 
 

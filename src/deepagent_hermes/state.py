@@ -56,9 +56,7 @@ class HermesState(AgentState):
     """Number of recent compressions yielding <10% reduction (≥2 → skip)."""
 
     # ── background-review coordination ──
-    pending_review_kind: NotRequired[
-        Annotated[Literal["memory", "skills", "combined"] | None, PrivateStateAttr]
-    ]
+    pending_review_kind: NotRequired[Annotated[Literal["memory", "skills", "combined"] | None, PrivateStateAttr]]
     """Which review the next ``after_agent`` should spawn (or ``None``)."""
 
     last_review_started_at: NotRequired[Annotated[float, PrivateStateAttr]]

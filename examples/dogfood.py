@@ -50,8 +50,7 @@ PROMPTS = [
     # "user values structured docs + examples".
     "Write a short README for the rate_limit.py module. Save as README.md.",
     # 7. Test the agent's recall of the preference.
-    "Why did you put a docstring on RateLimitConfig and not just bare fields? "
-    "Was that your call or was I particular about it?",
+    "Why did you put a docstring on RateLimitConfig and not just bare fields? Was that your call or was I particular about it?",
     # 8. Direct meta-instruction that points the review at memory rather than
     # skill — "I work like X" is squarely in MEMORY.md territory per the
     # prompt.
@@ -70,8 +69,7 @@ PROMPTS = [
     "Summarize: across this session, what conventions am I clearly asking "
     "you to follow? Keep it to a bulleted list, no preamble.",
     # 12. Explicit invitation — closes the loop deliberately.
-    "Anything from this session you should remember for next time? If yes, "
-    "use the appropriate tool to persist it now.",
+    "Anything from this session you should remember for next time? If yes, use the appropriate tool to persist it now.",
 ]
 
 
@@ -206,6 +204,7 @@ def main() -> int:
 
     # FTS5
     import sqlite3
+
     db = tmp_home / "state.db"
     conn = sqlite3.connect(str(db))
     try:

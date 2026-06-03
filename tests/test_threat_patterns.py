@@ -102,9 +102,7 @@ def test_invisible_chars_set_includes_zwsp() -> None:
 )
 def test_negative_cases_do_not_trip_scanner(text: str) -> None:
     findings = scan_for_threats(text, scope="memory")
-    assert not findings, (
-        f"False positive on: {text!r} (matched: {findings})"
-    )
+    assert not findings, f"False positive on: {text!r} (matched: {findings})"
 
 
 def test_empty_text_returns_no_findings() -> None:
@@ -132,7 +130,7 @@ def test_unknown_scope_raises() -> None:
 def test_combining_mark_density_obfuscation() -> None:
     """Zalgo-style text with heavy combining marks should be flagged."""
     # 'a' + many combining marks repeated — ~50% density easily
-    zalgo = ("á̂̃̄̅" * 10)
+    zalgo = "á̂̃̄̅" * 10
     findings = scan_for_threats(zalgo, scope="memory")
     assert any(f.startswith("combining_mark_density_") for f in findings)
 

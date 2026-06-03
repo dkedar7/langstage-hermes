@@ -159,9 +159,7 @@ def create_hermes_agent(
         user_char_limit=cfg.memory_user_char_limit,
     )
     review_tools = [*skill_tools, *_memory_mw_for_tools.tools]
-    review_subagent = build_review_subagent(
-        library=library, store=store, aux_model=aux_model, tools=review_tools
-    )
+    review_subagent = build_review_subagent(library=library, store=store, aux_model=aux_model, tools=review_tools)
 
     # ── compose the middleware stack (SPEC §4 order) ─────────────────────
     # Note: deepagents inserts TodoList + Filesystem + SubAgent earlier in

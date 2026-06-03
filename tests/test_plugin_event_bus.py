@@ -274,10 +274,7 @@ def test_plugin_exception_swallowed(caplog):
     # Good plugin still ran.
     assert any(isinstance(m, HumanMessage) and m.content == "touched" for m in request.messages)
     # The broken plugin was logged.
-    assert any(
-        "pre_llm_call" in rec.message and "plugin go boom" in rec.message
-        for rec in caplog.records
-    )
+    assert any("pre_llm_call" in rec.message and "plugin go boom" in rec.message for rec in caplog.records)
 
 
 def test_multiple_plugins_chain():
@@ -311,9 +308,7 @@ def test_pre_tool_call_and_post_tool_call_fire():
     ctx = _make_ctx()
     events: list[tuple[str, Any]] = []
     ctx.register_hook("pre_tool_call", lambda req: events.append(("pre", req)))
-    ctx.register_hook(
-        "post_tool_call", lambda req, result: events.append(("post", result))
-    )
+    ctx.register_hook("post_tool_call", lambda req, result: events.append(("post", result)))
 
     bus = PluginEventBus()
     request = _MockToolCallRequest(tool_name="search")
@@ -331,9 +326,7 @@ def test_approval_hooks_fire_only_for_interrupt_tools():
     ctx = _make_ctx()
     seen: list[str] = []
     ctx.register_hook("pre_approval_request", lambda req: seen.append("pre"))
-    ctx.register_hook(
-        "post_approval_response", lambda req, result: seen.append("post")
-    )
+    ctx.register_hook("post_approval_response", lambda req, result: seen.append("post"))
 
     bus = PluginEventBus(interrupt_tool_names={"bash"})
 

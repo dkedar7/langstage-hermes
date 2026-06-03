@@ -114,9 +114,7 @@ def parse_duration(expr: str) -> int:
     text = expr.strip().lower()
     m = _DURATION_RE.match(text)
     if not m:
-        raise ValueError(
-            f"Invalid duration {expr!r}. Use forms like '30s', '5m', '2h', '7d'."
-        )
+        raise ValueError(f"Invalid duration {expr!r}. Use forms like '30s', '5m', '2h', '7d'.")
     value = int(m.group(1))
     unit = m.group(2)[0]  # s / m / h / d
     multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
@@ -164,10 +162,7 @@ def parse_schedule(expr: str) -> dict[str, Any]:
     parts = original.split()
     if len(parts) in (5, 6) and all(re.match(r"^[\d\*\-,/]+$", p) for p in parts[:5]):
         if not _HAS_CRONITER:
-            raise ValueError(
-                "Cron expressions require the 'croniter' package "
-                "(pip install croniter)."
-            )
+            raise ValueError("Cron expressions require the 'croniter' package (pip install croniter).")
         try:
             croniter(original)
         except Exception as e:
@@ -203,10 +198,7 @@ def parse_schedule(expr: str) -> dict[str, Any]:
             "display": f"once in {original}",
         }
 
-    raise ValueError(
-        f"Invalid schedule {expr!r}. Try '30m' / 'every 2h' / '0 9 * * *' / "
-        f"'once at 2026-06-15T09:00'."
-    )
+    raise ValueError(f"Invalid schedule {expr!r}. Try '30m' / 'every 2h' / '0 9 * * *' / 'once at 2026-06-15T09:00'.")
 
 
 # ── time helpers ────────────────────────────────────────────────────
@@ -264,9 +256,7 @@ def compute_next_run(
                 schedule.get("expr"),
             )
             return None
-        base = (
-            _ensure_aware(datetime.fromisoformat(last_run_at)) if last_run_at else now
-        )
+        base = _ensure_aware(datetime.fromisoformat(last_run_at)) if last_run_at else now
         c = croniter(schedule["expr"], base)
         return c.get_next(datetime)
 
@@ -297,9 +287,7 @@ def _save(jobs: list[dict[str, Any]]) -> None:
     """Atomically write jobs.json (tmp + rename) with 0600 perms."""
     _ensure_dirs()
     path = _jobs_file()
-    fd, tmp = tempfile.mkstemp(
-        dir=str(path.parent), suffix=".tmp", prefix=".jobs_"
-    )
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=".jobs_")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(
@@ -370,10 +358,7 @@ def create_job(
     normalized_skills = _normalize_skill_list(skill, skills)
 
     if no_agent and not script:
-        raise ValueError(
-            "no_agent=True requires a script — with no agent and no script "
-            "there is nothing for the job to run."
-        )
+        raise ValueError("no_agent=True requires a script — with no agent and no script there is nothing for the job to run.")
 
     # Auto-set repeat=1 for one-shot schedules.
     if parsed["kind"] == "once" and repeat is None:
@@ -382,21 +367,14 @@ def create_job(
         repeat = None
 
     if isinstance(context_from, str):
-        ctx_from: list[str] | None = (
-            [context_from.strip()] if context_from.strip() else None
-        )
+        ctx_from: list[str] | None = [context_from.strip()] if context_from.strip() else None
     elif isinstance(context_from, list):
         ctx_from = [str(j).strip() for j in context_from if str(j).strip()] or None
     else:
         ctx_from = None
 
     prompt_text = "" if prompt is None else str(prompt)
-    label_source = (
-        prompt_text
-        or (normalized_skills[0] if normalized_skills else "")
-        or (script or "")
-        or "cron job"
-    )
+    label_source = prompt_text or (normalized_skills[0] if normalized_skills else "") or (script or "") or "cron job"
     job_id = uuid.uuid4().hex[:12]
     now_iso = _now().isoformat()
 
@@ -407,14 +385,8 @@ def create_job(
         "skills": normalized_skills,
         "skill": normalized_skills[0] if normalized_skills else None,
         "model": model.strip() if isinstance(model, str) and model.strip() else None,
-        "provider": (
-            provider.strip() if isinstance(provider, str) and provider.strip() else None
-        ),
-        "base_url": (
-            base_url.strip().rstrip("/")
-            if isinstance(base_url, str) and base_url.strip()
-            else None
-        ),
+        "provider": (provider.strip() if isinstance(provider, str) and provider.strip() else None),
+        "base_url": (base_url.strip().rstrip("/") if isinstance(base_url, str) and base_url.strip() else None),
         "script": script.strip() if isinstance(script, str) and script.strip() else None,
         "no_agent": bool(no_agent),
         "context_from": ctx_from,
@@ -566,9 +538,7 @@ def mark_job_run(
                 if kind in {"cron", "interval"}:
                     job["state"] = "error"
                     if not job.get("last_error"):
-                        job["last_error"] = (
-                            "Failed to compute next run for recurring schedule"
-                        )
+                        job["last_error"] = "Failed to compute next run for recurring schedule"
                 else:
                     job["enabled"] = False
                     job["state"] = "completed"

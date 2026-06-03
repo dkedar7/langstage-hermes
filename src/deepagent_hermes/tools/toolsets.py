@@ -51,10 +51,18 @@ TOOLSETS: dict[str, list[str]] = {
     "session_search": ["session_search"],
     # ── Browser automation ───────────────────────────────────────────
     "browser": [
-        "browser_navigate", "browser_snapshot", "browser_click",
-        "browser_type", "browser_scroll", "browser_back",
-        "browser_press", "browser_get_images",
-        "browser_vision", "browser_console", "browser_cdp", "browser_dialog",
+        "browser_navigate",
+        "browser_snapshot",
+        "browser_click",
+        "browser_type",
+        "browser_scroll",
+        "browser_back",
+        "browser_press",
+        "browser_get_images",
+        "browser_vision",
+        "browser_console",
+        "browser_cdp",
+        "browser_dialog",
     ],
     # ── Scheduling / interaction ─────────────────────────────────────
     "cronjob": ["cronjob"],
@@ -65,28 +73,45 @@ TOOLSETS: dict[str, list[str]] = {
     "delegation": ["delegate_task"],
     # ── External integrations ────────────────────────────────────────
     "homeassistant": [
-        "ha_list_entities", "ha_get_state",
-        "ha_list_services", "ha_call_service",
+        "ha_list_entities",
+        "ha_get_state",
+        "ha_list_services",
+        "ha_call_service",
     ],
     "kanban": [
-        "kanban_show", "kanban_list", "kanban_complete", "kanban_block",
-        "kanban_heartbeat", "kanban_comment",
-        "kanban_create", "kanban_link", "kanban_unblock",
+        "kanban_show",
+        "kanban_list",
+        "kanban_complete",
+        "kanban_block",
+        "kanban_heartbeat",
+        "kanban_comment",
+        "kanban_create",
+        "kanban_link",
+        "kanban_unblock",
     ],
     "discord": ["discord"],
     "discord_admin": ["discord_admin"],
     "yuanbao": [
-        "yb_query_group_info", "yb_query_group_members",
-        "yb_send_dm", "yb_search_sticker", "yb_send_sticker",
+        "yb_query_group_info",
+        "yb_query_group_members",
+        "yb_send_dm",
+        "yb_search_sticker",
+        "yb_send_sticker",
     ],
     "feishu_doc": ["feishu_doc_read"],
     "feishu_drive": [
-        "feishu_drive_list_comments", "feishu_drive_list_comment_replies",
-        "feishu_drive_reply_comment", "feishu_drive_add_comment",
+        "feishu_drive_list_comments",
+        "feishu_drive_list_comment_replies",
+        "feishu_drive_reply_comment",
+        "feishu_drive_add_comment",
     ],
     "spotify": [
-        "spotify_playback", "spotify_devices", "spotify_queue",
-        "spotify_search", "spotify_playlists", "spotify_albums",
+        "spotify_playback",
+        "spotify_devices",
+        "spotify_queue",
+        "spotify_search",
+        "spotify_playlists",
+        "spotify_albums",
         "spotify_library",
     ],
     # ── Scenario composites (Hermes parity) ──────────────────────────
@@ -99,9 +124,7 @@ TOOLSETS: dict[str, list[str]] = {
 
 # Sanity check at import time — protects against accidentally drifting from
 # the SPEC count when editing this file.
-assert len(TOOLSETS) == 33, (
-    f"TOOLSETS must contain exactly 33 entries (per SPEC §11); got {len(TOOLSETS)}"
-)
+assert len(TOOLSETS) == 33, f"TOOLSETS must contain exactly 33 entries (per SPEC §11); got {len(TOOLSETS)}"
 
 
 # Toolsets with at least one concrete implementation in v0.1.0. The rest are

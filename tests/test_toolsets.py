@@ -43,12 +43,39 @@ def test_implemented_set_matches_spec() -> None:
 def test_known_leaf_toolsets_are_present() -> None:
     """Spot-check that the Hermes leaf names port through."""
     for name in [
-        "web", "search", "x_search", "vision", "video", "image_gen", "video_gen",
-        "computer_use", "terminal", "file", "moa", "todo", "skills", "memory",
-        "context_engine", "session_search", "browser", "cronjob", "messaging",
-        "tts", "clarify", "code_execution", "delegation", "homeassistant",
-        "kanban", "discord", "discord_admin", "yuanbao", "feishu_doc",
-        "feishu_drive", "spotify", "debugging", "safe",
+        "web",
+        "search",
+        "x_search",
+        "vision",
+        "video",
+        "image_gen",
+        "video_gen",
+        "computer_use",
+        "terminal",
+        "file",
+        "moa",
+        "todo",
+        "skills",
+        "memory",
+        "context_engine",
+        "session_search",
+        "browser",
+        "cronjob",
+        "messaging",
+        "tts",
+        "clarify",
+        "code_execution",
+        "delegation",
+        "homeassistant",
+        "kanban",
+        "discord",
+        "discord_admin",
+        "yuanbao",
+        "feishu_doc",
+        "feishu_drive",
+        "spotify",
+        "debugging",
+        "safe",
     ]:
         assert name in TOOLSETS, f"{name} missing from TOOLSETS"
 
@@ -63,9 +90,7 @@ def test_terminal_toolset_has_terminal_and_process() -> None:
 
 
 def test_skills_toolset_has_three_tools() -> None:
-    assert sorted(tools_for("skills")) == sorted(
-        ["skills_list", "skill_view", "skill_manage"]
-    )
+    assert sorted(tools_for("skills")) == sorted(["skills_list", "skill_view", "skill_manage"])
 
 
 def test_all_toolset_names_sorted() -> None:

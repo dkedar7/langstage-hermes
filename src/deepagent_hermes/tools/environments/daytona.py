@@ -41,10 +41,7 @@ from deepagent_hermes.tools.environments.base import (
     ProcessHandle,
 )
 
-_INSTALL_HINT = (
-    "DaytonaEnvironment requires the 'daytona-sdk' package. "
-    "Install with: pip install deepagent-hermes[daytona]"
-)
+_INSTALL_HINT = "DaytonaEnvironment requires the 'daytona-sdk' package. Install with: pip install deepagent-hermes[daytona]"
 
 
 def _resolve_api_key() -> str | None:
@@ -54,9 +51,7 @@ def _resolve_api_key() -> str | None:
       1. ``DAYTONA_API_KEY`` (Daytona's own env var — what their SDK auto-reads)
       2. ``DEEPAGENT_HERMES_DAYTONA_API_KEY`` (namespaced override)
     """
-    return os.environ.get("DAYTONA_API_KEY") or os.environ.get(
-        "DEEPAGENT_HERMES_DAYTONA_API_KEY"
-    )
+    return os.environ.get("DAYTONA_API_KEY") or os.environ.get("DEEPAGENT_HERMES_DAYTONA_API_KEY")
 
 
 def _import_sdk() -> Any:
@@ -90,6 +85,7 @@ class _BlockingResultHandle:
 
     def __init__(self, output: str, exit_code: int) -> None:
         import io
+
         self._exit_code = exit_code
         # Encode and wrap so the base class's generic drain path (iterates
         # bytes) gets data in the same shape as a real Popen.stdout.
@@ -197,8 +193,7 @@ class DaytonaEnvironment(BaseEnvironment):
         )
         if create_fn is None:
             raise ImportError(
-                "daytona-sdk client has no create()/create_sandbox()/create_workspace() "
-                "method. The SDK API may have changed."
+                "daytona-sdk client has no create()/create_sandbox()/create_workspace() method. The SDK API may have changed."
             )
         self._sandbox = create_fn(CreateSandboxParams(language=self._language))
 
@@ -250,12 +245,7 @@ class DaytonaEnvironment(BaseEnvironment):
         # ``response.result`` (stdout) and ``response.exit_code``. Some SDK
         # versions expose ``stdout``/``output`` instead. Try the most common
         # in order.
-        output = (
-            getattr(response, "result", None)
-            or getattr(response, "stdout", None)
-            or getattr(response, "output", None)
-            or ""
-        )
+        output = getattr(response, "result", None) or getattr(response, "stdout", None) or getattr(response, "output", None) or ""
         exit_code = getattr(response, "exit_code", None)
         if exit_code is None:
             exit_code = getattr(response, "returncode", None)
@@ -292,9 +282,7 @@ class DaytonaEnvironment(BaseEnvironment):
                 if delete_fn is not None:
                     delete_fn()
                 elif self._client is not None:
-                    client_delete = getattr(self._client, "delete", None) or getattr(
-                        self._client, "remove", None
-                    )
+                    client_delete = getattr(self._client, "delete", None) or getattr(self._client, "remove", None)
                     if client_delete is not None:
                         client_delete(self._sandbox)
             except Exception:
@@ -314,6 +302,7 @@ def _shquote(s: str) -> str:
     surface flat (and to make the SDK-vs-stdlib boundary obvious in diffs).
     """
     import shlex
+
     return shlex.quote(s)
 
 

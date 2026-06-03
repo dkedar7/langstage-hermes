@@ -49,9 +49,7 @@ def test_includes_identity_and_date_and_platform_hint(mw_minimal):
     # No HH:MM:SS or HH:MM in the date line — guarded by regex
     date_line_match = re.search(r"Conversation started: ([^\n]+)", prompt)
     assert date_line_match is not None
-    assert not re.search(r"\d{1,2}:\d{2}", date_line_match.group(1)), (
-        f"date line contains time: {date_line_match.group(1)!r}"
-    )
+    assert not re.search(r"\d{1,2}:\d{2}", date_line_match.group(1)), f"date line contains time: {date_line_match.group(1)!r}"
 
 
 def test_byte_stable_within_same_day(mw_minimal):
@@ -136,9 +134,7 @@ def test_tool_use_enforcement_only_for_non_claude_models(tmp_hermes_home, tmp_wo
 
 def test_context_files_block_picked_up(tmp_hermes_home, tmp_workspace):
     """An ``AGENTS.md`` in the workspace shows up in the context layer."""
-    (tmp_workspace / "AGENTS.md").write_text(
-        "Project rule: prefer absolute paths.\n", encoding="utf-8"
-    )
+    (tmp_workspace / "AGENTS.md").write_text("Project rule: prefer absolute paths.\n", encoding="utf-8")
     mw = PromptAssemblyMiddleware(platform="cli", workspace_root=tmp_workspace)
     prompt = mw.assemble(model_id="claude-sonnet-4.5")
     assert "Project rule: prefer absolute paths." in prompt

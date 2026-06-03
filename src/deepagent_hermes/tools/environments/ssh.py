@@ -56,10 +56,7 @@ except Exception:  # pragma: no cover - import guard
     _paramiko = None  # type: ignore[assignment]
 
 
-_INSTALL_HINT = (
-    "paramiko is required for SshEnvironment. Install with: "
-    "pip install 'deepagent-hermes[ssh]'"
-)
+_INSTALL_HINT = "paramiko is required for SshEnvironment. Install with: pip install 'deepagent-hermes[ssh]'"
 
 
 # ── ProcessHandle adapter ─────────────────────────────────────────────
@@ -173,6 +170,7 @@ class _SshProcessHandle:
                 # Mirror subprocess.Popen.wait timeout semantics — raise so
                 # the base class's drain loop can fall through to kill().
                 import subprocess as _sp
+
                 raise _sp.TimeoutExpired(cmd="ssh-exec", timeout=timeout or 0)
             time.sleep(0.05)
 
@@ -262,22 +260,17 @@ class SshEnvironment(BaseEnvironment):
         # Resolve config: kwarg > env > default.
         raw_host = host if host is not None else os.environ.get("DEEPAGENT_HERMES_SSH_HOST")
         if not raw_host:
-            raise ValueError(
-                "SshEnvironment requires DEEPAGENT_HERMES_SSH_HOST (e.g. 'user@host:22') "
-                "or the host= kwarg."
-            )
+            raise ValueError("SshEnvironment requires DEEPAGENT_HERMES_SSH_HOST (e.g. 'user@host:22') or the host= kwarg.")
 
         parsed_user, parsed_host, parsed_port = _parse_host(raw_host)
         self.host = parsed_host
         self.user = user or parsed_user or os.environ.get("USER") or os.environ.get("USERNAME") or "root"
         self.port = int(port) if port is not None else parsed_port
 
-        self.key_path = key_path if key_path is not None else os.environ.get(
-            "DEEPAGENT_HERMES_SSH_KEY", os.path.expanduser("~/.ssh/id_rsa")
+        self.key_path = (
+            key_path if key_path is not None else os.environ.get("DEEPAGENT_HERMES_SSH_KEY", os.path.expanduser("~/.ssh/id_rsa"))
         )
-        self.password = password if password is not None else os.environ.get(
-            "DEEPAGENT_HERMES_SSH_PASSWORD"
-        )
+        self.password = password if password is not None else os.environ.get("DEEPAGENT_HERMES_SSH_PASSWORD")
 
         if timeout is not None:
             self.timeout = float(timeout)
@@ -373,9 +366,7 @@ class SshEnvironment(BaseEnvironment):
         login = not self._initialized
 
         try:
-            proc = self._run_bash(
-                wrapped, login=login, timeout=timeout, stdin_data=stdin_data
-            )
+            proc = self._run_bash(wrapped, login=login, timeout=timeout, stdin_data=stdin_data)
         except FileNotFoundError as exc:
             return ExecuteResponse(
                 output=f"[error] {exc}",
@@ -406,9 +397,7 @@ class SshEnvironment(BaseEnvironment):
             return
         try:
             cwd_q = shlex.quote(str(self._cwd_path()))
-            _stdin, stdout, _stderr = self._client.exec_command(
-                f"cat {cwd_q} 2>/dev/null || true", timeout=5
-            )
+            _stdin, stdout, _stderr = self._client.exec_command(f"cat {cwd_q} 2>/dev/null || true", timeout=5)
             data = stdout.read()
             text = data.decode("utf-8", "replace").strip() if isinstance(data, bytes) else str(data).strip()
             if text:
@@ -463,9 +452,7 @@ class SshEnvironment(BaseEnvironment):
         else:
             remote_cmd = f"bash -c {shlex.quote(cmd)}"
 
-        stdin, stdout, stderr = self._exec(
-            remote_cmd, timeout=float(timeout), stdin_data=stdin_data
-        )
+        stdin, stdout, stderr = self._exec(remote_cmd, timeout=float(timeout), stdin_data=stdin_data)
         channel = stdout.channel
 
         return _SshProcessHandle(

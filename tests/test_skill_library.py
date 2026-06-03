@@ -206,7 +206,9 @@ def test_platforms_field_filters_by_os(tmp_hermes_home, monkeypatch):
     # Skill restricted to a platform that does NOT match the current OS.
     other_platform = "linux" if sys.platform.startswith("win") else "windows"
     _write_skill(
-        skills_dir, name="alpha", extra={"platforms": [other_platform]},
+        skills_dir,
+        name="alpha",
+        extra={"platforms": [other_platform]},
     )
     # Skill restricted to whatever the current OS is.
     if sys.platform.startswith("darwin"):
@@ -241,11 +243,7 @@ def test_validate_all_reports_errors(tmp_hermes_home, lib):
     results = lib.validate_all()
     assert results["alpha"] == []
     # The bad skill keys under its frontmatter name (not-bad) with parent_dir errors
-    assert any(
-        "parent directory" in err
-        for errs in results.values()
-        for err in errs
-    )
+    assert any("parent directory" in err for errs in results.values() for err in errs)
 
 
 # ---------------------------------------------------------------------------

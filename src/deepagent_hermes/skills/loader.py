@@ -121,5 +121,5 @@ class SkillLoaderMiddleware(AgentMiddleware):
         chunks: list[str] = [_BANNER]
         for name in sorted(bodies):
             body = bodies[name].strip()
-            chunks.append(f"<skill name=\"{name}\">\n{body}\n</skill>")
+            chunks.append(f'<skill name="{name}">\n{body}\n</skill>')
         return "\n\n".join(chunks)

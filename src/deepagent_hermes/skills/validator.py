@@ -58,8 +58,7 @@ def _validate_name(value: Any, *, parent_dir_name: str | None, errors: list[str]
     if not _NAME_CHARS_RE.match(value):
         _err(
             errors,
-            "name: may only contain lowercase letters, digits, and hyphens "
-            f"(got {value!r})",
+            f"name: may only contain lowercase letters, digits, and hyphens (got {value!r})",
         )
     if value.startswith("-") or value.endswith("-"):
         _err(errors, f"name: must not start or end with a hyphen (got {value!r})")
@@ -68,8 +67,7 @@ def _validate_name(value: Any, *, parent_dir_name: str | None, errors: list[str]
     if parent_dir_name is not None and value != parent_dir_name:
         _err(
             errors,
-            f"name: must match parent directory name "
-            f"(name={value!r}, parent_dir={parent_dir_name!r})",
+            f"name: must match parent directory name (name={value!r}, parent_dir={parent_dir_name!r})",
         )
 
 
@@ -98,8 +96,7 @@ def _validate_compatibility(value: Any, *, errors: list[str]) -> None:
     if len(value) < 1 or len(value) > MAX_COMPATIBILITY_LENGTH:
         _err(
             errors,
-            f"compatibility: must be 1-{MAX_COMPATIBILITY_LENGTH} characters "
-            f"(got {len(value)})",
+            f"compatibility: must be 1-{MAX_COMPATIBILITY_LENGTH} characters (got {len(value)})",
         )
 
 
@@ -122,15 +119,13 @@ def _validate_metadata(value: Any, *, errors: list[str]) -> None:
         if tags is not None and not isinstance(tags, (list, tuple, str)):
             _err(
                 errors,
-                "metadata.hermes.tags: must be a list (or comma-separated string), "
-                f"got {type(tags).__name__}",
+                f"metadata.hermes.tags: must be a list (or comma-separated string), got {type(tags).__name__}",
             )
         related = hermes.get("related_skills")
         if related is not None and not isinstance(related, (list, tuple, str)):
             _err(
                 errors,
-                "metadata.hermes.related_skills: must be a list (or comma-separated "
-                f"string), got {type(related).__name__}",
+                f"metadata.hermes.related_skills: must be a list (or comma-separated string), got {type(related).__name__}",
             )
 
 
@@ -154,8 +149,7 @@ def _validate_platforms(value: Any, *, errors: list[str]) -> None:
         if item not in _VALID_PLATFORMS:
             _err(
                 errors,
-                f"platforms: {item!r} is not a valid platform "
-                f"(allowed: {sorted(_VALID_PLATFORMS)})",
+                f"platforms: {item!r} is not a valid platform (allowed: {sorted(_VALID_PLATFORMS)})",
             )
 
 

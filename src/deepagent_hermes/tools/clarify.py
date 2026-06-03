@@ -61,8 +61,7 @@ def make_clarify_tool() -> Any:
         from langchain_core.tools import tool
     except ImportError as exc:  # pragma: no cover - guarded for headless test envs
         raise RuntimeError(
-            "make_clarify_tool() requires langchain_core. Install "
-            "`deepagent-hermes[dev]` or add `langchain-core` to your env."
+            "make_clarify_tool() requires langchain_core. Install `deepagent-hermes[dev]` or add `langchain-core` to your env."
         ) from exc
 
     @tool("clarify")

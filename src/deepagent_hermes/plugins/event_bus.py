@@ -97,9 +97,7 @@ logger = logging.getLogger(__name__)
 # Tool names that should additionally fire ``transform_terminal_output``.
 # Matches the canonical Hermes terminal toolset names; extensible via the
 # ``terminal_tool_names`` constructor arg.
-_DEFAULT_TERMINAL_TOOL_NAMES: frozenset[str] = frozenset(
-    {"terminal", "process", "execute_code", "bash"}
-)
+_DEFAULT_TERMINAL_TOOL_NAMES: frozenset[str] = frozenset({"terminal", "process", "execute_code", "bash"})
 
 
 def _tool_name_of(request: ToolCallRequest) -> str | None:
@@ -139,9 +137,7 @@ def _extract_result_content(result: Any) -> tuple[Any, ToolMessage | None]:
     return result, None
 
 
-def _replace_result_content(
-    result: Any, tool_msg: ToolMessage | None, new_content: Any
-) -> Any:
+def _replace_result_content(result: Any, tool_msg: ToolMessage | None, new_content: Any) -> Any:
     """Return a new result with ``new_content`` substituted in the right slot.
 
     Mirrors :func:`_extract_result_content`. When the original carrier is a
@@ -205,9 +201,7 @@ class PluginEventBus(AgentMiddleware):
         )
         if interrupt_tool_names is None:
             csv = os.getenv("DEEPAGENT_HERMES_INTERRUPT_ON", "")
-            self._interrupt_tool_names = frozenset(
-                n.strip() for n in csv.split(",") if n.strip()
-            )
+            self._interrupt_tool_names = frozenset(n.strip() for n in csv.split(",") if n.strip())
         else:
             self._interrupt_tool_names = frozenset(interrupt_tool_names)
 
@@ -231,13 +225,9 @@ class PluginEventBus(AgentMiddleware):
             try:
                 fn(*args, **kwargs)
             except Exception as exc:
-                logger.warning(
-                    "plugin hook %s raised: %s", hook_name, exc, exc_info=True
-                )
+                logger.warning("plugin hook %s raised: %s", hook_name, exc, exc_info=True)
 
-    def _fire_transform(
-        self, hook_name: str, value: Any, *extra_args: Any, **kwargs: Any
-    ) -> Any:
+    def _fire_transform(self, hook_name: str, value: Any, *extra_args: Any, **kwargs: Any) -> Any:
         """Run each callback for ``hook_name``, chaining the output as the new value.
 
         Callback signature: ``fn(value, *extra_args, **kwargs) -> Any | None``.
@@ -249,9 +239,7 @@ class PluginEventBus(AgentMiddleware):
             try:
                 result = fn(current, *extra_args, **kwargs)
             except Exception as exc:
-                logger.warning(
-                    "plugin hook %s raised: %s", hook_name, exc, exc_info=True
-                )
+                logger.warning("plugin hook %s raised: %s", hook_name, exc, exc_info=True)
                 continue
             if result is not None:
                 current = result
@@ -259,31 +247,23 @@ class PluginEventBus(AgentMiddleware):
 
     # ── before_agent / after_agent (session lifecycle) ──────────────
 
-    def before_agent(
-        self, state: Any, runtime: Any
-    ) -> dict[str, Any] | None:
+    def before_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         """Fire ``on_session_start``."""
         del runtime
         self._fire("on_session_start", state)
         return None
 
-    async def abefore_agent(
-        self, state: Any, runtime: Any
-    ) -> dict[str, Any] | None:
+    async def abefore_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         return self.before_agent(state, runtime)
 
-    def after_agent(
-        self, state: Any, runtime: Any
-    ) -> dict[str, Any] | None:
+    def after_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         """Fire ``on_session_end`` then ``on_session_finalize`` in that order."""
         del runtime
         self._fire("on_session_end", state)
         self._fire("on_session_finalize", state)
         return None
 
-    async def aafter_agent(
-        self, state: Any, runtime: Any
-    ) -> dict[str, Any] | None:
+    async def aafter_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         return self.after_agent(state, runtime)
 
     # ── wrap_model_call (LLM surface) ───────────────────────────────
@@ -336,18 +316,14 @@ class PluginEventBus(AgentMiddleware):
         response = self._fire_response_transform("post_api_request", request, response)
         return response
 
-    def _fire_request_transform(
-        self, hook_name: str, request: ModelRequest
-    ) -> ModelRequest:
+    def _fire_request_transform(self, hook_name: str, request: ModelRequest) -> ModelRequest:
         """Fire a ``pre_llm_call``-style hook; allow returning a new request."""
         current = request
         for fn in list(self._registry().get(hook_name, [])):
             try:
                 result = fn(current)
             except Exception as exc:
-                logger.warning(
-                    "plugin hook %s raised: %s", hook_name, exc, exc_info=True
-                )
+                logger.warning("plugin hook %s raised: %s", hook_name, exc, exc_info=True)
                 continue
             if result is not None:
                 current = result
@@ -365,18 +341,14 @@ class PluginEventBus(AgentMiddleware):
             try:
                 result = fn(request, current)
             except Exception as exc:
-                logger.warning(
-                    "plugin hook %s raised: %s", hook_name, exc, exc_info=True
-                )
+                logger.warning("plugin hook %s raised: %s", hook_name, exc, exc_info=True)
                 continue
             if result is not None:
                 current = result
         return current
 
     @staticmethod
-    def _replace_response_messages(
-        response: ModelResponse, new_messages: Any
-    ) -> ModelResponse:
+    def _replace_response_messages(response: ModelResponse, new_messages: Any) -> ModelResponse:
         """Return a ModelResponse copy with ``result`` swapped to ``new_messages``."""
         return ModelResponse(
             result=list(new_messages) if new_messages is not None else [],
@@ -402,9 +374,7 @@ class PluginEventBus(AgentMiddleware):
           7. ``post_tool_call(request, result)``
         """
         tool_name = _tool_name_of(request)
-        is_interrupt = (
-            tool_name is not None and tool_name in self._interrupt_tool_names
-        )
+        is_interrupt = tool_name is not None and tool_name in self._interrupt_tool_names
 
         self._fire("pre_tool_call", request)
         if is_interrupt:
@@ -426,9 +396,7 @@ class PluginEventBus(AgentMiddleware):
         handler: Callable[[ToolCallRequest], Awaitable[Any]],
     ) -> Any:
         tool_name = _tool_name_of(request)
-        is_interrupt = (
-            tool_name is not None and tool_name in self._interrupt_tool_names
-        )
+        is_interrupt = tool_name is not None and tool_name in self._interrupt_tool_names
         self._fire("pre_tool_call", request)
         if is_interrupt:
             self._fire("pre_approval_request", request)
@@ -457,14 +425,10 @@ class PluginEventBus(AgentMiddleware):
         args = _tool_args_of(request)
 
         if has_terminal and tool_name in self._terminal_tool_names:
-            content = self._fire_transform(
-                "transform_terminal_output", content, tool_name, args
-            )
+            content = self._fire_transform("transform_terminal_output", content, tool_name, args)
 
         if has_tool:
-            content = self._fire_transform(
-                "transform_tool_result", content, tool_name, args
-            )
+            content = self._fire_transform("transform_tool_result", content, tool_name, args)
 
         if content is original_content:
             return result

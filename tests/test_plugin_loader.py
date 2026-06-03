@@ -30,9 +30,7 @@ def _write_plugin(parent: Path, name: str, *, register_body: str = "pass") -> Pa
         encoding="utf-8",
     )
     (plugin_dir / "__init__.py").write_text(
-        "def register(ctx):\n"
-        + "\n".join("    " + line for line in register_body.splitlines() or ["pass"])
-        + "\n",
+        "def register(ctx):\n" + "\n".join("    " + line for line in register_body.splitlines() or ["pass"]) + "\n",
         encoding="utf-8",
     )
     return plugin_dir

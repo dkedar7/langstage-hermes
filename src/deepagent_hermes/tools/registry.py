@@ -81,10 +81,7 @@ class HermesToolRegistry:
         """
         name = getattr(tool, "name", None)
         if not name:
-            raise ValueError(
-                "register() requires a tool with a non-empty .name attribute; "
-                f"got {tool!r}"
-            )
+            raise ValueError(f"register() requires a tool with a non-empty .name attribute; got {tool!r}")
         with self._lock:
             self._tools[name] = _ToolEntry(
                 tool=tool,

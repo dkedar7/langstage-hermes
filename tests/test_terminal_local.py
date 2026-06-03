@@ -58,9 +58,7 @@ def test_init_session_is_idempotent(env: LocalEnvironment) -> None:
 # ── CWD persistence across calls ─────────────────────────────────────
 
 
-def test_cwd_persists_across_execute_calls(
-    env: LocalEnvironment, tmp_path: Path
-) -> None:
+def test_cwd_persists_across_execute_calls(env: LocalEnvironment, tmp_path: Path) -> None:
     """``cd`` in one call must be visible to ``pwd`` in the next call.
 
     Uses ``tmp_path`` rather than ``/tmp`` so the test works on Windows
@@ -81,8 +79,7 @@ def test_cwd_persists_across_execute_calls(
     # Either the full path matches, or at minimum the basename does
     # (covers MSYS path translation under Git Bash on Windows).
     assert pwd_output.endswith(expected_basename), (
-        f"expected pwd to end with {expected_basename!r}, got {pwd_output!r}\n"
-        f"full output: {resp.output!r}"
+        f"expected pwd to end with {expected_basename!r}, got {pwd_output!r}\nfull output: {resp.output!r}"
     )
 
 

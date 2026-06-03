@@ -70,6 +70,7 @@ class _ReflectionStateExt(AgentState):
     pending_review_kind: NotRequired[Annotated[Literal["memory", "skills", "combined"] | None, _take_last]]
     last_review_started_at: NotRequired[Annotated[float, _take_last]]
 
+
 if TYPE_CHECKING:
     from typing_extensions import TypedDict
 
@@ -274,9 +275,7 @@ class ReflectionMiddleware(AgentMiddleware):
         # alongside the message.
         return Command(update={**update, "messages": [result]})
 
-    def _counter_update_for_tool(
-        self, tool_name: str | None, state: Any
-    ) -> dict[str, Any]:
+    def _counter_update_for_tool(self, tool_name: str | None, state: Any) -> dict[str, Any]:
         """Decide which counter to bump/reset based on the tool that ran."""
         if tool_name == _SKILL_TOOL_NAME:
             # Successful skill_manage call resets the skills counter.
@@ -293,9 +292,7 @@ class ReflectionMiddleware(AgentMiddleware):
 
     # ── before_model ─────────────────────────────────────────────
 
-    def before_model(
-        self, state: Any, runtime: Runtime[Any] | None = None
-    ) -> dict[str, Any] | None:
+    def before_model(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         """Detect a user-turn boundary and bump ``turns_since_memory``.
 
         A "real user turn" is one where the LATEST message is a
@@ -324,9 +321,7 @@ class ReflectionMiddleware(AgentMiddleware):
 
     # ── after_model ──────────────────────────────────────────────
 
-    def after_model(
-        self, state: Any, runtime: Runtime[Any] | None = None
-    ) -> dict[str, Any] | None:
+    def after_model(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         """Flag a review when the model has finished and a counter is over."""
         messages = self._messages(state)
         if not messages:
@@ -343,9 +338,7 @@ class ReflectionMiddleware(AgentMiddleware):
 
         iters_since_skill = self._read_int(state, "iters_since_skill")
         turns_since_memory = self._read_int(state, "turns_since_memory")
-        skill_due = self.skills_toolset_enabled and (
-            iters_since_skill >= self.skill_nudge_interval
-        )
+        skill_due = self.skills_toolset_enabled and (iters_since_skill >= self.skill_nudge_interval)
         memory_due = turns_since_memory >= self.memory_nudge_interval
 
         if not (skill_due or memory_due):
@@ -366,9 +359,7 @@ class ReflectionMiddleware(AgentMiddleware):
 
     # ── after_agent ──────────────────────────────────────────────
 
-    def after_agent(
-        self, state: Any, runtime: Runtime[Any] | None = None
-    ) -> dict[str, Any] | None:
+    def after_agent(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         """Invoke the review subagent synchronously and clear the counters."""
         kind = self._get(state, "pending_review_kind")
         if not kind:
@@ -386,17 +377,14 @@ class ReflectionMiddleware(AgentMiddleware):
             # anyway so the trigger doesn't stay stuck on. Production wiring
             # via SubAgentMiddleware will replace this branch.
             logger.info(
-                "Reflection: pending_review_kind=%s but no review_graph wired; "
-                "skipping inline invocation (counters reset).",
+                "Reflection: pending_review_kind=%s but no review_graph wired; skipping inline invocation (counters reset).",
                 kind,
             )
             return reset
 
         try:
             history = list(self._messages(state))
-            sub_state = {
-                "messages": [*history, HumanMessage(content=review_prompt)]
-            }
+            sub_state = {"messages": [*history, HumanMessage(content=review_prompt)]}
             self._review_graph.invoke(sub_state)
         except Exception as exc:
             logger.warning("Reflection: review subagent failed: %s", exc)
@@ -449,19 +437,13 @@ class ReflectionMiddleware(AgentMiddleware):
             return Command(update=base_update, goto=result.goto)
         return Command(update={**update, "messages": [result]})
 
-    async def abefore_model(
-        self, state: Any, runtime: Runtime[Any] | None = None
-    ) -> dict[str, Any] | None:
+    async def abefore_model(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         return self.before_model(state, runtime)
 
-    async def aafter_model(
-        self, state: Any, runtime: Runtime[Any] | None = None
-    ) -> dict[str, Any] | None:
+    async def aafter_model(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         return self.after_model(state, runtime)
 
-    async def aafter_agent(
-        self, state: Any, runtime: Runtime[Any] | None = None
-    ) -> dict[str, Any] | None:
+    async def aafter_agent(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         # Synchronous path is fine — review_graph.invoke is sync.
         return self.after_agent(state, runtime)
 

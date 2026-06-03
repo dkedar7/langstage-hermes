@@ -34,10 +34,7 @@ def _restore_modules():
     test sticks a fake (or ``None``) into ``sys.modules`` we have to undo it
     before the next test runs or cross-test bleed makes failures inscrutable.
     """
-    snapshot = {
-        key: sys.modules.get(key)
-        for key in ("daytona_sdk", "modal", DAYTONA_MODPATH, MODAL_MODPATH)
-    }
+    snapshot = {key: sys.modules.get(key) for key in ("daytona_sdk", "modal", DAYTONA_MODPATH, MODAL_MODPATH)}
     yield
     for key, value in snapshot.items():
         if value is None:

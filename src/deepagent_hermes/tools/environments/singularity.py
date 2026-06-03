@@ -94,9 +94,7 @@ class SingularityEnvironment(BaseEnvironment):
         # store the None and let _run_bash() raise FileNotFoundError so the
         # base class can format it as a normal ExecuteResponse with exit 127.
         self._singularity = _find_singularity()
-        self._image = os.environ.get(
-            "DEEPAGENT_HERMES_SINGULARITY_IMAGE", _DEFAULT_IMAGE
-        )
+        self._image = os.environ.get("DEEPAGENT_HERMES_SINGULARITY_IMAGE", _DEFAULT_IMAGE)
         self._workspace = _resolve_workspace()
 
     # ── snapshot / cwd paths live inside the bind mount ───────────────
@@ -165,9 +163,7 @@ class SingularityEnvironment(BaseEnvironment):
 
         popen_kwargs: dict = {}
         if sys.platform == "win32":
-            popen_kwargs["creationflags"] = getattr(
-                subprocess, "CREATE_NO_WINDOW", 0
-            )
+            popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         else:
             # POSIX: own process group so we can kill the whole tree on timeout.
             popen_kwargs["preexec_fn"] = os.setsid  # type: ignore[attr-defined]

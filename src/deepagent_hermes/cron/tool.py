@@ -30,16 +30,16 @@ except ImportError:  # pragma: no cover - langchain-core is required at runtime
 def _format_job_summary(job: dict[str, Any]) -> str:
     """Single-line summary used by ``list`` and as the header of ``show``."""
     return (
-        f"- `{job['id']}` **{job.get('name','?')}** "
-        f"[{job.get('schedule_display','?')}] "
-        f"state={job.get('state','?')} "
+        f"- `{job['id']}` **{job.get('name', '?')}** "
+        f"[{job.get('schedule_display', '?')}] "
+        f"state={job.get('state', '?')} "
         f"next={job.get('next_run_at') or '—'}"
     )
 
 
 def _format_job_detail(job: dict[str, Any]) -> str:
     """Multi-line markdown detail used by ``show``."""
-    lines = [f"### Cron job `{job['id']}` — {job.get('name','?')}", ""]
+    lines = [f"### Cron job `{job['id']}` — {job.get('name', '?')}", ""]
     for key in (
         "schedule_display",
         "prompt",
@@ -99,10 +99,7 @@ def _cronjob_impl(
             )
         except (ValueError, RuntimeError) as e:
             return f"Error creating cron job: {e}"
-        return (
-            f"Created cron job `{job['id']}` ({job['name']}) "
-            f"[{job['schedule_display']}], next run at {job['next_run_at']}."
-        )
+        return f"Created cron job `{job['id']}` ({job['name']}) [{job['schedule_display']}], next run at {job['next_run_at']}."
 
     if act == "list":
         items = cron_jobs.list_jobs()
@@ -121,29 +118,17 @@ def _cronjob_impl(
     if act == "delete":
         if not id:
             return "Error: `id` is required for delete."
-        return (
-            f"Deleted cron job `{id}`."
-            if cron_jobs.delete_job(id)
-            else f"No cron job with id `{id}`."
-        )
+        return f"Deleted cron job `{id}`." if cron_jobs.delete_job(id) else f"No cron job with id `{id}`."
 
     if act == "pause":
         if not id:
             return "Error: `id` is required for pause."
-        return (
-            f"Paused cron job `{id}`."
-            if cron_jobs.pause_job(id)
-            else f"No cron job with id `{id}`."
-        )
+        return f"Paused cron job `{id}`." if cron_jobs.pause_job(id) else f"No cron job with id `{id}`."
 
     if act == "resume":
         if not id:
             return "Error: `id` is required for resume."
-        return (
-            f"Resumed cron job `{id}`."
-            if cron_jobs.resume_job(id)
-            else f"No cron job with id `{id}`."
-        )
+        return f"Resumed cron job `{id}`." if cron_jobs.resume_job(id) else f"No cron job with id `{id}`."
 
     if act in {"run-now", "run_now", "trigger"}:
         if not id:
@@ -153,15 +138,9 @@ def _cronjob_impl(
             return f"No cron job with id `{id}`."
         result = run_job(job)
         status = "ok" if result["success"] else f"error: {result.get('error')}"
-        return (
-            f"Ran cron job `{id}` ({status}). "
-            f"Output: {result.get('output_path')}"
-        )
+        return f"Ran cron job `{id}` ({status}). Output: {result.get('output_path')}"
 
-    return (
-        f"Unknown cron action `{action}`. "
-        "Valid: create, list, show, delete, pause, resume, run-now."
-    )
+    return f"Unknown cron action `{action}`. Valid: create, list, show, delete, pause, resume, run-now."
 
 
 if tool is not None:

@@ -40,7 +40,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
-    "ruff>=0.5",
+    "ruff==0.15.15",
     "mypy>=1.10",
 ]
 
@@ -74,6 +74,10 @@ markers = [
 [tool.ruff]
 line-length = 130
 target-version = "py311"
+# Vendored, standalone agent-skill scripts (not part of the shipped package).
+# They keep upstream-faithful patterns ruff dislikes (sys.path setup before
+# imports, re-export aliases), so don't lint or reformat them.
+extend-exclude = ["skills"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "PL", "RUF"]
