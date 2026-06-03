@@ -95,19 +95,13 @@ def register_provider(name: str, cls: type[MemoryProvider]) -> None:
     allowed to use ``""``.
     """
     if not isinstance(name, str):
-        raise TypeError(
-            f"register_provider: name must be a string, got {type(name).__name__}"
-        )
+        raise TypeError(f"register_provider: name must be a string, got {type(name).__name__}")
     if not isinstance(cls, type) or not issubclass(cls, MemoryProvider):
-        raise TypeError(
-            f"register_provider: cls must be a MemoryProvider subclass, got {cls!r}"
-        )
+        raise TypeError(f"register_provider: cls must be a MemoryProvider subclass, got {cls!r}")
     # External callers can't claim "" — that's the noop slot. The noop
     # registration below this function uses _REGISTRY directly.
     if name == "" and cls is not NoopMemoryProvider:
-        raise ValueError(
-            "register_provider: empty name is reserved for NoopMemoryProvider"
-        )
+        raise ValueError("register_provider: empty name is reserved for NoopMemoryProvider")
     _REGISTRY[name] = cls
 
 
@@ -122,10 +116,7 @@ def get_provider(name: str) -> type[MemoryProvider]:
         return _REGISTRY[name]
     except KeyError as e:
         registered = sorted(_REGISTRY)
-        raise KeyError(
-            f"No memory provider registered as {name!r}. "
-            f"Available: {registered!r}"
-        ) from e
+        raise KeyError(f"No memory provider registered as {name!r}. Available: {registered!r}") from e
 
 
 def available_providers() -> list[str]:

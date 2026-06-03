@@ -216,6 +216,7 @@ END;
 # Resolution: where on disk does state.db live?
 # ---------------------------------------------------------------------------
 
+
 def resolve_hermes_home() -> Path:
     """Resolve the deepagent-hermes home directory.
 
@@ -236,15 +237,16 @@ def default_db_path() -> Path:
 # CJK detection (verbatim ported from Hermes)
 # ---------------------------------------------------------------------------
 
+
 def _is_cjk_codepoint(cp: int) -> bool:
     return (
-        0x4E00 <= cp <= 0x9FFF        # CJK Unified Ideographs
-        or 0x3400 <= cp <= 0x4DBF     # CJK Extension A
-        or 0x20000 <= cp <= 0x2A6DF   # CJK Extension B
-        or 0x3000 <= cp <= 0x303F     # CJK Symbols and Punctuation
-        or 0x3040 <= cp <= 0x309F     # Hiragana
-        or 0x30A0 <= cp <= 0x30FF     # Katakana
-        or 0xAC00 <= cp <= 0xD7AF     # Hangul Syllables
+        0x4E00 <= cp <= 0x9FFF  # CJK Unified Ideographs
+        or 0x3400 <= cp <= 0x4DBF  # CJK Extension A
+        or 0x20000 <= cp <= 0x2A6DF  # CJK Extension B
+        or 0x3000 <= cp <= 0x303F  # CJK Symbols and Punctuation
+        or 0x3040 <= cp <= 0x309F  # Hiragana
+        or 0x30A0 <= cp <= 0x30FF  # Katakana
+        or 0xAC00 <= cp <= 0xD7AF  # Hangul Syllables
     )
 
 
@@ -261,6 +263,7 @@ def _count_cjk(text: str) -> int:
 # FTS5 query sanitization (subset of Hermes's logic — enough for our tests
 # and typical agent-generated queries).
 # ---------------------------------------------------------------------------
+
 
 def _sanitize_fts5_query(query: str) -> str:
     """Make a user-typed query safe for FTS5 MATCH.
@@ -282,7 +285,7 @@ def _sanitize_fts5_query(query: str) -> str:
     sanitized = re.sub(r'"[^"]*"', _preserve_quoted, query)
 
     # Drop unmatched FTS5-special chars
-    sanitized = re.sub(r'[+{}()\"^]', " ", sanitized)
+    sanitized = re.sub(r"[+{}()\"^]", " ", sanitized)
 
     # Collapse repeated * and drop leading *
     sanitized = re.sub(r"\*+", "*", sanitized)
@@ -304,6 +307,7 @@ def _sanitize_fts5_query(query: str) -> str:
 # ---------------------------------------------------------------------------
 # Store
 # ---------------------------------------------------------------------------
+
 
 class SqliteFtsStore(BaseStore):
     """SQLite-backed ``BaseStore`` with FTS5 search over messages.
@@ -384,15 +388,11 @@ class SqliteFtsStore(BaseStore):
         # Probe FTS5 availability — the bundled python.org sqlite ships it,
         # but a hand-rolled Python build might not.
         try:
-            cur.execute(
-                "CREATE VIRTUAL TABLE temp._fts5_probe USING fts5(x)"
-            )
+            cur.execute("CREATE VIRTUAL TABLE temp._fts5_probe USING fts5(x)")
             cur.execute("DROP TABLE temp._fts5_probe")
             fts5_available = True
         except sqlite3.OperationalError as exc:
-            logger.warning(
-                "SQLite FTS5 unavailable; session search disabled (%s)", exc
-            )
+            logger.warning("SQLite FTS5 unavailable; session search disabled (%s)", exc)
             fts5_available = False
 
         if fts5_available:
@@ -440,9 +440,7 @@ class SqliteFtsStore(BaseStore):
                         )
                         continue
                 raise
-        raise last_err or sqlite3.OperationalError(
-            "database is locked after max retries"
-        )
+        raise last_err or sqlite3.OperationalError("database is locked after max retries")
 
     # ── journal mode probe (for tests) ──────────────────────────────
 
@@ -493,8 +491,7 @@ class SqliteFtsStore(BaseStore):
 
         def _do(conn: sqlite3.Connection) -> None:
             conn.execute(
-                f"INSERT OR IGNORE INTO sessions ({col_sql}) "
-                f"VALUES ({placeholders})",
+                f"INSERT OR IGNORE INTO sessions ({col_sql}) VALUES ({placeholders})",
                 values,
             )
 
@@ -525,8 +522,7 @@ class SqliteFtsStore(BaseStore):
 
         def _do(conn: sqlite3.Connection) -> None:
             conn.execute(
-                f"UPDATE sessions SET {', '.join(sets)} "
-                f"WHERE id = ? AND ended_at IS NULL",
+                f"UPDATE sessions SET {', '.join(sets)} WHERE id = ? AND ended_at IS NULL",
                 params,
             )
 
@@ -588,14 +584,12 @@ class SqliteFtsStore(BaseStore):
             msg_id = cur.lastrowid
             if num_tool_calls:
                 conn.execute(
-                    "UPDATE sessions SET message_count = message_count + 1, "
-                    "tool_call_count = tool_call_count + ? WHERE id = ?",
+                    "UPDATE sessions SET message_count = message_count + 1, tool_call_count = tool_call_count + ? WHERE id = ?",
                     (num_tool_calls, session_id),
                 )
             else:
                 conn.execute(
-                    "UPDATE sessions SET message_count = message_count + 1 "
-                    "WHERE id = ?",
+                    "UPDATE sessions SET message_count = message_count + 1 WHERE id = ?",
                     (session_id,),
                 )
             return int(msg_id)
@@ -606,9 +600,7 @@ class SqliteFtsStore(BaseStore):
 
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM sessions WHERE id = ?", (session_id,)
-            ).fetchone()
+            row = self._conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         return dict(row) if row else None
 
     def list_recent_sessions(
@@ -646,7 +638,7 @@ class SqliteFtsStore(BaseStore):
                     s.started_at
                 ) AS last_active
             FROM sessions s
-            WHERE {' AND '.join(where)}
+            WHERE {" AND ".join(where)}
             ORDER BY last_active DESC, s.started_at DESC, s.id DESC
             LIMIT ?
         """
@@ -730,13 +722,11 @@ class SqliteFtsStore(BaseStore):
             if not anchor:
                 return {"window": [], "messages_before": 0, "messages_after": 0}
             before_rows = self._conn.execute(
-                "SELECT * FROM messages WHERE session_id = ? AND id <= ? "
-                "ORDER BY id DESC LIMIT ?",
+                "SELECT * FROM messages WHERE session_id = ? AND id <= ? ORDER BY id DESC LIMIT ?",
                 (session_id, around_message_id, window + 1),
             ).fetchall()
             after_rows = self._conn.execute(
-                "SELECT * FROM messages WHERE session_id = ? AND id > ? "
-                "ORDER BY id ASC LIMIT ?",
+                "SELECT * FROM messages WHERE session_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
                 (session_id, around_message_id, window),
             ).fetchall()
         rows = list(reversed(before_rows)) + list(after_rows)
@@ -758,9 +748,7 @@ class SqliteFtsStore(BaseStore):
         """Window + ``bookend_start`` + ``bookend_end`` (first / last
         ``bookend`` user+assistant messages of the session).
         """
-        primitive = self.get_messages_around(
-            session_id, around_message_id, window=window
-        )
+        primitive = self.get_messages_around(session_id, around_message_id, window=window)
         win_rows = primitive["window"]
         empty = {
             "window": [],
@@ -773,10 +761,7 @@ class SqliteFtsStore(BaseStore):
             return empty
 
         keep = {"user", "assistant"}
-        filtered_window = [
-            m for m in win_rows
-            if m.get("id") == around_message_id or m.get("role") in keep
-        ]
+        filtered_window = [m for m in win_rows if m.get("id") == around_message_id or m.get("role") in keep]
         min_id = win_rows[0]["id"]
         max_id = win_rows[-1]["id"]
 
@@ -832,11 +817,7 @@ class SqliteFtsStore(BaseStore):
         excl = list(exclude_sources) if exclude_sources else []
         roles = list(role_filter) if role_filter else []
 
-        use_trigram = (
-            self._trigram_enabled
-            and contains_cjk(cleaned)
-            and _count_cjk(cleaned) >= 3
-        )
+        use_trigram = self._trigram_enabled and contains_cjk(cleaned) and _count_cjk(cleaned) >= 3
         if use_trigram:
             # Quote each non-operator token so % and * are literal
             tokens = cleaned.split()
@@ -874,7 +855,7 @@ class SqliteFtsStore(BaseStore):
             FROM {fts_table}
             JOIN messages m ON m.id = {fts_table}.rowid
             JOIN sessions s ON s.id = m.session_id
-            WHERE {' AND '.join(where)}
+            WHERE {" AND ".join(where)}
             ORDER BY rank
             LIMIT ?
         """
@@ -919,11 +900,7 @@ class SqliteFtsStore(BaseStore):
     def _do_get(self, op: GetOp) -> Item | None:
         namespace = op.namespace
         # ("messages", session_id, role) maps to a single row.
-        if (
-            len(namespace) >= 2
-            and namespace[0] == "messages"
-            and op.key.isdigit()
-        ):
+        if len(namespace) >= 2 and namespace[0] == "messages" and op.key.isdigit():
             session_id = namespace[1]
             role_filter = namespace[2] if len(namespace) >= 3 else None
             with self._lock:
@@ -934,8 +911,7 @@ class SqliteFtsStore(BaseStore):
                     ).fetchone()
                 else:
                     row = self._conn.execute(
-                        "SELECT * FROM messages WHERE id = ? AND session_id = ? "
-                        "AND role = ?",
+                        "SELECT * FROM messages WHERE id = ? AND session_id = ? AND role = ?",
                         (int(op.key), session_id, role_filter),
                     ).fetchone()
             if not row:
@@ -945,14 +921,10 @@ class SqliteFtsStore(BaseStore):
         # ("sessions",) namespace → session metadata row.
         if namespace and namespace[0] == "sessions":
             with self._lock:
-                row = self._conn.execute(
-                    "SELECT * FROM sessions WHERE id = ?", (op.key,)
-                ).fetchone()
+                row = self._conn.execute("SELECT * FROM sessions WHERE id = ?", (op.key,)).fetchone()
             if not row:
                 return None
-            now = datetime.fromtimestamp(
-                row["started_at"] or time.time(), tz=UTC
-            )
+            now = datetime.fromtimestamp(row["started_at"] or time.time(), tz=UTC)
             return Item(
                 value=dict(row),
                 key=op.key,
@@ -966,11 +938,7 @@ class SqliteFtsStore(BaseStore):
         namespace = op.namespace
         if op.value is None:
             # Delete
-            if (
-                len(namespace) >= 2
-                and namespace[0] == "messages"
-                and op.key.isdigit()
-            ):
+            if len(namespace) >= 2 and namespace[0] == "messages" and op.key.isdigit():
                 session_id = namespace[1]
 
                 def _do(conn: sqlite3.Connection) -> None:
@@ -991,10 +959,7 @@ class SqliteFtsStore(BaseStore):
             return
 
         # Write
-        if (
-            len(namespace) >= 2
-            and namespace[0] == "messages"
-        ):
+        if len(namespace) >= 2 and namespace[0] == "messages":
             session_id = namespace[1]
             role = namespace[2] if len(namespace) >= 3 else op.value.get("role")
             self.ensure_session(session_id)
@@ -1028,12 +993,8 @@ class SqliteFtsStore(BaseStore):
             return []
         if not op.query:
             # No FTS5 query → return most recent messages in the namespace.
-            session_filter = (
-                namespace_prefix[1] if len(namespace_prefix) >= 2 else None
-            )
-            role_filter = (
-                namespace_prefix[2] if len(namespace_prefix) >= 3 else None
-            )
+            session_filter = namespace_prefix[1] if len(namespace_prefix) >= 2 else None
+            role_filter = namespace_prefix[2] if len(namespace_prefix) >= 3 else None
             where = ["m.active = 1"]
             params: list[Any] = []
             if session_filter:
@@ -1042,26 +1003,17 @@ class SqliteFtsStore(BaseStore):
             if role_filter:
                 where.append("m.role = ?")
                 params.append(role_filter)
-            sql = (
-                "SELECT * FROM messages m WHERE "
-                + " AND ".join(where)
-                + " ORDER BY m.id DESC LIMIT ? OFFSET ?"
-            )
+            sql = "SELECT * FROM messages m WHERE " + " AND ".join(where) + " ORDER BY m.id DESC LIMIT ? OFFSET ?"
             params.extend([op.limit, op.offset])
             with self._lock:
                 rows = self._conn.execute(sql, params).fetchall()
-            return [
-                _row_to_search_item(row, namespace_prefix, score=None)
-                for row in rows
-            ]
+            return [_row_to_search_item(row, namespace_prefix, score=None) for row in rows]
 
         # FTS5 query path
         matches = self.search_messages(
             op.query,
             limit=op.limit + op.offset,
-            role_filter=(
-                [namespace_prefix[2]] if len(namespace_prefix) >= 3 else None
-            ),
+            role_filter=([namespace_prefix[2]] if len(namespace_prefix) >= 3 else None),
         )
         # Filter by session_id if present in the prefix.
         if len(namespace_prefix) >= 2:
@@ -1099,17 +1051,11 @@ class SqliteFtsStore(BaseStore):
             )
         return results
 
-    def _do_list_namespaces(
-        self, op: ListNamespacesOp
-    ) -> list[tuple[str, ...]]:
+    def _do_list_namespaces(self, op: ListNamespacesOp) -> list[tuple[str, ...]]:
         match_conds = list(op.match_conditions or ())
         with self._lock:
-            session_rows = self._conn.execute(
-                "SELECT id FROM sessions ORDER BY started_at DESC"
-            ).fetchall()
-            role_rows = self._conn.execute(
-                "SELECT DISTINCT session_id, role FROM messages"
-            ).fetchall()
+            session_rows = self._conn.execute("SELECT id FROM sessions ORDER BY started_at DESC").fetchall()
+            role_rows = self._conn.execute("SELECT DISTINCT session_id, role FROM messages").fetchall()
         ns_set: set[tuple[str, ...]] = set()
         for r in session_rows:
             ns_set.add(("messages", r["id"]))
@@ -1174,9 +1120,7 @@ def _hydrate_message(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     return msg
 
 
-def _row_to_item(
-    row: sqlite3.Row, namespace: tuple[str, ...]
-) -> Item:
+def _row_to_item(row: sqlite3.Row, namespace: tuple[str, ...]) -> Item:
     ts = row["timestamp"] or time.time()
     when = datetime.fromtimestamp(ts, tz=UTC)
     value = _hydrate_message(row)
@@ -1199,9 +1143,7 @@ def _row_to_search_item(
     when = datetime.fromtimestamp(ts, tz=UTC)
     value = _hydrate_message(row)
     role = value.get("role") or ""
-    session_id = value.get("session_id") or (
-        namespace_prefix[1] if len(namespace_prefix) >= 2 else ""
-    )
+    session_id = value.get("session_id") or (namespace_prefix[1] if len(namespace_prefix) >= 2 else "")
     ns: tuple[str, ...] = ("messages", session_id, role)
     return SearchItem(
         namespace=ns,

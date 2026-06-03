@@ -102,9 +102,7 @@ def register_deliverer(cls: type[Deliverer]) -> type[Deliverer]:
     """
     name = getattr(cls, "name", None)
     if not name or not isinstance(name, str):
-        raise ValueError(
-            f"Deliverer {cls.__name__} must set a non-empty class-level 'name'"
-        )
+        raise ValueError(f"Deliverer {cls.__name__} must set a non-empty class-level 'name'")
     _REGISTRY[name] = cls
     return cls
 
@@ -251,9 +249,7 @@ class AgentMailDeliverer(Deliverer):
             status = resp.status_code
             body = resp.text
             if status >= 400:
-                raise RuntimeError(
-                    f"AgentMail API call failed: HTTP {status} — {body}"
-                )
+                raise RuntimeError(f"AgentMail API call failed: HTTP {status} — {body}")
             return None
 
         # urllib fallback
@@ -271,9 +267,7 @@ class AgentMailDeliverer(Deliverer):
                 body = e.read().decode("utf-8", errors="replace")
             except Exception:
                 pass
-            raise RuntimeError(
-                f"AgentMail API call failed: HTTP {e.code} — {body}"
-            ) from e
+            raise RuntimeError(f"AgentMail API call failed: HTTP {e.code} — {body}") from e
 
 
 __all__ = [

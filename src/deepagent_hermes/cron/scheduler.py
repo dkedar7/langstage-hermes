@@ -70,9 +70,7 @@ def _tick_lock() -> Iterator[None]:
         try:
             lock.acquire()
         except Timeout as e:
-            raise RuntimeError(
-                f"Another cron daemon already holds {lock_path}.flock"
-            ) from e
+            raise RuntimeError(f"Another cron daemon already holds {lock_path}.flock") from e
         try:
             yield
         finally:
@@ -88,10 +86,7 @@ def _tick_lock() -> Iterator[None]:
     try:
         fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError as e:  # pragma: no cover - integration path
-        raise RuntimeError(
-            f"Stale or active lockfile at {lock_path}. "
-            "Remove it if no daemon is running."
-        ) from e
+        raise RuntimeError(f"Stale or active lockfile at {lock_path}. Remove it if no daemon is running.") from e
     try:
         os.write(fd, str(os.getpid()).encode())
         os.close(fd)
@@ -123,9 +118,7 @@ def _run_script(script_path: str, *, timeout: int = 300) -> tuple[bool, str]:
         return False, f"script not found: {candidate}"
 
     is_shell = candidate.suffix.lower() in {".sh", ".bash"}
-    cmd: list[str] = (
-        ["bash", str(candidate)] if is_shell else [sys.executable, str(candidate)]
-    )
+    cmd: list[str] = ["bash", str(candidate)] if is_shell else [sys.executable, str(candidate)]
     try:
         proc = subprocess.run(
             cmd,
@@ -153,8 +146,7 @@ def _build_cron_response(job: dict[str, Any], *, prompt: str) -> str:
         from deepagent_hermes.agent import create_hermes_agent
     except ImportError as e:
         logger.warning(
-            "Cron job %s: deepagent_hermes.agent not available (%s). "
-            "Returning placeholder response.",
+            "Cron job %s: deepagent_hermes.agent not available (%s). Returning placeholder response.",
             job.get("id"),
             e,
         )
@@ -205,11 +197,7 @@ def _build_cron_response(job: dict[str, Any], *, prompt: str) -> str:
             return content
         if isinstance(content, list):
             # Anthropic-style content blocks → concat text parts.
-            text = "".join(
-                part.get("text", "")
-                for part in content
-                if isinstance(part, dict) and part.get("type") == "text"
-            )
+            text = "".join(part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text")
             if text.strip():
                 return text
     return ""
@@ -254,9 +242,7 @@ def _deliver_output(
         deliverer_name = "local"
     deliverer_cls = get_deliverer(deliverer_name)
     if deliverer_cls is None:
-        logger.warning(
-            "cron: no deliverer registered for %r; using local", deliverer_name
-        )
+        logger.warning("cron: no deliverer registered for %r; using local", deliverer_name)
         deliverer_cls = get_deliverer("local")
         assert deliverer_cls is not None, "LocalDeliverer should always be registered"
     try:
@@ -291,9 +277,7 @@ def run_job(job: dict[str, Any]) -> dict[str, Any]:
             success = ok
             if not ok:
                 error = body
-            doc = _build_output_doc(
-                job, started_at=started, body=body, mode="no_agent"
-            )
+            doc = _build_output_doc(job, started_at=started, body=body, mode="no_agent")
             output_path = cron_jobs.save_job_output(job_id, doc)
             silent = not body.strip()
             if not silent and ok:

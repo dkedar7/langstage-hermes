@@ -49,9 +49,7 @@ def test_initial_state_respects_max_iterations():
 
 
 def test_initial_state_subagent_lineage():
-    state = initial_hermes_state(
-        "sub-001", max_iterations=50, parent_session_id="root-007"
-    )
+    state = initial_hermes_state("sub-001", max_iterations=50, parent_session_id="root-007")
     assert state["session_id"] == "sub-001"
     assert state["parent_session_id"] == "root-007"
     assert state["iteration_budget_remaining"] == 50
@@ -69,9 +67,7 @@ def test_hermes_state_extends_agent_state():
     """
     base_fields = set(AgentState.__annotations__.keys())
     child_fields = set(HermesState.__annotations__.keys())
-    assert base_fields.issubset(child_fields), (
-        f"missing AgentState fields: {base_fields - child_fields}"
-    )
+    assert base_fields.issubset(child_fields), f"missing AgentState fields: {base_fields - child_fields}"
 
 
 def test_hermes_state_annotation_keys_cover_spec_fields():
@@ -128,6 +124,4 @@ def test_private_state_attrs_annotated():
         if not metadata:
             # Already an Annotated (NotRequired stripped)
             metadata = get_args(ann)[1:] if get_args(ann) else ()
-        assert any(m is PrivateStateAttr for m in metadata), (
-            f"field {fname!r} missing PrivateStateAttr; metadata={metadata!r}"
-        )
+        assert any(m is PrivateStateAttr for m in metadata), f"field {fname!r} missing PrivateStateAttr; metadata={metadata!r}"

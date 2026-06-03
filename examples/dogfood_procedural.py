@@ -65,35 +65,27 @@ print("top 5:", top)
 PROMPTS = [
     # 0. Drop both scripts into the workspace via the agent.
     f"Save this script to slow1.py and then we'll work with it:\n\n```python\n{SLOW_SCRIPT_1}```",
-
     # 1. Procedural step 1.
     "I think slow1.py is slow. Walk me through how you'd investigate it: "
     "your investigation process, not the answer yet. Be specific about which "
     "tools/commands you'd run.",
-
     # 2. Procedural step 2 — execute the investigation.
     "OK, do the investigation. Read the file, identify the hotspot from first "
     "principles, then propose ONE concrete fix. Don't apply the fix.",
-
     # 3. Apply.
     "Apply the fix and save it back to slow1.py.",
-
     # 4. Repeat the pattern on a different script — this is the key reinforcement
     # the review subagent should pick up as "procedure to crystallize".
     f"Now do the same thing for this other script. Save it to slow2.py first, "
     f"then run your investigation procedure:\n\n```python\n{SLOW_SCRIPT_2}```",
-
     # 5. Make the pattern explicit.
     "Across slow1 and slow2, what's your repeatable investigation procedure? "
     "Describe it as steps a less-experienced engineer could follow.",
-
     # 6. Reinforce + invite persistence.
     "Good. We're going to do this kind of investigation a lot. If you have "
     "tools to persist that procedure so future sessions start with it, use them now.",
-
     # 7. Light test of recall in a new context.
-    "If I bring you a third slow script tomorrow, what's the first thing "
-    "you'd do? Keep it brief.",
+    "If I bring you a third slow script tomorrow, what's the first thing you'd do? Keep it brief.",
 ]
 
 

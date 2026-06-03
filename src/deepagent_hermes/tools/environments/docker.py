@@ -125,9 +125,7 @@ class DockerEnvironment(BaseEnvironment):
         # Image + optional bind mount come from env vars per the spec. Read
         # once at construction so a test that sets the env then constructs
         # gets a deterministic image, even if the env is later mutated.
-        self._image = os.environ.get(
-            "DEEPAGENT_HERMES_DOCKER_IMAGE", "python:3.13-slim"
-        )
+        self._image = os.environ.get("DEEPAGENT_HERMES_DOCKER_IMAGE", "python:3.13-slim")
         workspace = os.environ.get("DEEPAGENT_HERMES_DOCKER_WORKSPACE")
         self._workspace_host: str | None = workspace if workspace else None
 
@@ -171,8 +169,7 @@ class DockerEnvironment(BaseEnvironment):
         # with a name conflict. If it's stopped we let it stay stopped; the
         # caller can ``cleanup()`` and reconstruct with a fresh session id.
         probe = subprocess.run(
-            ["docker", "ps", "-a", "--filter", f"name=^{re.escape(self._container_name)}$",
-             "--format", "{{.ID}}"],
+            ["docker", "ps", "-a", "--filter", f"name=^{re.escape(self._container_name)}$", "--format", "{{.ID}}"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -184,8 +181,12 @@ class DockerEnvironment(BaseEnvironment):
             return
 
         cmd: list[str] = [
-            "docker", "run", "-d", "--rm",
-            "--name", self._container_name,
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            self._container_name,
         ]
         if self._workspace_host:
             # Resolve to absolute path; Docker rejects relative ``-v`` sources.
@@ -196,15 +197,15 @@ class DockerEnvironment(BaseEnvironment):
         # Image pull on first run can be slow; give it a generous timeout.
         # 180s covers a clean pull of python:3.13-slim on most home connections.
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=180,
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=180,
         )
         if result.returncode != 0:
             # Surface stderr to the caller — without it debugging a missing
             # image / daemon-down condition is a guessing game.
-            raise RuntimeError(
-                f"docker run failed (exit {result.returncode}): "
-                f"{result.stderr.strip() or result.stdout.strip()}"
-            )
+            raise RuntimeError(f"docker run failed (exit {result.returncode}): {result.stderr.strip() or result.stdout.strip()}")
         self._container_started = True
 
     def init_session(self) -> None:
@@ -244,10 +245,7 @@ class DockerEnvironment(BaseEnvironment):
             # base class invoking _run_bash before init_session in some future
             # refactor. Better an explicit error here than a confusing
             # "container not found" from docker exec.
-            raise RuntimeError(
-                "DockerEnvironment._run_bash called before container start; "
-                "call init_session() first."
-            )
+            raise RuntimeError("DockerEnvironment._run_bash called before container start; call init_session() first.")
 
         exec_cmd: list[str] = ["docker", "exec"]
         if stdin_data is not None:
@@ -267,10 +265,9 @@ class DockerEnvironment(BaseEnvironment):
         # No Windows equivalent we care about — CREATE_NO_WINDOW just hides
         # the console flash.
         import sys as _sys
+
         if _sys.platform == "win32":
-            popen_kwargs["creationflags"] = getattr(
-                subprocess, "CREATE_NO_WINDOW", 0
-            )
+            popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         else:
             popen_kwargs["preexec_fn"] = os.setsid  # type: ignore[attr-defined]
 
@@ -342,9 +339,10 @@ class DockerEnvironment(BaseEnvironment):
         if self._container_started:
             try:
                 cat = subprocess.run(
-                    ["docker", "exec", self._container_name,
-                     "cat", _CONTAINER_CWD],
-                    capture_output=True, text=True, timeout=10,
+                    ["docker", "exec", self._container_name, "cat", _CONTAINER_CWD],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
                 if cat.returncode == 0:
                     val = cat.stdout.strip()
@@ -363,9 +361,10 @@ class DockerEnvironment(BaseEnvironment):
         if self._container_started:
             try:
                 cat = subprocess.run(
-                    ["docker", "exec", self._container_name,
-                     "cat", _CONTAINER_CWD],
-                    capture_output=True, text=True, timeout=10,
+                    ["docker", "exec", self._container_name, "cat", _CONTAINER_CWD],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
                 if cat.returncode == 0:
                     val = cat.stdout.strip()

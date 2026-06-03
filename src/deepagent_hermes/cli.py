@@ -83,13 +83,8 @@ def _try_import_agent() -> tuple[Any | None, str | None]:
     try:
         agent_mod = importlib.import_module("deepagent_hermes.agent")
     except ImportError as e:
-        return None, (
-            "Agent module not yet integrated "
-            f"(import error: {e}). Run 'pytest' to verify subsystems work."
-        )
-    factory = getattr(agent_mod, "create_hermes_agent", None) or getattr(
-        agent_mod, "graph", None
-    )
+        return None, (f"Agent module not yet integrated (import error: {e}). Run 'pytest' to verify subsystems work.")
+    factory = getattr(agent_mod, "create_hermes_agent", None) or getattr(agent_mod, "graph", None)
     if factory is None:
         return None, (
             "deepagent_hermes.agent loaded but exposes neither create_hermes_agent "
@@ -223,6 +218,7 @@ def _dispatch_slash(line: str, state: dict[str, Any]) -> bool:
 
 # Individual slash command handlers — each returns ``True`` to terminate REPL.
 
+
 def _slash_quit(args: str, state: dict[str, Any]) -> bool:
     return True
 
@@ -251,10 +247,7 @@ def _slash_reset(args: str, state: dict[str, Any]) -> bool:
 
 def _slash_model(args: str, state: dict[str, Any]) -> bool:
     if not args.strip():
-        click.echo(
-            "Current model: "
-            f"{state.get('model_override') or state['cfg'].model_default}"
-        )
+        click.echo(f"Current model: {state.get('model_override') or state['cfg'].model_default}")
         return False
     state["model_override"] = args.strip()
     click.echo(f"(model override set: {args.strip()})")
@@ -449,9 +442,9 @@ def cron_list() -> None:
         return
     for job in items:
         click.echo(
-            f"  {job['id']}  {job.get('name','?'):<30} "
-            f"[{job.get('schedule_display','?'):<20}] "
-            f"state={job.get('state','?'):<10} "
+            f"  {job['id']}  {job.get('name', '?'):<30} "
+            f"[{job.get('schedule_display', '?'):<20}] "
+            f"state={job.get('state', '?'):<10} "
             f"next={job.get('next_run_at') or '—'}"
         )
 
@@ -461,9 +454,7 @@ def cron_list() -> None:
 @click.option("--schedule", "schedule_expr", required=True, help="Schedule expression.")
 @click.option("--name", default=None, help="Friendly name (defaults to first 50 chars of prompt).")
 @click.option("--model", default=None, help="Per-job model override.")
-def cron_create(
-    prompt: str, schedule_expr: str, name: str | None, model: str | None
-) -> None:
+def cron_create(prompt: str, schedule_expr: str, name: str | None, model: str | None) -> None:
     """Create a new cron job."""
     from deepagent_hermes.cron.jobs import create_job
 
@@ -594,8 +585,7 @@ def plugins_list() -> None:
         flag = "on " if p.enabled else "off"
         click.echo(
             f"  [{flag}] {p.name:<24} ({p.source:<11}) "
-            f"v{p.version or '?':<8} {p.description or ''}"
-            + (f"  — {p.error}" if p.error else "")
+            f"v{p.version or '?':<8} {p.description or ''}" + (f"  — {p.error}" if p.error else "")
         )
 
 
@@ -649,12 +639,8 @@ def doctor() -> None:
         click.echo(f"  HERMES_HOME ({home}): NOT writable — {e}")
 
     cron_dir = home / "cron"
-    click.echo(
-        f"  cron dir: {'exists' if cron_dir.exists() else 'absent (will be created on first use)'}"
-    )
-    click.echo(
-        f"  shutil.which('bash'): {shutil.which('bash') or 'not on PATH (no_agent shell scripts will fail)'}"
-    )
+    click.echo(f"  cron dir: {'exists' if cron_dir.exists() else 'absent (will be created on first use)'}")
+    click.echo(f"  shutil.which('bash'): {shutil.which('bash') or 'not on PATH (no_agent shell scripts will fail)'}")
 
 
 # ── entry point ────────────────────────────────────────────────────

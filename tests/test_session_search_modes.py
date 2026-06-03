@@ -41,43 +41,27 @@ def seeded_store(store: SqliteFtsStore) -> tuple[SqliteFtsStore, dict[str, int]]
     ids: dict[str, int] = {}
 
     store.ensure_session("sess-a", source="user", title="Docker setup chat")
-    ids["first_a"] = store.record_message(
-        "sess-a", "user", "set up docker compose for the api"
-    )
+    ids["first_a"] = store.record_message("sess-a", "user", "set up docker compose for the api")
     ids["docker_assistant"] = store.record_message(
         "sess-a",
         "assistant",
         "I'll write docker-compose.yml with the api + redis services",
     )
     for i in range(8):
-        store.record_message(
-            "sess-a", "user", f"tweak {i}: dockerfile layer caching"
-        )
-        store.record_message(
-            "sess-a", "assistant", f"applied tweak {i} to the dockerfile"
-        )
-    ids["docker_resolution"] = store.record_message(
-        "sess-a", "assistant", "all dockerfile tweaks merged, deploy ready"
-    )
+        store.record_message("sess-a", "user", f"tweak {i}: dockerfile layer caching")
+        store.record_message("sess-a", "assistant", f"applied tweak {i} to the dockerfile")
+    ids["docker_resolution"] = store.record_message("sess-a", "assistant", "all dockerfile tweaks merged, deploy ready")
 
     store.ensure_session("sess-b", source="user", title="Kubernetes deploy")
     store.record_message("sess-b", "user", "deploy on kubernetes")
-    store.record_message(
-        "sess-b", "assistant", "kubernetes manifests written for the cluster"
-    )
+    store.record_message("sess-b", "assistant", "kubernetes manifests written for the cluster")
     for i in range(6):
-        store.record_message(
-            "sess-b", "user", f"scale replicas to {i + 1} on the cluster"
-        )
-        store.record_message(
-            "sess-b", "assistant", f"replicas now {i + 1} in kubernetes"
-        )
+        store.record_message("sess-b", "user", f"scale replicas to {i + 1} on the cluster")
+        store.record_message("sess-b", "assistant", f"replicas now {i + 1} in kubernetes")
 
     # Lineage: sess-old → sess-new (compression-style split)
     store.ensure_session("sess-old", source="user", title="Long context")
-    store.record_message(
-        "sess-old", "user", "compare docker swarm vs kubernetes scheduler"
-    )
+    store.record_message("sess-old", "user", "compare docker swarm vs kubernetes scheduler")
     store.record_message(
         "sess-old",
         "assistant",
@@ -97,9 +81,7 @@ def seeded_store(store: SqliteFtsStore) -> tuple[SqliteFtsStore, dict[str, int]]
 
     # Background reflection-fork session — should be hidden by default.
     store.ensure_session("sess-bg", source="tool", title="bg review")
-    store.record_message(
-        "sess-bg", "user", "internal review: reflect on docker setup decisions"
-    )
+    store.record_message("sess-bg", "user", "internal review: reflect on docker setup decisions")
 
     return store, ids
 
@@ -109,9 +91,7 @@ def seeded_store(store: SqliteFtsStore) -> tuple[SqliteFtsStore, dict[str, int]]
 # ---------------------------------------------------------------------------
 
 
-def test_discovery_returns_relevant_sessions(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_discovery_returns_relevant_sessions(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, _ = seeded_store
     out = run_session_search(store, query="docker-compose.yml")
     assert "## session_search (discover)" in out
@@ -121,9 +101,7 @@ def test_discovery_returns_relevant_sessions(
     assert "← anchor" in out
 
 
-def test_discovery_emits_bookends_for_mid_session_match(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_discovery_emits_bookends_for_mid_session_match(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     """A query that only matches a row near the END of the session must
     produce a non-empty ``bookend_start`` (opening of conversation)."""
     store, _ = seeded_store
@@ -134,9 +112,7 @@ def test_discovery_emits_bookends_for_mid_session_match(
     assert "bookend_start" in out
 
 
-def test_discovery_dedupes_lineage(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_discovery_dedupes_lineage(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, _ = seeded_store
     out = run_session_search(store, query="kubernetes")
     # sess-old + sess-new are one lineage. They should NOT both surface
@@ -149,18 +125,14 @@ def test_discovery_dedupes_lineage(
     assert (n_root_headers + n_child_headers) <= 1, out
 
 
-def test_discovery_excludes_tool_sources_by_default(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_discovery_excludes_tool_sources_by_default(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, _ = seeded_store
     out = run_session_search(store, query="reflect")
     # sess-bg is tagged source='tool' and must be filtered out
     assert "sess-bg" not in out
 
 
-def test_discovery_excludes_current_session_lineage(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_discovery_excludes_current_session_lineage(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, _ = seeded_store
     out = run_session_search(
         store,
@@ -171,17 +143,13 @@ def test_discovery_excludes_current_session_lineage(
     assert "Session `sess-a`" not in out
 
 
-def test_discovery_empty_query_falls_through_to_browse(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_discovery_empty_query_falls_through_to_browse(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, _ = seeded_store
     out = run_session_search(store, query="   ")
     assert "(browse)" in out
 
 
-def test_discovery_no_matches_returns_friendly_message(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_discovery_no_matches_returns_friendly_message(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, _ = seeded_store
     out = run_session_search(store, query="quetzalcoatl-flavoured zarf")
     assert "No matching sessions found" in out
@@ -204,9 +172,7 @@ def test_discovery_handles_cjk(store: SqliteFtsStore) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_scroll_returns_window_around_anchor(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_scroll_returns_window_around_anchor(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, ids = seeded_store
     anchor = ids["docker_assistant"]
     out = run_session_search(
@@ -221,9 +187,7 @@ def test_scroll_returns_window_around_anchor(
     assert "← anchor" in out
 
 
-def test_scroll_clamps_window(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_scroll_clamps_window(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, ids = seeded_store
     anchor = ids["docker_assistant"]
     out = run_session_search(
@@ -235,9 +199,7 @@ def test_scroll_clamps_window(
     assert "±20 window" in out
 
 
-def test_scroll_inside_current_session_is_rejected(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_scroll_inside_current_session_is_rejected(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, ids = seeded_store
     out = run_session_search(
         store,
@@ -249,16 +211,12 @@ def test_scroll_inside_current_session_is_rejected(
     assert "rejected" in out.lower()
 
 
-def test_scroll_rejects_anchor_in_lineage(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_scroll_rejects_anchor_in_lineage(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     """If the active session is sess-new, scrolling into sess-old (its
     parent) should also be rejected — same lineage, same context."""
     store, _ = seeded_store
     # Take an arbitrary message id in sess-old
-    row = store._conn.execute(
-        "SELECT id FROM messages WHERE session_id = 'sess-old' LIMIT 1"
-    ).fetchone()
+    row = store._conn.execute("SELECT id FROM messages WHERE session_id = 'sess-old' LIMIT 1").fetchone()
     out = run_session_search(
         store,
         session_id="sess-old",
@@ -280,9 +238,7 @@ def test_scroll_unknown_session_returns_error(
     assert "not found" in out
 
 
-def test_scroll_takes_precedence_over_query(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_scroll_takes_precedence_over_query(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     """Spec: SCROLL beats DISCOVERY when both look set."""
     store, ids = seeded_store
     out = run_session_search(
@@ -300,9 +256,7 @@ def test_scroll_takes_precedence_over_query(
 # ---------------------------------------------------------------------------
 
 
-def test_browse_lists_recent_root_sessions(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_browse_lists_recent_root_sessions(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, _ = seeded_store
     out = run_session_search(store)
     assert "## session_search (browse)" in out
@@ -314,17 +268,13 @@ def test_browse_lists_recent_root_sessions(
     assert "### sess-new" not in out
 
 
-def test_browse_hides_tool_sources(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_browse_hides_tool_sources(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, _ = seeded_store
     out = run_session_search(store)
     assert "### sess-bg" not in out
 
 
-def test_browse_skips_current_session(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_browse_skips_current_session(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, _ = seeded_store
     out = run_session_search(store, current_session_id="sess-a")
     assert "### sess-a" not in out
@@ -340,9 +290,7 @@ def test_browse_empty_store(store: SqliteFtsStore) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_make_session_search_tool_invocation(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_make_session_search_tool_invocation(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, ids = seeded_store
     tool = make_session_search_tool(store)
     result = tool.invoke(
@@ -356,12 +304,8 @@ def test_make_session_search_tool_invocation(
     assert f"#{ids['docker_assistant']}" in result
 
 
-def test_tool_uses_current_session_id_getter(
-    seeded_store: tuple[SqliteFtsStore, dict[str, int]]
-) -> None:
+def test_tool_uses_current_session_id_getter(seeded_store: tuple[SqliteFtsStore, dict[str, int]]) -> None:
     store, _ = seeded_store
-    tool = make_session_search_tool(
-        store, current_session_id_getter=lambda: "sess-a"
-    )
+    tool = make_session_search_tool(store, current_session_id_getter=lambda: "sess-a")
     result = tool.invoke({"query": "docker"})
     assert "sess-a" not in result.split("###", 1)[-1]

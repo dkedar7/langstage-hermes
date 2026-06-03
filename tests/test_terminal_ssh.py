@@ -26,6 +26,7 @@ def _install_fake_paramiko(monkeypatch) -> MagicMock:
     time, so we install our mock before constructing the env.
     """
     fake = MagicMock(name="paramiko")
+
     # paramiko.SSHException needs to be an actual exception type — the
     # SshEnvironment catches it. MagicMock's auto-attrs are not real classes.
     class _FakeSSHException(Exception):
@@ -66,6 +67,7 @@ def _exec_command_returning(exit_status: int = 0, output: bytes = b"") -> MagicM
 
     Each call gets a fresh tuple so multi-command tests don't share state.
     """
+
     def _factory(*_args, **_kwargs):
         channel = _make_channel_mock(exit_status=exit_status)
         stdin = MagicMock(name="stdin")
@@ -187,21 +189,14 @@ def test_cwd_persists_via_marker_file(monkeypatch):
 
     # Look at the 2nd user-execute (after snapshot). Both should reference the
     # marker file via `cat <cwd_path>`.
-    user_calls = [
-        c for c in client_instance.exec_command.call_args_list
-        if "eval " in (c.args[0] if c.args else "")
-    ]
+    user_calls = [c for c in client_instance.exec_command.call_args_list if "eval " in (c.args[0] if c.args else "")]
     assert len(user_calls) >= 2, f"expected 2 user execs, got {len(user_calls)}"
 
     marker = "deepagent-hermes-cwd-t4"
     for c in user_calls:
         cmd = c.args[0]
-        assert "cat " in cmd and marker in cmd, (
-            f"call should read cwd marker via cat, got: {cmd!r}"
-        )
-        assert "pwd -P" in cmd and marker in cmd, (
-            f"call should write cwd marker via pwd -P, got: {cmd!r}"
-        )
+        assert "cat " in cmd and marker in cmd, f"call should read cwd marker via cat, got: {cmd!r}"
+        assert "pwd -P" in cmd and marker in cmd, f"call should write cwd marker via pwd -P, got: {cmd!r}"
 
 
 # ── 5. cleanup closes the client ─────────────────────────────────────
@@ -236,6 +231,7 @@ def test_paramiko_missing_raises_helpful(monkeypatch):
 
     # Also wipe the cached module-level _paramiko so the check picks up our None.
     from deepagent_hermes.tools.environments import ssh as ssh_mod
+
     monkeypatch.setattr(ssh_mod, "_paramiko", None, raising=False)
 
     with pytest.raises(ImportError, match=r"pip install.*deepagent-hermes\[ssh\]"):

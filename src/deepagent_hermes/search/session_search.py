@@ -54,9 +54,7 @@ def _fmt_ts(ts: float | int | None) -> str:
     if ts is None:
         return "unknown"
     try:
-        return datetime.fromtimestamp(float(ts)).strftime(
-            "%B %d, %Y at %I:%M %p"
-        )
+        return datetime.fromtimestamp(float(ts)).strftime("%B %d, %Y at %I:%M %p")
     except (ValueError, OSError, OverflowError):
         return str(ts)
 
@@ -99,9 +97,7 @@ def _render_message(msg: dict[str, Any], *, anchor_id: int | None = None) -> str
     return f"- **{role}** (#{mid}){tool_part}{marker}: {body}"
 
 
-def _join_messages(
-    messages: list[dict[str, Any]], *, anchor_id: int | None = None
-) -> str:
+def _join_messages(messages: list[dict[str, Any]], *, anchor_id: int | None = None) -> str:
     return "\n".join(_render_message(m, anchor_id=anchor_id) for m in messages)
 
 
@@ -163,16 +159,12 @@ def _browse(
     exclude_sources: list[str],
 ) -> str:
     try:
-        sessions = store.list_recent_sessions(
-            limit=20, exclude_sources=exclude_sources
-        )
+        sessions = store.list_recent_sessions(limit=20, exclude_sources=exclude_sources)
     except Exception as exc:  # pragma: no cover — defensive
         logger.exception("session_search browse failed")
         return f"## session_search (browse)\n\nError loading sessions: {exc}"
 
-    current_root = (
-        store.resolve_to_lineage_root(current_session_id) if current_session_id else ""
-    )
+    current_root = store.resolve_to_lineage_root(current_session_id) if current_session_id else ""
     surfaced: list[dict[str, Any]] = []
     for s in sessions:
         if current_root and s["id"] == current_root:
@@ -182,10 +174,7 @@ def _browse(
             break
 
     if not surfaced:
-        return (
-            "## session_search (browse)\n\n"
-            "No prior sessions on disk yet.\n"
-        )
+        return "## session_search (browse)\n\nNo prior sessions on disk yet.\n"
 
     lines = [
         "## session_search (browse)",
@@ -242,21 +231,12 @@ def _scroll(
 
     meta = store.get_session(session_id)
     if not meta:
-        return (
-            "## session_search (scroll)\n\n"
-            f"**Error**: session_id `{session_id}` not found.\n"
-        )
+        return f"## session_search (scroll)\n\n**Error**: session_id `{session_id}` not found.\n"
 
-    view = store.get_messages_around(
-        session_id, around_message_id, window=window
-    )
+    view = store.get_messages_around(session_id, around_message_id, window=window)
     messages = view["window"]
     if not messages:
-        return (
-            "## session_search (scroll)\n\n"
-            f"**Error**: message #{around_message_id} not in session "
-            f"`{session_id}`.\n"
-        )
+        return f"## session_search (scroll)\n\n**Error**: message #{around_message_id} not in session `{session_id}`.\n"
 
     title = meta.get("title") or "(no title)"
     lines = [
@@ -275,10 +255,7 @@ def _scroll(
     if view["messages_after"] < window:
         lines.append("_(at session end — no later messages)_")
     lines.append("")
-    lines.append(
-        "To page further: pass the first/last message id back as "
-        "`around_message_id` to walk backward/forward."
-    )
+    lines.append("To page further: pass the first/last message id back as `around_message_id` to walk backward/forward.")
     return "\n".join(lines)
 
 
@@ -304,14 +281,9 @@ def _discover(
         return f"## session_search (discover)\n\nFTS5 query failed: {exc}\n"
 
     if not raw_hits:
-        return (
-            f"## session_search (discover)\n\n"
-            f"**Query**: `{query}`\n\nNo matching sessions found.\n"
-        )
+        return f"## session_search (discover)\n\n**Query**: `{query}`\n\nNo matching sessions found.\n"
 
-    current_root = (
-        store.resolve_to_lineage_root(current_session_id) if current_session_id else ""
-    )
+    current_root = store.resolve_to_lineage_root(current_session_id) if current_session_id else ""
 
     # Dedupe by lineage root; preserve the raw hit's owning session_id so
     # the anchored window pairs validly with the FTS match id.
@@ -344,13 +316,9 @@ def _discover(
         owning_sid = hit["session_id"]
         msg_id = hit["id"]
         try:
-            view = store.get_anchored_view(
-                owning_sid, msg_id, window=5, bookend=3
-            )
+            view = store.get_anchored_view(owning_sid, msg_id, window=5, bookend=3)
         except Exception as exc:
-            logger.warning(
-                "get_anchored_view failed for %s/%s: %s", owning_sid, msg_id, exc
-            )
+            logger.warning("get_anchored_view failed for %s/%s: %s", owning_sid, msg_id, exc)
             continue
         session_meta = store.get_session(lineage_root) or {}
         title = session_meta.get("title") or hit.get("title") or "(no title)"
@@ -362,12 +330,8 @@ def _discover(
         sections.append(f"### Session `{owning_sid}` — {title}")
         if lineage_root != owning_sid:
             sections.append(f"*lineage root*: `{lineage_root}`")
-        sections.append(
-            f"- when: {when}  source: `{source}`  model: `{model}`"
-        )
-        sections.append(
-            f"- match: **{hit.get('role') or '?'}** (#{msg_id}) — {snippet}"
-        )
+        sections.append(f"- when: {when}  source: `{source}`  model: `{model}`")
+        sections.append(f"- match: **{hit.get('role') or '?'}** (#{msg_id}) — {snippet}")
 
         if view.get("bookend_start"):
             sections.append("")
@@ -376,10 +340,7 @@ def _discover(
 
         if view.get("window"):
             sections.append("")
-            sections.append(
-                f"**window** (±5 around match; {view['messages_before']} before, "
-                f"{view['messages_after']} after):"
-            )
+            sections.append(f"**window** (±5 around match; {view['messages_before']} before, {view['messages_after']} after):")
             sections.append(_join_messages(view["window"], anchor_id=msg_id))
 
         if view.get("bookend_end"):
@@ -389,8 +350,7 @@ def _discover(
 
         sections.append("")
         sections.append(
-            f"_To read more: call `session_search(session_id=\"{owning_sid}\", "
-            f"around_message_id={msg_id}, window=10)`._"
+            f'_To read more: call `session_search(session_id="{owning_sid}", around_message_id={msg_id}, window=10)`._'
         )
         sections.append("")
     return "\n".join(sections)

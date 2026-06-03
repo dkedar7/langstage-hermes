@@ -89,8 +89,7 @@ def test_six_message_conversation_gets_four_markers():
     tagged_indices = [
         i
         for i, msg in enumerate(new_request.messages)
-        if isinstance(msg.content, list)
-        and any(isinstance(b, dict) and "cache_control" in b for b in msg.content)
+        if isinstance(msg.content, list) and any(isinstance(b, dict) and "cache_control" in b for b in msg.content)
     ]
     assert tagged_indices == [3, 4, 5]
 

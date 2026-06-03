@@ -19,9 +19,7 @@ def test_show_config_exits_zero_and_prints_sections():
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, (
-        f"--show-config failed:\nstdout={result.stdout}\nstderr={result.stderr}"
-    )
+    assert result.returncode == 0, f"--show-config failed:\nstdout={result.stdout}\nstderr={result.stderr}"
     assert "model" in result.stdout
     assert "agent" in result.stdout
     # Sanity: every field row contains its source bracket.

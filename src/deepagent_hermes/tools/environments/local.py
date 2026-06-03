@@ -36,9 +36,7 @@ def _find_bash() -> str | None:
       3. POSIX hard-coded paths (``/usr/bin/bash``, ``/bin/bash``).
       4. Windows fallback: standard Git for Windows install locations.
     """
-    override = os.environ.get("DEEPAGENT_HERMES_BASH_PATH") or os.environ.get(
-        "HERMES_BASH_PATH"
-    )
+    override = os.environ.get("DEEPAGENT_HERMES_BASH_PATH") or os.environ.get("HERMES_BASH_PATH")
     if override and Path(override).is_file():
         return override
 
@@ -50,15 +48,22 @@ def _find_bash() -> str | None:
         candidates = [
             os.path.join(
                 os.environ.get("ProgramFiles", r"C:\Program Files"),
-                "Git", "bin", "bash.exe",
+                "Git",
+                "bin",
+                "bash.exe",
             ),
             os.path.join(
                 os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
-                "Git", "bin", "bash.exe",
+                "Git",
+                "bin",
+                "bash.exe",
             ),
             os.path.join(
                 os.environ.get("LOCALAPPDATA", ""),
-                "Programs", "Git", "bin", "bash.exe",
+                "Programs",
+                "Git",
+                "bin",
+                "bash.exe",
             ),
         ]
         for c in candidates:
@@ -125,9 +130,7 @@ class LocalEnvironment(BaseEnvironment):
         # documented stable since 3.7.
         popen_kwargs: dict = {}
         if sys.platform == "win32":
-            popen_kwargs["creationflags"] = getattr(
-                subprocess, "CREATE_NO_WINDOW", 0
-            )
+            popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         else:
             # POSIX: put the child in its own process group so we can kill
             # the whole tree (background processes + grandchildren) on

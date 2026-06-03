@@ -26,8 +26,7 @@ def make_todo_tool() -> Any:
         from deepagents.middleware.todo import write_todos  # type: ignore[import-not-found]
     except ImportError as exc:  # pragma: no cover - guarded for headless test envs
         raise RuntimeError(
-            "make_todo_tool() requires deepagents. Install `deepagents>=0.6` "
-            "or add it to your project dependencies."
+            "make_todo_tool() requires deepagents. Install `deepagents>=0.6` or add it to your project dependencies."
         ) from exc
 
     return _rename_tool(write_todos, "todo")
@@ -44,8 +43,7 @@ def make_todo_middleware() -> Any:
         from deepagents.middleware.todo import TodoListMiddleware  # type: ignore[import-not-found]
     except ImportError as exc:  # pragma: no cover - guarded for headless test envs
         raise RuntimeError(
-            "make_todo_middleware() requires deepagents. Install "
-            "`deepagents>=0.6` or add it to your project dependencies."
+            "make_todo_middleware() requires deepagents. Install `deepagents>=0.6` or add it to your project dependencies."
         ) from exc
 
     return TodoListMiddleware()

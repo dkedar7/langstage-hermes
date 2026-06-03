@@ -64,9 +64,7 @@ def main() -> int:
         last_content = getattr(last_ai, "content", "<no AIMessage>")
         if isinstance(last_content, list):
             # Anthropic content-block format
-            last_content = "".join(
-                b.get("text", "") for b in last_content if isinstance(b, dict)
-            )
+            last_content = "".join(b.get("text", "") for b in last_content if isinstance(b, dict))
         snippet = (last_content[:100] + "...") if len(last_content) > 100 else last_content
         print(f"  ({elapsed:.2f}s) -> {snippet!r}")
         print(
@@ -83,9 +81,7 @@ def main() -> int:
     print(f"Total skills in library: {len(bundled)}")
     # Filter to user-created (not under the bundled dir)
     user_skills = [
-        s for s in bundled
-        if "deepagent-hermes\\skills" not in str(s.path)
-        and "deepagent-hermes/skills" not in str(s.path)
+        s for s in bundled if "deepagent-hermes\\skills" not in str(s.path) and "deepagent-hermes/skills" not in str(s.path)
     ]
     print(f"User-created skills: {len(user_skills)}")
     for s in user_skills:

@@ -122,7 +122,7 @@ def test_loaded_skill_bodies_injected(library):
     final_prompt = captured["request"].system_prompt
     assert "## Loaded skills" in final_prompt
     assert "ALPHA BODY CONTENT" in final_prompt
-    assert "<skill name=\"alpha-skill\">" in final_prompt
+    assert '<skill name="alpha-skill">' in final_prompt
 
 
 def test_no_skills_no_block(tmp_hermes_home):

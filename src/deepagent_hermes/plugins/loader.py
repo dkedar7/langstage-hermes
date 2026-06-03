@@ -100,10 +100,7 @@ class HermesPluginLoader:
             for plugin in self._scan_dir(self._project_dir(), source="project"):
                 self._maybe_register(plugin)
         else:
-            logger.debug(
-                "Project plugin discovery disabled "
-                "(set DEEPAGENT_HERMES_ENABLE_PROJECT_PLUGINS=1 to enable)"
-            )
+            logger.debug("Project plugin discovery disabled (set DEEPAGENT_HERMES_ENABLE_PROJECT_PLUGINS=1 to enable)")
 
         # Source 4: pip entry points.
         for plugin in self._scan_entry_points():
@@ -300,9 +297,7 @@ class HermesPluginLoader:
         spec.loader.exec_module(module)
         register_fn = getattr(module, "register", None)
         if not callable(register_fn):
-            raise AttributeError(
-                f"Plugin {plugin.name!r} at {init_file} has no callable register()"
-            )
+            raise AttributeError(f"Plugin {plugin.name!r} at {init_file} has no callable register()")
         return register_fn
 
 

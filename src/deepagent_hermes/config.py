@@ -49,11 +49,7 @@ def hermes_home() -> Path:
     (``~/.deepagent-hermes``). The result is not created — that's the caller's
     job (`tests/conftest.py::tmp_hermes_home` already does this).
     """
-    return Path(
-        os.getenv("DEEPAGENT_HERMES_HOME")
-        or os.getenv("HERMES_HOME")
-        or (Path.home() / ".deepagent-hermes")
-    )
+    return Path(os.getenv("DEEPAGENT_HERMES_HOME") or os.getenv("HERMES_HOME") or (Path.home() / ".deepagent-hermes"))
 
 
 def _hermes_global_toml_path() -> Path:
@@ -364,13 +360,9 @@ class HermesConfig(HostConfig):
         env = os.environ if env is None else env
 
         # Layer 2: cross-host TOML (deepagents.toml) — same as base.
-        base_toml_data, base_toml_paths = (
-            load_toml_config(toml_start) if use_toml else ({}, [])
-        )
+        base_toml_data, base_toml_paths = load_toml_config(toml_start) if use_toml else ({}, [])
         # Layer 3: hermes-specific TOML.
-        hermes_toml_data, hermes_toml_paths = (
-            load_hermes_toml_config(toml_start) if use_toml else ({}, [])
-        )
+        hermes_toml_data, hermes_toml_paths = load_hermes_toml_config(toml_start) if use_toml else ({}, [])
 
         env_map = cls._env_map()
         toml_map = cls._toml_map()
@@ -395,19 +387,11 @@ class HermesConfig(HostConfig):
                 tv = _get_dotted(base_toml_data, tkey)
                 if tv is not None:
                     val = _coerce(f, tv)
-                    src = (
-                        f"toml ({base_toml_paths[-1].name})"
-                        if base_toml_paths
-                        else "toml"
-                    )
+                    src = f"toml ({base_toml_paths[-1].name})" if base_toml_paths else "toml"
                 tv2 = _get_dotted(hermes_toml_data, tkey)
                 if tv2 is not None:
                     val = _coerce(f, tv2)
-                    src = (
-                        f"toml ({hermes_toml_paths[-1].name})"
-                        if hermes_toml_paths
-                        else "toml"
-                    )
+                    src = f"toml ({hermes_toml_paths[-1].name})" if hermes_toml_paths else "toml"
 
             if name in env_map:
                 var, caster = env_map[name]
@@ -424,7 +408,7 @@ class HermesConfig(HostConfig):
             sources[name] = src
 
         obj = cls(**values)
-        obj._sources = sources           # type: ignore[attr-defined]
+        obj._sources = sources  # type: ignore[attr-defined]
         obj._toml_paths = base_toml_paths + hermes_toml_paths  # type: ignore[attr-defined]
         return obj
 

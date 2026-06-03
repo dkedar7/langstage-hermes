@@ -162,11 +162,7 @@ def _render(skills: list[Skill]) -> str:
                 lines.append(f"    - {skill.name}")
 
     return (
-        "## Skills (mandatory)\n"
-        + PREFACE
-        + "\n\n<available_skills>\n"
-        + "\n".join(lines)
-        + "\n</available_skills>\n\n"
+        "## Skills (mandatory)\n" + PREFACE + "\n\n<available_skills>\n" + "\n".join(lines) + "\n</available_skills>\n\n"
         "Only proceed without loading a skill if genuinely none are relevant to the task."
     )
 

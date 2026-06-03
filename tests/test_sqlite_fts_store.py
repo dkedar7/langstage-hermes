@@ -44,27 +44,17 @@ def populated_store(store: SqliteFtsStore) -> SqliteFtsStore:
 
     # sess-a: 15 docker rows (whole token)
     for i in range(8):
-        store.record_message(
-            "sess-a", "user", f"tweak {i}: docker setup for layer caching"
-        )
-        store.record_message(
-            "sess-a", "assistant", f"applied tweak {i} to docker"
-        )
+        store.record_message("sess-a", "user", f"tweak {i}: docker setup for layer caching")
+        store.record_message("sess-a", "assistant", f"applied tweak {i} to docker")
 
     # sess-b: kubernetes content (no docker)
     for i in range(8):
-        store.record_message(
-            "sess-b", "user", f"scale replicas to {i + 1} on the cluster"
-        )
-        store.record_message(
-            "sess-b", "assistant", f"replicas set to {i + 1} in kubernetes"
-        )
+        store.record_message("sess-b", "user", f"scale replicas to {i + 1} on the cluster")
+        store.record_message("sess-b", "assistant", f"replicas set to {i + 1} in kubernetes")
 
     # sess-c: a couple docker mentions
     store.record_message("sess-c", "user", "compare docker swarm vs kubernetes")
-    store.record_message(
-        "sess-c", "assistant", "docker swarm is simpler; kubernetes more capable"
-    )
+    store.record_message("sess-c", "assistant", "docker swarm is simpler; kubernetes more capable")
     return store
 
 
@@ -102,9 +92,7 @@ def test_wal_mode_active(store: SqliteFtsStore) -> None:
 
 
 def test_schema_has_expected_tables(store: SqliteFtsStore) -> None:
-    rows = store._conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-    ).fetchall()
+    rows = store._conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
     names = {r[0] for r in rows}
     for required in (
         "sessions",
@@ -119,9 +107,7 @@ def test_schema_has_expected_tables(store: SqliteFtsStore) -> None:
 
 
 def test_fts_triggers_exist(store: SqliteFtsStore) -> None:
-    rows = store._conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='trigger'"
-    ).fetchall()
+    rows = store._conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'").fetchall()
     names = {r[0] for r in rows}
     assert "messages_after_insert" in names
     assert "messages_after_delete" in names
@@ -136,14 +122,10 @@ def test_fts_triggers_exist(store: SqliteFtsStore) -> None:
 def test_ensure_session_is_idempotent(store: SqliteFtsStore) -> None:
     store.ensure_session("s1", source="user")
     store.ensure_session("s1", source="ignored_on_second_call")
-    rows = store._conn.execute(
-        "SELECT COUNT(*) FROM sessions WHERE id = ?", ("s1",)
-    ).fetchone()
+    rows = store._conn.execute("SELECT COUNT(*) FROM sessions WHERE id = ?", ("s1",)).fetchone()
     assert rows[0] == 1
     # First write wins on source
-    src = store._conn.execute(
-        "SELECT source FROM sessions WHERE id = ?", ("s1",)
-    ).fetchone()
+    src = store._conn.execute("SELECT source FROM sessions WHERE id = ?", ("s1",)).fetchone()
     assert src[0] == "user"
 
 
@@ -182,9 +164,7 @@ def test_fts_returns_bm25_ranked_rowids(populated_store: SqliteFtsStore) -> None
     # docker content (sess-a or sess-c) and contain the term.
     for h in hits:
         assert h["session_id"] in {"sess-a", "sess-c"}
-        row = populated_store._conn.execute(
-            "SELECT content, tool_name FROM messages WHERE id = ?", (h["id"],)
-        ).fetchone()
+        row = populated_store._conn.execute("SELECT content, tool_name FROM messages WHERE id = ?", (h["id"],)).fetchone()
         content = (row["content"] or "") + " " + (row["tool_name"] or "")
         assert "docker" in content.lower()
     # sess-a has 15+ docker rows, sess-c has 2 — sess-a must dominate the
@@ -202,28 +182,19 @@ def test_fts_snippet_contains_highlight_markers(populated_store: SqliteFtsStore)
 
 def test_fts_excludes_inactive_rows(populated_store: SqliteFtsStore) -> None:
     # Soft-delete every docker row in sess-a
-    populated_store._conn.execute(
-        "UPDATE messages SET active = 0 WHERE session_id = 'sess-a' "
-        "AND content LIKE '%docker%'"
-    )
+    populated_store._conn.execute("UPDATE messages SET active = 0 WHERE session_id = 'sess-a' AND content LIKE '%docker%'")
     populated_store._conn.commit()
     hits = populated_store.search_messages("docker", limit=20)
     for h in hits:
         # Any returned id must still be active
-        row = populated_store._conn.execute(
-            "SELECT active FROM messages WHERE id = ?", (h["id"],)
-        ).fetchone()
+        row = populated_store._conn.execute("SELECT active FROM messages WHERE id = ?", (h["id"],)).fetchone()
         assert row[0] == 1
 
 
 def test_fts_exclude_sources(populated_store: SqliteFtsStore) -> None:
     populated_store.ensure_session("sess-bg", source="tool")
-    populated_store.record_message(
-        "sess-bg", "assistant", "background docker update"
-    )
-    hits = populated_store.search_messages(
-        "docker", exclude_sources=["tool"], limit=50
-    )
+    populated_store.record_message("sess-bg", "assistant", "background docker update")
+    hits = populated_store.search_messages("docker", exclude_sources=["tool"], limit=50)
     assert all(h["session_id"] != "sess-bg" for h in hits)
 
 
@@ -245,13 +216,9 @@ def test_cjk_content_routes_through_trigram_table(store: SqliteFtsStore) -> None
         "今日は素晴らしい日本語をテストしましょう",
     )
     # The row must be in BOTH FTS tables (triggers wrote it)
-    fts_row = store._conn.execute(
-        "SELECT rowid FROM messages_fts WHERE rowid = ?", (mid,)
-    ).fetchone()
+    fts_row = store._conn.execute("SELECT rowid FROM messages_fts WHERE rowid = ?", (mid,)).fetchone()
     assert fts_row is not None
-    tri_row = store._conn.execute(
-        "SELECT rowid FROM messages_fts_trigram WHERE rowid = ?", (mid,)
-    ).fetchone()
+    tri_row = store._conn.execute("SELECT rowid FROM messages_fts_trigram WHERE rowid = ?", (mid,)).fetchone()
     assert tri_row is not None
 
     # Searching for 日本語 must produce a result. The unicode61 tokenizer
@@ -281,9 +248,7 @@ def test_base_store_put_and_get_message_roundtrip(store: SqliteFtsStore) -> None
 
 
 def test_base_store_search_via_fts(populated_store: SqliteFtsStore) -> None:
-    items = populated_store.search(
-        ("messages",), query="kubernetes", limit=5
-    )
+    items = populated_store.search(("messages",), query="kubernetes", limit=5)
     assert items, "BaseStore.search returned no results for 'kubernetes'"
     for it in items:
         assert it.namespace[0] == "messages"
@@ -291,9 +256,7 @@ def test_base_store_search_via_fts(populated_store: SqliteFtsStore) -> None:
 
 
 def test_base_store_search_namespace_filter(populated_store: SqliteFtsStore) -> None:
-    items = populated_store.search(
-        ("messages", "sess-b"), query="replicas", limit=5
-    )
+    items = populated_store.search(("messages", "sess-b"), query="replicas", limit=5)
     assert items
     for it in items:
         assert it.value["session_id"] == "sess-b"
@@ -315,9 +278,7 @@ def test_base_store_delete_removes_row_and_fts_entry(store: SqliteFtsStore) -> N
     store.delete(("messages", "s1", "user"), str(mid))
     assert store.get(("messages", "s1", "user"), str(mid)) is None
     # FTS row should be gone via the delete trigger
-    row = store._conn.execute(
-        "SELECT rowid FROM messages_fts WHERE rowid = ?", (mid,)
-    ).fetchone()
+    row = store._conn.execute("SELECT rowid FROM messages_fts WHERE rowid = ?", (mid,)).fetchone()
     assert row is None
 
 
@@ -333,8 +294,6 @@ async def test_async_abatch_runs_get_op(populated_store: SqliteFtsStore) -> None
 
 
 async def test_async_asearch(populated_store: SqliteFtsStore) -> None:
-    items = await populated_store.asearch(
-        ("messages",), query="docker", limit=3
-    )
+    items = await populated_store.asearch(("messages",), query="docker", limit=3)
     assert items
     assert len(items) <= 3

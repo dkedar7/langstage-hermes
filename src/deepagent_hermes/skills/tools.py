@@ -186,11 +186,7 @@ def _render_list(library: SkillLibrary, *, query: str, category: str) -> str:
 
     if query:
         q = query.lower()
-        skills = [
-            s
-            for s in skills
-            if q in s.name.lower() or q in s.description.lower()
-        ]
+        skills = [s for s in skills if q in s.name.lower() or q in s.description.lower()]
 
     if not skills:
         return "_No skills match._"
@@ -205,15 +201,11 @@ def _render_list(library: SkillLibrary, *, query: str, category: str) -> str:
     return "\n".join(lines)
 
 
-def _skill_view_impl(
-    library: SkillLibrary, *, name: str, tool_call_id: str
-) -> Command:
+def _skill_view_impl(library: SkillLibrary, *, name: str, tool_call_id: str) -> Command:
     """Return a Command that loads the named skill body into state."""
     skill = library.get(name)
     if skill is None:
-        payload = json.dumps(
-            {"success": False, "error": f"skill {name!r} not found"}
-        )
+        payload = json.dumps({"success": False, "error": f"skill {name!r} not found"})
         return _command_with_tool_message(payload, tool_call_id=tool_call_id)
 
     body = skill.body
@@ -253,17 +245,13 @@ def _skill_manage_impl(
     """Implement the five mutation actions and return a state-resetting Command."""
     try:
         if action == "create":
-            path = _action_create(
-                library, name=name, description=description, body=body, category=category
-            )
+            path = _action_create(library, name=name, description=description, body=body, category=category)
             result = {"success": True, "action": action, "name": name, "path": str(path)}
         elif action == "patch":
             path = _action_patch(library, name=name, old_str=old_str, new_str=new_str)
             result = {"success": True, "action": action, "name": name, "path": str(path)}
         elif action == "write_file":
-            path = _action_write_file(
-                library, name=name, frontmatter_data=frontmatter_data or {}, body=body
-            )
+            path = _action_write_file(library, name=name, frontmatter_data=frontmatter_data or {}, body=body)
             result = {"success": True, "action": action, "name": name, "path": str(path)}
         elif action == "delete":
             archived = library.delete(name)
@@ -319,9 +307,7 @@ def _action_create(
     return library.write(name, fm, body, category=category or None)
 
 
-def _action_patch(
-    library: SkillLibrary, *, name: str, old_str: str, new_str: str
-) -> Path:
+def _action_patch(library: SkillLibrary, *, name: str, old_str: str, new_str: str) -> Path:
     if not old_str:
         raise ValueError("patch: 'old_str' is required")
     skill = library.get(name)
@@ -332,9 +318,7 @@ def _action_patch(
         raise ValueError("patch: 'old_str' not found in SKILL.md")
     count = full.count(old_str)
     if count > 1:
-        raise ValueError(
-            f"patch: 'old_str' is ambiguous (matched {count} times) — supply more context"
-        )
+        raise ValueError(f"patch: 'old_str' is ambiguous (matched {count} times) — supply more context")
     full = full.replace(old_str, new_str, 1)
     skill.path.write_text(full, encoding="utf-8")
     return skill.path
@@ -386,9 +370,7 @@ def _action_pin(library: SkillLibrary, *, name: str, pinned: bool) -> Path:
     # Re-validate + rewrite via library.write (preserves dir/category).
     errors = validate_frontmatter(meta, parent_dir_name=skill.name)
     if errors:
-        raise ValueError(
-            "pin/unpin would produce invalid frontmatter:\n- " + "\n- ".join(errors)
-        )
+        raise ValueError("pin/unpin would produce invalid frontmatter:\n- " + "\n- ".join(errors))
     post = frontmatter.Post(skill.body, **meta)
     skill.path.write_bytes(frontmatter.dumps(post).encode("utf-8"))
     return skill.path

@@ -31,8 +31,7 @@ from deepagent_hermes.tools.environments.singularity import (
 
 if _find_singularity() is None:
     pytest.skip(
-        "Neither 'singularity' nor 'apptainer' found on PATH — "
-        "install Apptainer to run these tests.",
+        "Neither 'singularity' nor 'apptainer' found on PATH — install Apptainer to run these tests.",
         allow_module_level=True,
     )
 

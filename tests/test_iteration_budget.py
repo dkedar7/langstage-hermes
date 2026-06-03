@@ -104,9 +104,7 @@ def test_refund_tools_do_not_decrement():
 
 
 def test_custom_refund_tools_list():
-    mw = IterationBudgetMiddleware(
-        max_iterations=5, refund_tools=("execute_code", "internal_eval")
-    )
+    mw = IterationBudgetMiddleware(max_iterations=5, refund_tools=("execute_code", "internal_eval"))
     state = {"iteration_budget_remaining": 5}
 
     # internal_eval: refunded

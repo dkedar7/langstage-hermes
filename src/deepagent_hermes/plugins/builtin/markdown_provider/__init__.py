@@ -46,11 +46,7 @@ logger = logging.getLogger(__name__)
 
 def _resolve_notes_dir() -> Path:
     """``<HERMES_HOME>/memories/notes`` — matches the rest of the memory layout."""
-    home = (
-        os.environ.get("DEEPAGENT_HERMES_HOME")
-        or os.environ.get("HERMES_HOME")
-        or str(Path.home() / ".deepagent-hermes")
-    )
+    home = os.environ.get("DEEPAGENT_HERMES_HOME") or os.environ.get("HERMES_HOME") or str(Path.home() / ".deepagent-hermes")
     return Path(home) / "memories" / "notes"
 
 
@@ -124,9 +120,9 @@ class MarkdownProvider(MemoryProvider):
 
     def __init__(self, *, notes_dir: Path | None = None, limit: int = 5) -> None:
         """Args:
-            notes_dir: Override the default ``<HERMES_HOME>/memories/notes``.
-                Tests pass a tmp dir; production resolves from env.
-            limit: Max sections to return per ``recall()`` call.
+        notes_dir: Override the default ``<HERMES_HOME>/memories/notes``.
+            Tests pass a tmp dir; production resolves from env.
+        limit: Max sections to return per ``recall()`` call.
         """
         self._notes_dir = notes_dir
         self._limit = limit

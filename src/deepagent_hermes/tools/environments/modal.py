@@ -40,10 +40,7 @@ from deepagent_hermes.tools.environments.base import (
     ProcessHandle,
 )
 
-_INSTALL_HINT = (
-    "ModalEnvironment requires the 'modal' package. "
-    "Install with: pip install deepagent-hermes[modal]"
-)
+_INSTALL_HINT = "ModalEnvironment requires the 'modal' package. Install with: pip install deepagent-hermes[modal]"
 
 _APP_NAME = "deepagent-hermes"
 _DEFAULT_IMAGE = "python:3.13-slim"
@@ -234,9 +231,7 @@ class ModalEnvironment(BaseEnvironment):
         # since each exec() call spawns its own process.
         Sandbox = getattr(modal, "Sandbox", None)
         if Sandbox is None or not hasattr(Sandbox, "create"):
-            raise ImportError(
-                "modal SDK has no Sandbox.create — the SDK API may have changed."
-            )
+            raise ImportError("modal SDK has no Sandbox.create — the SDK API may have changed.")
         self._sandbox = Sandbox.create(image=image_obj, app=self._app)
 
         # Now run the standard base-class snapshot bootstrap inside the sandbox.

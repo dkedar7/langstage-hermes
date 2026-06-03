@@ -53,9 +53,7 @@ def _tag_message_last_block(message: AnyMessage, cache_control: dict[str, str]) 
     if isinstance(content, str):
         if not content:
             return message
-        new_content: list[Any] = [
-            {"type": "text", "text": content, "cache_control": cache_control}
-        ]
+        new_content: list[Any] = [{"type": "text", "text": content, "cache_control": cache_control}]
         # ``model_copy`` preserves message subclass (Human / AI / Tool / System)
         return message.model_copy(update={"content": new_content})
     if isinstance(content, list):
@@ -137,9 +135,7 @@ class AnthropicCachingS3Middleware(AnthropicPromptCachingMiddleware):
 
         # Last 3 non-system messages (up to 3 breakpoints).
         if request.messages:
-            non_system_indices = [
-                i for i, m in enumerate(request.messages) if not isinstance(m, SystemMessage)
-            ]
+            non_system_indices = [i for i, m in enumerate(request.messages) if not isinstance(m, SystemMessage)]
             target_indices = set(non_system_indices[-3:])
             if target_indices:
                 new_messages: list[AnyMessage] = []

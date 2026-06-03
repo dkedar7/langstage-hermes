@@ -54,6 +54,7 @@ class _RecorderStateExt(AgentState):
     session_id: NotRequired[Annotated[str, _take_last_str]]
     parent_session_id: NotRequired[Annotated[str | None, _take_last_str]]
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -177,11 +178,7 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
         del runtime
         session_id = _resolve_session_id(state)
         source = os.environ.get("DEEPAGENT_HERMES_SESSION_SOURCE", "user")
-        parent = (
-            state.get("parent_session_id")
-            if isinstance(state, dict)
-            else getattr(state, "parent_session_id", None)
-        )
+        parent = state.get("parent_session_id") if isinstance(state, dict) else getattr(state, "parent_session_id", None)
         try:
             self.store.ensure_session(
                 session_id,
@@ -194,17 +191,13 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
         # session_search tool can read it consistently.
         return {"session_id": session_id}
 
-    async def abefore_agent(
-        self, state: Any, runtime: Any
-    ) -> dict[str, Any] | None:
+    async def abefore_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         return self.before_agent(state, runtime)
 
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
         session_id = _resolve_session_id(state)
-        messages = state.get("messages") if isinstance(state, dict) else getattr(
-            state, "messages", []
-        )
+        messages = state.get("messages") if isinstance(state, dict) else getattr(state, "messages", [])
         if not messages:
             return None
         # The latest message after a model call is the AIMessage.
@@ -221,9 +214,7 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
                 "assistant",
                 _serialize_content(latest.content),
                 tool_calls=_serialize_tool_calls(latest),
-                finish_reason=getattr(latest, "response_metadata", {}).get(
-                    "finish_reason"
-                ),
+                finish_reason=getattr(latest, "response_metadata", {}).get("finish_reason"),
             )
         except sqlite3.OperationalError as exc:
             logger.warning("recorder.after_model record_message failed: %s", exc)
@@ -255,12 +246,8 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
         state = getattr(request, "state", None)
         session_id = _resolve_session_id(state)
         call = getattr(request, "tool_call", None) or {}
-        tool_name = call.get("name") if isinstance(call, dict) else getattr(
-            call, "name", None
-        )
-        tool_call_id = call.get("id") if isinstance(call, dict) else getattr(
-            call, "id", None
-        )
+        tool_name = call.get("name") if isinstance(call, dict) else getattr(call, "name", None)
+        tool_call_id = call.get("id") if isinstance(call, dict) else getattr(call, "id", None)
         if tool_call_id:
             key = (session_id, tool_call_id)
             if key in self._seen_tool_call_ids:
@@ -296,15 +283,9 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
     def after_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
         session_id = _resolve_session_id(state)
-        messages = state.get("messages") if isinstance(state, dict) else getattr(
-            state, "messages", []
-        )
+        messages = state.get("messages") if isinstance(state, dict) else getattr(state, "messages", [])
         message_count = len(messages or [])
-        tool_call_count = sum(
-            len(getattr(m, "tool_calls", []) or [])
-            for m in (messages or [])
-            if isinstance(m, AIMessage)
-        )
+        tool_call_count = sum(len(getattr(m, "tool_calls", []) or []) for m in (messages or []) if isinstance(m, AIMessage))
         try:
             self.store.end_session(
                 session_id,

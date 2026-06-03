@@ -266,9 +266,7 @@ class BaseEnvironment(ABC):
         login = not self._initialized
 
         try:
-            proc = self._run_bash(
-                wrapped, login=login, timeout=timeout, stdin_data=stdin_data
-            )
+            proc = self._run_bash(wrapped, login=login, timeout=timeout, stdin_data=stdin_data)
         except FileNotFoundError as exc:
             return ExecuteResponse(
                 output=f"[error] {exc}",

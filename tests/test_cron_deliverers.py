@@ -73,9 +73,7 @@ def test_agentmail_deliverer_requires_api_key(monkeypatch):
     """Without AGENTMAIL_API_KEY in env, deliver() raises immediately."""
     monkeypatch.delenv("AGENTMAIL_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="AGENTMAIL_API_KEY"):
-        AgentMailDeliverer().deliver(
-            _job(deliver="agentmail"), "body", output_path=None
-        )
+        AgentMailDeliverer().deliver(_job(deliver="agentmail"), "body", output_path=None)
 
 
 def test_agentmail_deliverer_posts_to_endpoint(monkeypatch):
@@ -116,9 +114,7 @@ def test_agentmail_deliverer_uses_default_recipient(monkeypatch):
 
     fake_resp = MagicMock(status_code=200, text="{}")
     with patch("requests.post", return_value=fake_resp) as mock_post:
-        AgentMailDeliverer().deliver(
-            _job(deliver="agentmail"), "body", output_path=None
-        )
+        AgentMailDeliverer().deliver(_job(deliver="agentmail"), "body", output_path=None)
 
     _, kwargs = mock_post.call_args
     assert kwargs["json"]["to"] == ["kdabhadk@gmail.com"]
@@ -131,9 +127,7 @@ def test_agentmail_deliverer_raises_on_4xx(monkeypatch):
     fake_resp = MagicMock(status_code=401, text='{"error": "unauthorized"}')
     with patch("requests.post", return_value=fake_resp):
         with pytest.raises(RuntimeError, match="HTTP 401"):
-            AgentMailDeliverer().deliver(
-                _job(deliver="agentmail"), "body", output_path=None
-            )
+            AgentMailDeliverer().deliver(_job(deliver="agentmail"), "body", output_path=None)
 
 
 # ── scheduler SILENT_MARKER integration ────────────────────────────
@@ -192,10 +186,7 @@ def test_unknown_deliverer_falls_back_to_local_with_warning(caplog):
     with caplog.at_level(logging.WARNING, logger="deepagent_hermes.cron.scheduler"):
         # Must not raise; LocalDeliverer is a no-op.
         scheduler_mod._deliver_output(job, "some output", None)
-    assert any(
-        "no deliverer registered for 'nope-not-real'" in rec.getMessage()
-        for rec in caplog.records
-    )
+    assert any("no deliverer registered for 'nope-not-real'" in rec.getMessage() for rec in caplog.records)
 
 
 # ── bundled registry sanity ────────────────────────────────────────

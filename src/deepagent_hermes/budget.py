@@ -96,9 +96,7 @@ class IterationBudgetMiddleware(AgentMiddleware):
 
     # ── before_agent: seed counter ───────────────────────────────────
 
-    def before_agent(
-        self, state: Any, runtime: Runtime[Any] | None = None
-    ) -> dict[str, Any] | None:
+    def before_agent(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         """Seed ``iteration_budget_remaining`` to ``max_iterations`` when
         the current value is missing, None, or 0.
 
@@ -114,17 +112,13 @@ class IterationBudgetMiddleware(AgentMiddleware):
             return {"iteration_budget_remaining": self.max_iterations}
         return None
 
-    async def abefore_agent(
-        self, state: Any, runtime: Runtime[Any] | None = None
-    ) -> dict[str, Any] | None:
+    async def abefore_agent(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         return self.before_agent(state, runtime)
 
     # ── before_model: check + jump-to-end on exhaustion ──────────────
 
     @hook_config(can_jump_to=["end"])
-    def before_model(
-        self, state: Any, runtime: Runtime[Any] | None = None
-    ) -> dict[str, Any] | None:
+    def before_model(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         """If budget is exhausted, append a final ``AIMessage`` and jump to end."""
         remaining = _state_get(state, "iteration_budget_remaining", self.max_iterations)
         if remaining is None:
@@ -132,15 +126,11 @@ class IterationBudgetMiddleware(AgentMiddleware):
         if remaining > 0:
             return None
 
-        final = AIMessage(
-            content=f"[budget_exhausted: max_iterations={self.max_iterations} reached]"
-        )
+        final = AIMessage(content=f"[budget_exhausted: max_iterations={self.max_iterations} reached]")
         return {"messages": [final], "jump_to": "end"}
 
     @hook_config(can_jump_to=["end"])
-    async def abefore_model(
-        self, state: Any, runtime: Runtime[Any] | None = None
-    ) -> dict[str, Any] | None:
+    async def abefore_model(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         return self.before_model(state, runtime)
 
     # ── wrap_tool_call: decrement after the tool runs ────────────────

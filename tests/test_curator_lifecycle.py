@@ -10,6 +10,7 @@ SKILL.md files with varying mtimes, and verify ``mark_stale_and_archive``:
 3. leaves pinned skills entirely alone;
 4. leaves fresh / recently-used skills untouched.
 """
+
 from __future__ import annotations
 
 import time
@@ -66,9 +67,7 @@ class FakeLibrary:
             skill_md = child / "SKILL.md"
             if not skill_md.is_file():
                 continue
-            out.append(
-                FakeSkill(name=child.name, path=skill_md, metadata=self._read_meta(skill_md))
-            )
+            out.append(FakeSkill(name=child.name, path=skill_md, metadata=self._read_meta(skill_md)))
         return out
 
     def get(self, name: str) -> FakeSkill:
@@ -141,7 +140,7 @@ def test_lifecycle_archives_long_unused_and_marks_stale(library: FakeLibrary):
     DAY = 86400
     state_meta = {
         "fresh-skill": now - 1 * DAY,
-        "stale-skill": now - 45 * DAY,    # > 30 days → stale
+        "stale-skill": now - 45 * DAY,  # > 30 days → stale
         "ancient-skill": now - 120 * DAY,  # > 90 days → archive
     }
 
@@ -236,10 +235,14 @@ def test_curator_middleware_respects_interval_gate(library: FakeLibrary):
     # In-memory store stand-in: tracks the curator state dict via put/get.
     store = _FakeStore()
     # Seed last_run_at to 1 second ago so the interval gate is closed.
-    store.put(("curator_state",), "state", {
-        "last_run_at": time.time() - 1,
-        "last_user_activity": time.time() - 100_000,  # idle gate would be open
-    })
+    store.put(
+        ("curator_state",),
+        "state",
+        {
+            "last_run_at": time.time() - 1,
+            "last_user_activity": time.time() - 100_000,  # idle gate would be open
+        },
+    )
 
     mw = CuratorMiddleware(library, store, interval_hours=168, min_idle_hours=2)
     mw.before_agent(state={"messages": []})

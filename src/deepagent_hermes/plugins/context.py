@@ -166,9 +166,7 @@ class PluginContext:
         elif isinstance(self.registry, dict):
             self.registry.setdefault(toolset, []).append(tool)
         else:
-            raise TypeError(
-                f"PluginContext.register_tool: unknown registry type {type(self.registry).__name__}"
-            )
+            raise TypeError(f"PluginContext.register_tool: unknown registry type {type(self.registry).__name__}")
         name = getattr(tool, "name", None) or getattr(tool, "__name__", "<tool>")
         self._plugin.tools_registered.append(name)
         logger.debug("Plugin %s registered tool %s in toolset %s", self._plugin.name, name, toolset)
@@ -189,8 +187,7 @@ class PluginContext:
             self.memory_registry[name] = cls
         else:
             raise TypeError(
-                "PluginContext.register_memory_provider: unknown registry type "
-                f"{type(self.memory_registry).__name__}"
+                f"PluginContext.register_memory_provider: unknown registry type {type(self.memory_registry).__name__}"
             )
         logger.debug("Plugin %s registered memory provider %s", self._plugin.name, name)
 
@@ -210,10 +207,7 @@ class PluginContext:
         elif isinstance(self.memory_registry, dict):
             self.memory_registry[key] = cls
         else:
-            raise TypeError(
-                "PluginContext.register_context_engine: unknown registry type "
-                f"{type(self.memory_registry).__name__}"
-            )
+            raise TypeError(f"PluginContext.register_context_engine: unknown registry type {type(self.memory_registry).__name__}")
         logger.debug("Plugin %s registered context engine %s", self._plugin.name, name)
 
     # ── hooks ──
@@ -227,9 +221,7 @@ class PluginContext:
         until ``PluginEventBus`` ships in v0.2.
         """
         if name not in VALID_HOOKS:
-            raise ValueError(
-                f"Unknown hook {name!r}. Valid hooks: {sorted(VALID_HOOKS)}"
-            )
+            raise ValueError(f"Unknown hook {name!r}. Valid hooks: {sorted(VALID_HOOKS)}")
         if not callable(fn):
             raise TypeError(f"Hook callback must be callable, got {type(fn).__name__}")
 
@@ -238,9 +230,7 @@ class PluginContext:
         elif isinstance(self.hooks, dict):
             self.hooks.setdefault(name, []).append(fn)
         else:
-            raise TypeError(
-                f"PluginContext.register_hook: unknown hooks store {type(self.hooks).__name__}"
-            )
+            raise TypeError(f"PluginContext.register_hook: unknown hooks store {type(self.hooks).__name__}")
         # Also append to the module-level registry that PluginEventBus reads.
         # Loader-provided ``hooks`` store stays the authoritative per-discovery
         # record; the global mirror exists so the event bus has a stable
@@ -289,10 +279,7 @@ class PluginContext:
         elif isinstance(self.slash_commands, dict):
             self.slash_commands[clean] = fn
         else:
-            raise TypeError(
-                "PluginContext.register_slash_command: unknown registry type "
-                f"{type(self.slash_commands).__name__}"
-            )
+            raise TypeError(f"PluginContext.register_slash_command: unknown registry type {type(self.slash_commands).__name__}")
         self._plugin.commands_registered.append(clean)
         logger.debug("Plugin %s registered slash command /%s", self._plugin.name, clean)
 

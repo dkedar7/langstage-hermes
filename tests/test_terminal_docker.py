@@ -87,30 +87,26 @@ def test_init_session_starts_container_and_cleanup_stops_it() -> None:
         e.init_session()
         # Probe via docker ps for the container name we computed.
         result = subprocess.run(
-            ["docker", "ps", "--filter", f"name=^{e._container_name}$",
-             "--format", "{{.ID}}"],
-            capture_output=True, text=True, timeout=10,
+            ["docker", "ps", "--filter", f"name=^{e._container_name}$", "--format", "{{.ID}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         assert result.returncode == 0
-        assert result.stdout.strip(), (
-            f"expected container {e._container_name} to be running, "
-            f"got: {result.stdout!r}"
-        )
+        assert result.stdout.strip(), f"expected container {e._container_name} to be running, got: {result.stdout!r}"
     finally:
         e.cleanup()
 
     # After cleanup the container should be gone (--rm handles the delete).
     # Give docker a moment to actually flush the stop.
     result = subprocess.run(
-        ["docker", "ps", "-a", "--filter", f"name=^{e._container_name}$",
-         "--format", "{{.ID}}"],
-        capture_output=True, text=True, timeout=10,
+        ["docker", "ps", "-a", "--filter", f"name=^{e._container_name}$", "--format", "{{.ID}}"],
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
     assert result.returncode == 0
-    assert not result.stdout.strip(), (
-        f"expected container {e._container_name} to be gone after cleanup, "
-        f"got: {result.stdout!r}"
-    )
+    assert not result.stdout.strip(), f"expected container {e._container_name} to be gone after cleanup, got: {result.stdout!r}"
 
 
 def test_echo_returns_expected_output(env: DockerEnvironment) -> None:
@@ -126,9 +122,7 @@ def test_cwd_persists_across_calls(env: DockerEnvironment) -> None:
     env.execute("cd /tmp")
     resp = env.execute("pwd")
     # The wrapped command's stdout is the user pwd; strip for newline tolerance.
-    assert resp.output.strip().endswith("/tmp"), (
-        f"expected pwd output ending in /tmp, got: {resp.output!r}"
-    )
+    assert resp.output.strip().endswith("/tmp"), f"expected pwd output ending in /tmp, got: {resp.output!r}"
     assert resp.exit_code == 0
 
 

@@ -113,11 +113,7 @@ def _hermes_home() -> Path:
     Resolution order (matches ``config.hermes_home``): ``DEEPAGENT_HERMES_HOME``
     → ``HERMES_HOME`` → ``~/.deepagent-hermes``.
     """
-    return Path(
-        os.environ.get("DEEPAGENT_HERMES_HOME")
-        or os.environ.get("HERMES_HOME")
-        or (Path.home() / ".deepagent-hermes")
-    )
+    return Path(os.environ.get("DEEPAGENT_HERMES_HOME") or os.environ.get("HERMES_HOME") or (Path.home() / ".deepagent-hermes"))
 
 
 def _memory_dir() -> Path:
@@ -161,9 +157,7 @@ def _write_entries_atomic(path: Path, entries: list[str]) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     content = ENTRY_DELIMITER.join(entries)
-    fd, tmp_path_str = tempfile.mkstemp(
-        dir=str(path.parent), prefix=".mem_", suffix=".tmp"
-    )
+    fd, tmp_path_str = tempfile.mkstemp(dir=str(path.parent), prefix=".mem_", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
@@ -199,13 +193,9 @@ def _render_block(target: Target, entries: list[str], char_limit: int) -> str:
     pct = min(100, int((current / char_limit) * 100)) if char_limit > 0 else 0
 
     if target == "user":
-        header = (
-            f"USER PROFILE (who the user is) [{pct}% — {current:,}/{char_limit:,} chars]"
-        )
+        header = f"USER PROFILE (who the user is) [{pct}% — {current:,}/{char_limit:,} chars]"
     else:
-        header = (
-            f"MEMORY (your personal notes) [{pct}% — {current:,}/{char_limit:,} chars]"
-        )
+        header = f"MEMORY (your personal notes) [{pct}% — {current:,}/{char_limit:,} chars]"
     sep = "═" * 46
     return f"{sep}\n{header}\n{sep}\n{content}"
 
@@ -235,7 +225,8 @@ def _sanitize_for_snapshot(entries: list[str], filename: str) -> list[str]:
 
 
 def build_snapshot(
-    *, memory_char_limit: int = DEFAULT_MEMORY_CHAR_LIMIT,
+    *,
+    memory_char_limit: int = DEFAULT_MEMORY_CHAR_LIMIT,
     user_char_limit: int = DEFAULT_USER_CHAR_LIMIT,
 ) -> dict[str, str]:
     """Return ``{"memory_snapshot": ..., "user_snapshot": ...}`` from disk.
@@ -263,9 +254,7 @@ def build_snapshot(
 # ── Tool factory ─────────────────────────────────────────────────────
 
 
-def _make_memory_tool(
-    *, memory_char_limit: int, user_char_limit: int
-):
+def _make_memory_tool(*, memory_char_limit: int, user_char_limit: int):
     """Build the ``memory`` tool bound to the configured char limits.
 
     The tool is built as a closure (not a module-level function) so the
@@ -276,9 +265,7 @@ def _make_memory_tool(
     def _limit_for(target: Target) -> int:
         return user_char_limit if target == "user" else memory_char_limit
 
-    def _format_response(
-        target: Target, entries: list[str], message: str
-    ) -> str:
+    def _format_response(target: Target, entries: list[str], message: str) -> str:
         current = _char_count(entries)
         limit = _limit_for(target)
         pct = min(100, int((current / limit) * 100)) if limit > 0 else 0
@@ -329,14 +316,10 @@ def _make_memory_tool(
         # Validate target up front — anything else is a programming bug,
         # not a recoverable user error.
         if target not in ("memory", "user"):
-            payload = _format_error(
-                f"Invalid target {target!r}. Use 'memory' or 'user'."
-            )
+            payload = _format_error(f"Invalid target {target!r}. Use 'memory' or 'user'.")
             return Command(
                 update={
-                    "messages": [
-                        ToolMessage(content=payload, tool_call_id=tool_call_id)
-                    ],
+                    "messages": [ToolMessage(content=payload, tool_call_id=tool_call_id)],
                 }
             )
 
@@ -359,13 +342,10 @@ def _make_memory_tool(
                 reason = threat_patterns.scan(clean, scope="memory")
                 if reason:
                     payload = _format_error(
-                        f"Rejected: entry {reason}. Memory enters the system "
-                        f"prompt and must not contain injection payloads."
+                        f"Rejected: entry {reason}. Memory enters the system prompt and must not contain injection payloads."
                     )
                 elif clean in entries:
-                    payload = _format_response(
-                        target, entries, "Entry already exists (no duplicate added)."
-                    )
+                    payload = _format_response(target, entries, "Entry already exists (no duplicate added).")
                 else:
                     new_entries = [*entries, clean]
                     new_total = _char_count(new_entries)
@@ -379,30 +359,23 @@ def _make_memory_tool(
                         )
                     else:
                         _write_entries_atomic(path, new_entries)
-                        payload = _format_response(
-                            target, new_entries, "Entry added."
-                        )
+                        payload = _format_response(target, new_entries, "Entry added.")
 
         elif action == "replace":
             clean = (entry or "").strip()
             if index is None:
                 payload = _format_error("index is required for action='replace'.")
             elif not clean:
-                payload = _format_error(
-                    "entry is required for action='replace'. Use 'remove' to delete."
-                )
+                payload = _format_error("entry is required for action='replace'. Use 'remove' to delete.")
             elif index < 0 or index >= len(entries):
                 payload = _format_error(
-                    f"index {index} out of range (0..{len(entries) - 1}). "
-                    f"Use action='read' first to see current entries.",
+                    f"index {index} out of range (0..{len(entries) - 1}). Use action='read' first to see current entries.",
                     entries=entries,
                 )
             else:
                 reason = threat_patterns.scan(clean, scope="memory")
                 if reason:
-                    payload = _format_error(
-                        f"Rejected: replacement entry {reason}."
-                    )
+                    payload = _format_error(f"Rejected: replacement entry {reason}.")
                 else:
                     test_entries = list(entries)
                     test_entries[index] = clean
@@ -414,17 +387,14 @@ def _make_memory_tool(
                         )
                     else:
                         _write_entries_atomic(path, test_entries)
-                        payload = _format_response(
-                            target, test_entries, f"Entry at index {index} replaced."
-                        )
+                        payload = _format_response(target, test_entries, f"Entry at index {index} replaced.")
 
         elif action == "remove":
             if index is None:
                 payload = _format_error("index is required for action='remove'.")
             elif index < 0 or index >= len(entries):
                 payload = _format_error(
-                    f"index {index} out of range (0..{len(entries) - 1}). "
-                    f"Use action='read' first to see current entries.",
+                    f"index {index} out of range (0..{len(entries) - 1}). Use action='read' first to see current entries.",
                     entries=entries,
                 )
             else:
@@ -440,9 +410,7 @@ def _make_memory_tool(
                 )
 
         else:
-            payload = _format_error(
-                f"Unknown action {action!r}. Use: add, replace, remove, read."
-            )
+            payload = _format_error(f"Unknown action {action!r}. Use: add, replace, remove, read.")
 
         # On any successful write OR read, reset the nudge counter so the
         # reflection middleware doesn't immediately re-prompt. We can be a
@@ -450,9 +418,7 @@ def _make_memory_tool(
         # memory this turn".
         return Command(
             update={
-                "messages": [
-                    ToolMessage(content=payload, tool_call_id=tool_call_id)
-                ],
+                "messages": [ToolMessage(content=payload, tool_call_id=tool_call_id)],
                 "turns_since_memory": 0,
             }
         )

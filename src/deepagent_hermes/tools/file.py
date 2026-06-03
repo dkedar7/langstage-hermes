@@ -38,8 +38,7 @@ def make_file_tools(backend: Any) -> list[Any]:
         )
     except ImportError as exc:  # pragma: no cover - guarded for headless test envs
         raise RuntimeError(
-            "make_file_tools() requires deepagents. Install `deepagents>=0.6` "
-            "or add it to your project dependencies."
+            "make_file_tools() requires deepagents. Install `deepagents>=0.6` or add it to your project dependencies."
         ) from exc
 
     # deepagents exposes per-operation tool factories on the middleware class.

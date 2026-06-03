@@ -118,9 +118,7 @@ def mark_stale_and_archive(
         if not name:
             continue
 
-        metadata = getattr(skill, "metadata", None) or (
-            skill.get("metadata") if isinstance(skill, dict) else {}
-        )
+        metadata = getattr(skill, "metadata", None) or (skill.get("metadata") if isinstance(skill, dict) else {})
         metadata = dict(metadata or {})
         hermes_meta = dict(metadata.get("hermes") or {})
 
@@ -358,9 +356,7 @@ class CuratorMiddleware(AgentMiddleware):
 
     # ── before_agent: maybe run ──────────────────────────────────
 
-    def before_agent(
-        self, state: Any, runtime: Runtime[Any] | None = None
-    ) -> dict[str, Any] | None:
+    def before_agent(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         """If the cadence gates are open, run the curator pass."""
         if not self.enabled:
             return None
@@ -391,9 +387,7 @@ class CuratorMiddleware(AgentMiddleware):
 
     # ── after_agent: stamp last_user_activity ────────────────────
 
-    def after_agent(
-        self, state: Any, runtime: Runtime[Any] | None = None
-    ) -> dict[str, Any] | None:
+    def after_agent(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         """Stamp ``last_user_activity`` so the idle gate stays calibrated."""
         if not self.enabled:
             return None
@@ -440,11 +434,7 @@ class CuratorMiddleware(AgentMiddleware):
 
         if self._curator_graph is not None:
             try:
-                sub_state = {
-                    "messages": [
-                        HumanMessage(content=load_prompt("curator_review.md"))
-                    ]
-                }
+                sub_state = {"messages": [HumanMessage(content=load_prompt("curator_review.md"))]}
                 result = self._curator_graph.invoke(sub_state)
                 # Extract the LLM final message text for the report.
                 msgs = result.get("messages") if isinstance(result, dict) else None
@@ -464,12 +454,14 @@ class CuratorMiddleware(AgentMiddleware):
             error=error,
         )
 
-        cstate.update({
-            "last_run_at": now,
-            "last_user_activity": now,
-            "last_run_duration_seconds": round(elapsed, 2),
-            "last_lifecycle_counts": {k: len(v) for k, v in lifecycle_result.items()},
-        })
+        cstate.update(
+            {
+                "last_run_at": now,
+                "last_user_activity": now,
+                "last_run_duration_seconds": round(elapsed, 2),
+                "last_lifecycle_counts": {k: len(v) for k, v in lifecycle_result.items()},
+            }
+        )
         _save_curator_state(self.store, cstate)
 
 

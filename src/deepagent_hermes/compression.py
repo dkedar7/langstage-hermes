@@ -325,13 +325,7 @@ class HermesCompressionMiddleware(AgentMiddleware):
                 continue
             h = _content_hash(msg)
             if h in content_hashes:
-                result[i] = msg.model_copy(
-                    update={
-                        "content": (
-                            "[Duplicate tool output — same content as a more recent call]"
-                        )
-                    }
-                )
+                result[i] = msg.model_copy(update={"content": ("[Duplicate tool output — same content as a more recent call]")})
             else:
                 content_hashes[h] = i
 
@@ -344,24 +338,17 @@ class HermesCompressionMiddleware(AgentMiddleware):
             elif isinstance(msg, AIMessage):
                 self._maybe_shrink_tool_call_args(result, i, msg)
 
-    def _maybe_replace_tool_message(
-        self, result: list[AnyMessage], i: int, msg: ToolMessage
-    ) -> None:
+    def _maybe_replace_tool_message(self, result: list[AnyMessage], i: int, msg: ToolMessage) -> None:
         text = _message_text(msg)
         if not text or text.startswith(_PRUNED_PREFIXES):
             return
         if len(text) <= _TOOL_RESULT_MIN_PRUNE_CHARS:
             return
         tool_name = getattr(msg, "name", "unknown") or "unknown"
-        placeholder = (
-            f"[Tool {tool_name} returned {len(text)} chars; "
-            f"suppressed for context]"
-        )
+        placeholder = f"[Tool {tool_name} returned {len(text)} chars; suppressed for context]"
         result[i] = msg.model_copy(update={"content": placeholder})
 
-    def _maybe_shrink_tool_call_args(
-        self, result: list[AnyMessage], i: int, msg: AIMessage
-    ) -> None:
+    def _maybe_shrink_tool_call_args(self, result: list[AnyMessage], i: int, msg: AIMessage) -> None:
         tool_calls = getattr(msg, "tool_calls", None)
         if not tool_calls:
             return
@@ -427,9 +414,7 @@ class HermesCompressionMiddleware(AgentMiddleware):
         response = self.aux_model.invoke([system, human])
         text = getattr(response, "content", response)
         if isinstance(text, list):
-            text = "\n".join(
-                part.get("text", "") if isinstance(part, dict) else str(part) for part in text
-            )
+            text = "\n".join(part.get("text", "") if isinstance(part, dict) else str(part) for part in text)
         return str(text or "").strip()
 
     def _fallback_summary(self, middle: list[AnyMessage], *, exc: Exception) -> str:
@@ -447,9 +432,7 @@ class HermesCompressionMiddleware(AgentMiddleware):
 
     # ── middleware hook ──────────────────────────────────────────────
 
-    def before_model(
-        self, state: Any, runtime: Any | None = None
-    ) -> dict[str, Any] | None:
+    def before_model(self, state: Any, runtime: Any | None = None) -> dict[str, Any] | None:
         """If the conversation is over threshold, replace ``messages`` with compressed form."""
         if isinstance(state, dict):
             messages = state.get("messages")

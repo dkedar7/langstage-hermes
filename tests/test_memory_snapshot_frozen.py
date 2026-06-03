@@ -69,9 +69,7 @@ def test_snapshot_stays_byte_stable_after_add(tmp_hermes_home: Path) -> None:
     hash_before = _hash(*snapshot_before)
 
     # Mid-session write through the tool — disk changes, snapshot must not.
-    cmd = _invoke_memory_tool(
-        mw, action="add", target="memory", entry="Loves the section sign delimiter."
-    )
+    cmd = _invoke_memory_tool(mw, action="add", target="memory", entry="Loves the section sign delimiter.")
     # Command returns updates dict; apply it
     assert cmd.update is not None
     assert "turns_since_memory" in cmd.update
@@ -86,9 +84,7 @@ def test_snapshot_stays_byte_stable_after_add(tmp_hermes_home: Path) -> None:
     # The state snapshot fields were NOT updated by the Command — middleware
     # only updates `turns_since_memory` and the tool-message list.
     snapshot_after = (state["memory_snapshot"], state["user_snapshot"])
-    assert _hash(*snapshot_after) == hash_before, (
-        "Frozen-snapshot invariant violated: snapshot mutated after tool write"
-    )
+    assert _hash(*snapshot_after) == hash_before, "Frozen-snapshot invariant violated: snapshot mutated after tool write"
 
     # Disk DID change — verify the new entry made it
     mem_path = tmp_hermes_home / "memories" / "MEMORY.md"
@@ -199,9 +195,7 @@ def test_replace_by_index(tmp_hermes_home: Path) -> None:
     state: dict = {}
     state.update(mw.before_agent(state, runtime=None) or {})  # type: ignore[arg-type]
 
-    cmd = _invoke_memory_tool(
-        mw, action="replace", target="user", index=0, entry="new fact"
-    )
+    cmd = _invoke_memory_tool(mw, action="replace", target="user", index=0, entry="new fact")
     payload = json.loads(cmd.update["messages"][0].content)
     assert payload["success"] is True
     assert payload["entries"] == ["new fact"]
@@ -230,9 +224,7 @@ def test_before_agent_is_idempotent(tmp_hermes_home: Path) -> None:
     snap_before = state["memory_snapshot"]
 
     # Simulate sister-session writing in between
-    _write_memory_file(
-        tmp_hermes_home, "MEMORY.md", ["first load", "sister wrote this"]
-    )
+    _write_memory_file(tmp_hermes_home, "MEMORY.md", ["first load", "sister wrote this"])
 
     # Second before_agent call (same state) — must NOT reload
     result = mw.before_agent(state, runtime=None)  # type: ignore[arg-type]

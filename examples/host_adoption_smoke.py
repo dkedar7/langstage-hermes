@@ -54,6 +54,7 @@ def main() -> int:
     except ImportError:
         # config module may have moved across deepagent-code versions.
         from deepagent_code import config as code_config  # type: ignore[no-redef]
+
         CodeConfig = getattr(code_config, "CodeConfig", None)
     if CodeConfig is None:
         print("    !! could not locate CodeConfig; skipping deepagent-code config check")

@@ -50,14 +50,16 @@ _OS_PLATFORM_MAP = {
 }
 
 # Directories we never treat as skills.
-_EXCLUDED_DIR_NAMES = frozenset({
-    "_archived",
-    "node_modules",
-    ".git",
-    "__pycache__",
-    ".venv",
-    "venv",
-})
+_EXCLUDED_DIR_NAMES = frozenset(
+    {
+        "_archived",
+        "node_modules",
+        ".git",
+        "__pycache__",
+        ".venv",
+        "venv",
+    }
+)
 
 
 def _current_os_platform() -> str:
@@ -75,11 +77,7 @@ def _current_session_platform() -> str:
     SPEC §10 uses this for ``skills.platform_disabled`` lookups. Defaults to
     ``"cli"``. ``HERMES_PLATFORM`` wins over ``HERMES_SESSION_PLATFORM``.
     """
-    return (
-        os.environ.get("HERMES_PLATFORM")
-        or os.environ.get("HERMES_SESSION_PLATFORM")
-        or "cli"
-    )
+    return os.environ.get("HERMES_PLATFORM") or os.environ.get("HERMES_SESSION_PLATFORM") or "cli"
 
 
 # ---------------------------------------------------------------------------
@@ -260,17 +258,11 @@ class SkillLibrary:
         frontmatter_data = dict(frontmatter_data)
         frontmatter_data.setdefault("name", name)
         if frontmatter_data.get("name") != name:
-            raise ValueError(
-                f"frontmatter name {frontmatter_data.get('name')!r} does not match "
-                f"supplied name {name!r}"
-            )
+            raise ValueError(f"frontmatter name {frontmatter_data.get('name')!r} does not match supplied name {name!r}")
 
         errors = validate_frontmatter(frontmatter_data, parent_dir_name=name)
         if errors:
-            raise ValueError(
-                f"SKILL.md frontmatter for {name!r} is invalid:\n- "
-                + "\n- ".join(errors)
-            )
+            raise ValueError(f"SKILL.md frontmatter for {name!r} is invalid:\n- " + "\n- ".join(errors))
 
         base = Path(target_dir) if target_dir is not None else self._default_write_dir()
         skill_root = base / category / name if category else base / name
