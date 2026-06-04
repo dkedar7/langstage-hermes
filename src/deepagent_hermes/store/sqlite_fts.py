@@ -38,7 +38,7 @@ import time
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from langgraph.store.base import (
     BaseStore,
@@ -897,8 +897,32 @@ class SqliteFtsStore(BaseStore):
 
     # ── op handlers ──────────────────────────────────────────────────
 
+    # ----- kv namespace allow-list -----------------------------------
+    # Generic single-segment namespaces that map to a kv table of the
+    # same name. Currently just ``curator_state``; other components can
+    # add their own table to the schema and append the name here.
+    # state_meta is a different shape and handled via dedicated helpers.
+    _KV_NAMESPACES: ClassVar[frozenset[str]] = frozenset({"curator_state"})
+
     def _do_get(self, op: GetOp) -> Item | None:
         namespace = op.namespace
+        # Generic kv read for the single-segment namespaces we persist
+        # (currently just ``curator_state``).
+        if len(namespace) == 1 and namespace[0] in self._KV_NAMESPACES:
+            table = namespace[0]
+            with self._lock:
+                row = self._conn.execute(
+                    f"SELECT value FROM {table} WHERE key = ?", (op.key,)
+                ).fetchone()
+            if not row:
+                return None
+            try:
+                value = json.loads(row[0]) if row[0] else None
+            except (json.JSONDecodeError, TypeError):
+                value = row[0]
+            now = datetime.now(tz=UTC)
+            return Item(value=value if isinstance(value, dict) else {"value": value},
+                        key=op.key, namespace=namespace, created_at=now, updated_at=now)
         # ("messages", session_id, role) maps to a single row.
         if len(namespace) >= 2 and namespace[0] == "messages" and op.key.isdigit():
             session_id = namespace[1]
@@ -979,6 +1003,25 @@ class SqliteFtsStore(BaseStore):
 
         if namespace and namespace[0] == "sessions":
             self.ensure_session(op.key, **op.value)
+            return
+
+        # Generic key-value persistence (curator_state and any future single-
+        # table namespace). The schema declares ``curator_state(key, value)``
+        # as a plain kv store; we treat ``("curator_state",)`` and any other
+        # single-segment namespace not handled above as kv writes to a table
+        # of that name. The table must exist; we don't auto-create.
+        if len(namespace) == 1 and namespace[0] in self._KV_NAMESPACES:
+            table = namespace[0]
+            payload = json.dumps(op.value)
+
+            def _do_kv(conn: sqlite3.Connection) -> None:
+                conn.execute(
+                    f"INSERT INTO {table}(key, value) VALUES (?, ?) "
+                    f"ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (op.key, payload),
+                )
+
+            self._execute_write(_do_kv)
             return
 
         # Unknown namespace — refuse silently rather than raise.
