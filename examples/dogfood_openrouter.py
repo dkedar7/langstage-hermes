@@ -36,10 +36,8 @@ PROMPTS = [
     # 2-4. apply the procedure to three small functions
     "Write `parse_duration(s: str) -> int` that converts strings like "
     "'30s', '5m', '2h' into seconds. Save to durations.py with write_file.",
-    "Now write `format_bytes(n: int) -> str` that formats 1024 -> '1.0 KiB', "
-    "1048576 -> '1.0 MiB'. Save to bytes_fmt.py.",
-    "One more: `truncate(s: str, max_len: int = 80) -> str` that adds an "
-    "ellipsis when cut. Save to truncate.py.",
+    "Now write `format_bytes(n: int) -> str` that formats 1024 -> '1.0 KiB', 1048576 -> '1.0 MiB'. Save to bytes_fmt.py.",
+    "One more: `truncate(s: str, max_len: int = 80) -> str` that adds an ellipsis when cut. Save to truncate.py.",
     # 5. invite persistence
     "Across these three, what's the pattern you're following? If you have "
     "tools to persist that pattern (skills / memory), use them now so a "
@@ -88,8 +86,7 @@ def main() -> int:
     cfg = HermesConfig.resolve()
     sid = "openrouter-dogfood-001"
     agent = create_hermes_agent(cfg, workspace=workspace, session_id=sid)
-    print(f"agent built in {time.perf_counter() - t0:.2f}s "
-          f"({len(agent.deepagent_hermes_library.list())} bundled skills)")
+    print(f"agent built in {time.perf_counter() - t0:.2f}s ({len(agent.deepagent_hermes_library.list())} bundled skills)")
     print()
 
     memory_md = tmp_home / "memories" / "MEMORY.md"
@@ -171,6 +168,7 @@ def main() -> int:
 
     # FTS5
     import sqlite3
+
     db = tmp_home / "state.db"
     if db.exists():
         conn = sqlite3.connect(str(db))

@@ -298,10 +298,12 @@ def _slash_tools(args: str, state: dict[str, Any]) -> bool:
         names = TOOLSETS.get(ts, [])
         click.echo(f"  ● {ts:<18}  {', '.join(names)}")
     stubbed = len(TOOLSETS) - len(IMPLEMENTED_TOOLSETS)
-    click.echo(click.style(
-        f"  (+{stubbed} declared but stubbed — run `deepagent-hermes tools` for the full taxonomy)",
-        fg="bright_black",
-    ))
+    click.echo(
+        click.style(
+            f"  (+{stubbed} declared but stubbed — run `deepagent-hermes tools` for the full taxonomy)",
+            fg="bright_black",
+        )
+    )
     return False
 
 
@@ -343,10 +345,12 @@ def _slash_skills(args: str, state: dict[str, Any]) -> bool:
         click.echo(skill.body[:1500])
         if len(skill.body) > 1500:
             extra = len(skill.body) - 1500
-            click.echo(click.style(
-                f"\n... (+{extra} more chars — full body via `deepagent-hermes skills show {skill.name}`)",
-                fg="bright_black",
-            ))
+            click.echo(
+                click.style(
+                    f"\n... (+{extra} more chars — full body via `deepagent-hermes skills show {skill.name}`)",
+                    fg="bright_black",
+                )
+            )
         return False
 
     query = parts[0] if parts else ""
@@ -429,14 +433,18 @@ def _slash_memory(args: str, state: dict[str, Any]) -> bool:
         else:
             click.echo(click.style(f"{label}: empty", fg="bright_black"))
     if not shown_anything:
-        click.echo(click.style(
-            "  Memory grows as the reflection subagent decides things are worth saving,",
-            fg="bright_black",
-        ))
-        click.echo(click.style(
-            "  or by user request (\"remember that I prefer X\").",
-            fg="bright_black",
-        ))
+        click.echo(
+            click.style(
+                "  Memory grows as the reflection subagent decides things are worth saving,",
+                fg="bright_black",
+            )
+        )
+        click.echo(
+            click.style(
+                '  or by user request ("remember that I prefer X").',
+                fg="bright_black",
+            )
+        )
     return False
 
 
@@ -601,8 +609,7 @@ def tools(toolset_filter: str | None, implemented_only: bool) -> None:
         header_color = "cyan" if is_impl else "bright_black"
         suffix = "" if is_impl else "  (declared, not implemented in v0.1)"
         click.echo(
-            click.style(f"  {mark} {ts:<20}", fg=header_color)
-            + click.style(f" {len(names)} tool(s){suffix}", fg="bright_black")
+            click.style(f"  {mark} {ts:<20}", fg=header_color) + click.style(f" {len(names)} tool(s){suffix}", fg="bright_black")
         )
         for name in names:
             click.echo(click.style(f"      · {name}", fg="bright_black"))
@@ -1113,8 +1120,11 @@ def verify(model_id: str | None) -> None:
     prompts_dir = pkg_dir / "_prompts"
     skills_dir = pkg_dir / "_bundled_skills"
     needed_prompts = [
-        "default_identity.md", "combined_review.md", "skill_review.md",
-        "memory_review.md", "compression_summary.md",
+        "default_identity.md",
+        "combined_review.md",
+        "skill_review.md",
+        "memory_review.md",
+        "compression_summary.md",
     ]
     missing = [p for p in needed_prompts if not (prompts_dir / p).is_file()]
     if missing:
@@ -1127,10 +1137,12 @@ def verify(model_id: str | None) -> None:
     n_bundled = sum(1 for _ in skills_dir.rglob("SKILL.md")) if skills_dir.is_dir() else 0
     if n_bundled == 0:
         click.echo(click.style("  ⚠ no bundled SKILL.md files found", fg="yellow"))
-        click.echo(click.style(
-            f"    expected at {skills_dir} — agent will still run with an empty library",
-            fg="bright_black",
-        ))
+        click.echo(
+            click.style(
+                f"    expected at {skills_dir} — agent will still run with an empty library",
+                fg="bright_black",
+            )
+        )
     else:
         click.echo(click.style(f"  ✓ bundled skills: {n_bundled} SKILL.md files", fg="green"))
 
@@ -1225,10 +1237,12 @@ def verify(model_id: str | None) -> None:
 
     click.echo()
     click.echo(click.style("VERIFY: PASS — runtime is wired end-to-end.", fg="green", bold=True))
-    click.echo(click.style(
-        "  next: `deepagent-hermes chat`  (or set DEEPAGENT_AGENT_SPEC=deepagent_hermes.agent:graph in a host)",
-        fg="bright_black",
-    ))
+    click.echo(
+        click.style(
+            "  next: `deepagent-hermes chat`  (or set DEEPAGENT_AGENT_SPEC=deepagent_hermes.agent:graph in a host)",
+            fg="bright_black",
+        )
+    )
 
 
 @cli.command()

@@ -128,7 +128,7 @@ class HarborSandboxBackend(BaseSandbox):
                 self._env.exec(command, timeout_sec=effective),
                 timeout=effective,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # BaseSandbox.read/ls/grep parse stdout; surfacing the error as
             # a non-zero exit code keeps them on the error path instead of
             # crashing the agent.
@@ -192,7 +192,7 @@ class HarborSandboxBackend(BaseSandbox):
                 continue
             try:
                 content = base64.b64decode((result.stdout or "").strip())
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 responses.append(FileDownloadResponse(path=path, content=None, error=f"decode_error: {exc}"))
                 continue
             responses.append(FileDownloadResponse(path=path, content=content))
@@ -240,7 +240,7 @@ class DeepagentHermesAgent(BaseAgent):
             from deepagent_hermes import __version__
 
             return __version__
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     async def setup(self, environment: BaseEnvironment) -> None:
@@ -254,8 +254,7 @@ class DeepagentHermesAgent(BaseAgent):
             result = await environment.exec(cmd, timeout_sec=30)
             if result.return_code != 0:
                 raise RuntimeError(
-                    f"deepagent-hermes setup failed (rc={result.return_code}): "
-                    f"{(result.stderr or result.stdout or '').strip()}"
+                    f"deepagent-hermes setup failed (rc={result.return_code}): {(result.stderr or result.stdout or '').strip()}"
                 )
 
     async def run(
@@ -297,7 +296,7 @@ class DeepagentHermesAgent(BaseAgent):
                 {"messages": [{"role": "user", "content": instruction}]},
                 config={"configurable": {"thread_id": graph.deepagent_hermes_session_id}},
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             elapsed = time.monotonic() - start
             self.logger.exception("deepagent-hermes agent crashed after %.1fs: %s", elapsed, exc)
             context.metadata["error"] = str(exc)

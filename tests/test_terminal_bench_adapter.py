@@ -52,7 +52,7 @@ class FakeEnv:
         # without an explicit user, which our stub ignores.
         self.default_user: str | int | None = None
 
-    async def exec(self, command: str, **kwargs):  # noqa: ANN003
+    async def exec(self, command: str, **kwargs):
         self.calls.append((command, kwargs))
         # Cheap pattern match: writes succeed silently, reads return canned.
         if command.startswith("test -f"):
@@ -93,9 +93,7 @@ def test_harbor_backend_upload_download_roundtrip():
         loop = asyncio.get_running_loop()
         backend = HarborSandboxBackend(env, loop)
 
-        up = await asyncio.to_thread(
-            backend.upload_files, [("/tmp/x.txt", b"hello world\n")]
-        )
+        up = await asyncio.to_thread(backend.upload_files, [("/tmp/x.txt", b"hello world\n")])
         assert up[0].error is None
         # Last upload command should be the base64-pipe write.
         last_up_cmd = env.calls[-1][0]
@@ -114,7 +112,7 @@ def test_harbor_backend_download_missing_file_returns_not_found():
     from terminal_bench import HarborSandboxBackend
 
     class MissingEnv(FakeEnv):
-        async def exec(self, command: str, **kwargs):  # noqa: ANN003
+        async def exec(self, command: str, **kwargs):
             self.calls.append((command, kwargs))
             if command.startswith("test -f"):
                 return FakeExecResult(return_code=1)
