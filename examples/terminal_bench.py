@@ -147,18 +147,68 @@ class HarborSandboxBackend(BaseSandbox):
     # preflight check. We avoid round-tripping to disk on the host by
     # base64-piping the content through a single env.exec.
 
+    # `argv` on Linux maxes out around 128 KiB; anything bigger than that
+    # has to leave argv and ride either stdin or a chunked write. We pick
+    # chunked because Harbor's env.exec doesn't expose stdin. A safety
+    # margin under the real limit covers shell builtin overhead.
+    _MAX_INLINE_ARGV_BYTES = 64 * 1024
+
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         responses: list[FileUploadResponse] = []
         for path, content in files:
             b64 = base64.b64encode(content).decode("ascii")
-            cmd = (
-                f"mkdir -p {shlex.quote(str(Path(path).parent))} && "
-                f"printf '%s' {shlex.quote(b64)} | base64 -d > {shlex.quote(path)}"
-            )
-            result = self._await(
-                self._env.exec(cmd, timeout_sec=self._default_timeout),
-                timeout=self._default_timeout,
-            )
+            mkdir = f"mkdir -p {shlex.quote(str(Path(path).parent))}"
+            if len(b64) <= self._MAX_INLINE_ARGV_BYTES:
+                cmd = f"{mkdir} && printf '%s' {shlex.quote(b64)} | base64 -d > {shlex.quote(path)}"
+                result = self._await(
+                    self._env.exec(cmd, timeout_sec=self._default_timeout),
+                    timeout=self._default_timeout,
+                )
+            else:
+                # Chunked path: stream the base64 in pieces. Each chunk is
+                # appended to a temp file, then we base64-decode the whole
+                # thing into the target. We accept the per-chunk RTT cost
+                # because the alternative is the trial crashing with
+                # OSError(7) "Argument list too long" — surfaced on the
+                # 2026-06-04 make-mips-interpreter run when the agent
+                # tried to write a 200 KB-ish JS file in one call.
+                tmp = f"/tmp/hermes-upload-{uuid.uuid4().hex}.b64"
+                init = self._await(
+                    self._env.exec(f"{mkdir} && : > {shlex.quote(tmp)}", timeout_sec=60),
+                    timeout=60,
+                )
+                if init.return_code != 0:
+                    responses.append(
+                        FileUploadResponse(
+                            path=path,
+                            error=(init.stderr or init.stdout or "init failed").strip(),
+                        )
+                    )
+                    continue
+                ok = True
+                for start in range(0, len(b64), self._MAX_INLINE_ARGV_BYTES):
+                    chunk = b64[start : start + self._MAX_INLINE_ARGV_BYTES]
+                    cmd = f"printf '%s' {shlex.quote(chunk)} >> {shlex.quote(tmp)}"
+                    r = self._await(
+                        self._env.exec(cmd, timeout_sec=self._default_timeout),
+                        timeout=self._default_timeout,
+                    )
+                    if r.return_code != 0:
+                        responses.append(
+                            FileUploadResponse(
+                                path=path,
+                                error=(r.stderr or r.stdout or "chunk write failed").strip(),
+                            )
+                        )
+                        ok = False
+                        break
+                if not ok:
+                    continue
+                finalise = f"base64 -d < {shlex.quote(tmp)} > {shlex.quote(path)} && rm -f {shlex.quote(tmp)}"
+                result = self._await(
+                    self._env.exec(finalise, timeout_sec=self._default_timeout),
+                    timeout=self._default_timeout,
+                )
             if result.return_code != 0:
                 err = (result.stderr or result.stdout or "non-zero exit").strip()
                 if "Permission denied" in err:
@@ -288,18 +338,34 @@ class DeepagentHermesAgent(BaseAgent):
         start = time.monotonic()
         graph = create_hermes_agent(cfg, backend=backend)
 
+        # Harbor passes a freshly-constructed AgentContext whose `metadata`
+        # is None. Initialise it before writing so we don't TypeError on
+        # the error path.
+        if context.metadata is None:
+            context.metadata = {}
+
         # The instruction is the user's first turn. LangGraph's recursion
         # limit (1000) covers tool-call ping-pong; the iteration budget
         # middleware enforces the agent-level cap (default 10).
+        #
+        # We call the SYNC `invoke()` on a worker thread instead of
+        # `await ainvoke(...)`. Reason: the agent's checkpointer is
+        # SqliteSaver, which does not implement the async API (`aget_tuple`
+        # raises NotImplementedError). Wrapping in `to_thread` lets the
+        # graph drive its tools synchronously while the HarborSandboxBackend
+        # still bridges back into this event loop via
+        # `run_coroutine_threadsafe` to call `env.exec(...)`.
         try:
-            final = await graph.ainvoke(
+            final = await asyncio.to_thread(
+                graph.invoke,
                 {"messages": [{"role": "user", "content": instruction}]},
-                config={"configurable": {"thread_id": graph.deepagent_hermes_session_id}},
+                {"configurable": {"thread_id": graph.deepagent_hermes_session_id}},
             )
         except Exception as exc:
             elapsed = time.monotonic() - start
             self.logger.exception("deepagent-hermes agent crashed after %.1fs: %s", elapsed, exc)
             context.metadata["error"] = str(exc)
+            context.metadata["elapsed_sec"] = round(elapsed, 1)
             return
 
         elapsed = time.monotonic() - start
@@ -311,11 +377,19 @@ class DeepagentHermesAgent(BaseAgent):
         context.n_cache_tokens = usage["cache_read"]
         context.n_output_tokens = usage["output_tokens"]
         # Cost is provider-specific; we leave it 0.0 unless the user
-        # exports HERMES_BENCH_COST_PER_INPUT_KTOK / _OUTPUT_KTOK as a
-        # rough back-of-envelope estimator.
-        ipk = float(os.environ.get("HERMES_BENCH_COST_PER_INPUT_KTOK", "0") or 0)
-        opk = float(os.environ.get("HERMES_BENCH_COST_PER_OUTPUT_KTOK", "0") or 0)
-        context.cost_usd = (usage["input_tokens"] / 1000 * ipk) + (usage["output_tokens"] / 1000 * opk)
+        # exports per-megatoken rates. Splitting fresh-input vs cached-
+        # input matters: Anthropic's cache-read tier is ~10x cheaper than
+        # fresh input, so for hermes (high cache-hit rate) the headline
+        # number lies if we charge all input at the fresh rate.
+        i_mtok = float(os.environ.get("HERMES_BENCH_COST_PER_INPUT_MTOK", "0") or 0)
+        o_mtok = float(os.environ.get("HERMES_BENCH_COST_PER_OUTPUT_MTOK", "0") or 0)
+        c_mtok = float(os.environ.get("HERMES_BENCH_COST_PER_CACHE_READ_MTOK", "0") or 0)
+        fresh_input = max(usage["input_tokens"] - usage["cache_read"], 0)
+        context.cost_usd = (
+            fresh_input / 1_000_000 * i_mtok
+            + usage["cache_read"] / 1_000_000 * c_mtok
+            + usage["output_tokens"] / 1_000_000 * o_mtok
+        )
         context.metadata.update(
             {
                 "elapsed_sec": round(elapsed, 1),
