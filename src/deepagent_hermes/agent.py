@@ -117,7 +117,15 @@ def create_hermes_agent(
     db_path = cfg.hermes_home / "state.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     store = SqliteFtsStore(db_path=str(db_path))
-    library = SkillLibrary(_default_skill_dirs(cfg))
+    # Audit log shares the state.db file with the store (separate table).
+    # We give every library the audit log so agent skill mutations are
+    # automatically recorded; the CLI's `audit rollback` reads from the
+    # same table.
+    from deepagent_hermes.skills.audit import SkillAuditLog
+
+    audit_log = SkillAuditLog(db_path=str(db_path))
+    library = SkillLibrary(_default_skill_dirs(cfg), audit_log=audit_log)
+    library.set_mutation_context(session_id=sid, source="agent")
 
     main_model = _init_chat_model(cfg.model_default)
     aux_model = _init_chat_model(cfg.model_aux) if cfg.model_aux else main_model

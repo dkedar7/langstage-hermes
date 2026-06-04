@@ -243,6 +243,12 @@ def _skill_manage_impl(
     tool_call_id: str,
 ) -> Command:
     """Implement the five mutation actions and return a state-resetting Command."""
+    # Stash provenance so the audit log records who made the change.
+    # The agent's compiled graph doesn't expose its session_id to a tool
+    # handler; the recorder middleware does, but its hook fires after
+    # the tool. Leaving session_id None here is fine — `list` can join
+    # on tool_call_id when needed.
+    library.set_mutation_context(source="agent", tool_call_id=tool_call_id or None)
     try:
         if action == "create":
             path = _action_create(library, name=name, description=description, body=body, category=category)
@@ -304,7 +310,7 @@ def _action_create(
     if not body:
         raise ValueError("create: 'body' is required")
     fm = {"name": name, "description": description}
-    return library.write(name, fm, body, category=category or None)
+    return library.write(name, fm, body, category=category or None, audit_action="create")
 
 
 def _action_patch(library: SkillLibrary, *, name: str, old_str: str, new_str: str) -> Path:
@@ -313,14 +319,23 @@ def _action_patch(library: SkillLibrary, *, name: str, old_str: str, new_str: st
     skill = library.get(name)
     if skill is None:
         raise ValueError(f"skill {name!r} not found")
-    full = skill.path.read_text(encoding="utf-8")
+    before_bytes = skill.path.read_bytes()
+    full = before_bytes.decode("utf-8")
     if old_str not in full:
         raise ValueError("patch: 'old_str' not found in SKILL.md")
     count = full.count(old_str)
     if count > 1:
         raise ValueError(f"patch: 'old_str' is ambiguous (matched {count} times) — supply more context")
     full = full.replace(old_str, new_str, 1)
-    skill.path.write_text(full, encoding="utf-8")
+    after_bytes = full.encode("utf-8")
+    skill.path.write_bytes(after_bytes)
+    library._record_mutation(
+        skill_name=name,
+        action="patch",
+        skill_path=skill.path,
+        before_content=before_bytes,
+        after_content=after_bytes,
+    )
     return skill.path
 
 
@@ -345,7 +360,7 @@ def _action_write_file(
         # Place under the same search dir
         search_dir = library._find_search_dir_for(existing.path)
         target_dir = search_dir
-    return library.write(name, fm, body, category=category, target_dir=target_dir)
+    return library.write(name, fm, body, category=category, target_dir=target_dir, audit_action="write_file")
 
 
 def _action_pin(library: SkillLibrary, *, name: str, pinned: bool) -> Path:
@@ -367,12 +382,21 @@ def _action_pin(library: SkillLibrary, *, name: str, pinned: bool) -> Path:
         meta["metadata"] = nested
     elif "metadata" in meta:
         del meta["metadata"]
-    # Re-validate + rewrite via library.write (preserves dir/category).
+    # Re-validate + rewrite (preserves dir/category — we keep the existing path).
     errors = validate_frontmatter(meta, parent_dir_name=skill.name)
     if errors:
         raise ValueError("pin/unpin would produce invalid frontmatter:\n- " + "\n- ".join(errors))
+    before_bytes = skill.path.read_bytes()
     post = frontmatter.Post(skill.body, **meta)
-    skill.path.write_bytes(frontmatter.dumps(post).encode("utf-8"))
+    after_bytes = frontmatter.dumps(post).encode("utf-8")
+    skill.path.write_bytes(after_bytes)
+    library._record_mutation(
+        skill_name=name,
+        action="pin" if pinned else "unpin",
+        skill_path=skill.path,
+        before_content=before_bytes,
+        after_content=after_bytes,
+    )
     return skill.path
 
 

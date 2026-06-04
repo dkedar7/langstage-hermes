@@ -138,12 +138,38 @@ CREATE TABLE IF NOT EXISTS curator_state (
     value TEXT
 );
 
+-- Skill mutation log: every create / patch / write_file / delete / pin / unpin
+-- the agent or CLI performs lands here so we can diff and roll back. The
+-- before/after blobs are full SKILL.md content (frontmatter + body) so a
+-- rollback is a single read + write — no need to replay a chain of patches.
+-- Sized for thousands of mutations per HERMES_HOME, not millions; if your
+-- agent rewrites a skill in a tight loop, the bound is wall-clock disk
+-- pressure, not row count.
+CREATE TABLE IF NOT EXISTS skill_mutations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp REAL NOT NULL,
+    skill_name TEXT NOT NULL,
+    action TEXT NOT NULL,
+    source TEXT,
+    session_id TEXT,
+    tool_call_id TEXT,
+    skill_path TEXT,
+    before_hash TEXT,
+    after_hash TEXT,
+    before_content BLOB,
+    after_content BLOB
+);
+
 CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source);
 CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_session_active
     ON messages(session_id, active, timestamp);
+CREATE INDEX IF NOT EXISTS idx_skill_mutations_name_ts
+    ON skill_mutations(skill_name, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_mutations_session
+    ON skill_mutations(session_id);
 """
 
 # FTS5 virtual tables + triggers. content is the indexed payload; we
@@ -911,9 +937,7 @@ class SqliteFtsStore(BaseStore):
         if len(namespace) == 1 and namespace[0] in self._KV_NAMESPACES:
             table = namespace[0]
             with self._lock:
-                row = self._conn.execute(
-                    f"SELECT value FROM {table} WHERE key = ?", (op.key,)
-                ).fetchone()
+                row = self._conn.execute(f"SELECT value FROM {table} WHERE key = ?", (op.key,)).fetchone()
             if not row:
                 return None
             try:
@@ -921,8 +945,13 @@ class SqliteFtsStore(BaseStore):
             except (json.JSONDecodeError, TypeError):
                 value = row[0]
             now = datetime.now(tz=UTC)
-            return Item(value=value if isinstance(value, dict) else {"value": value},
-                        key=op.key, namespace=namespace, created_at=now, updated_at=now)
+            return Item(
+                value=value if isinstance(value, dict) else {"value": value},
+                key=op.key,
+                namespace=namespace,
+                created_at=now,
+                updated_at=now,
+            )
         # ("messages", session_id, role) maps to a single row.
         if len(namespace) >= 2 and namespace[0] == "messages" and op.key.isdigit():
             session_id = namespace[1]
@@ -1016,8 +1045,7 @@ class SqliteFtsStore(BaseStore):
 
             def _do_kv(conn: sqlite3.Connection) -> None:
                 conn.execute(
-                    f"INSERT INTO {table}(key, value) VALUES (?, ?) "
-                    f"ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    f"INSERT INTO {table}(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                     (op.key, payload),
                 )
 

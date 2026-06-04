@@ -176,6 +176,11 @@ class SkillLibrary:
             (bundled + user + project — see :func:`_default_search_dirs`).
         config: Optional dict shaped like ``{"disabled": [...],
             "platform_disabled": {"<platform>": [...]}}`` — see SPEC §2.
+        audit_log: Optional :class:`~deepagent_hermes.skills.audit.SkillAuditLog`.
+            When provided, every successful ``write()`` / ``delete()``
+            appends a row capturing the full SKILL.md before+after so
+            the change can be diffed and rolled back. Pass ``None`` for
+            test fixtures and read-only callers.
 
     The library performs no caching across calls — every ``list()`` /
     ``get()`` re-scans disk. The prompt builder in ``prompt.py`` adds the
@@ -187,9 +192,20 @@ class SkillLibrary:
         dirs: list[Path] | None = None,
         *,
         config: dict[str, Any] | None = None,
+        audit_log: Any = None,
     ) -> None:
         self.dirs: list[Path] = [Path(d) for d in (dirs if dirs is not None else _default_search_dirs())]
         self.config: dict[str, Any] = config or {}
+        # Typed as Any so audit.py doesn't have to be imported eagerly at
+        # library import time — the library is used in read-only contexts
+        # (tests, validators) that should not pay for sqlite startup.
+        self.audit_log: Any = audit_log
+        # Per-call provenance overrides. The default values are picked up
+        # by record-write/delete; callers can swap them in for a single
+        # mutation using ``set_mutation_context``.
+        self._mutation_source: str | None = None
+        self._mutation_session_id: str | None = None
+        self._mutation_tool_call_id: str | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -237,6 +253,58 @@ class SkillLibrary:
                 return skill
         return None
 
+    def set_mutation_context(
+        self,
+        *,
+        source: str | None = None,
+        session_id: str | None = None,
+        tool_call_id: str | None = None,
+    ) -> None:
+        """Stash provenance fields the audit log should record on the next
+        mutation. Callers (the agent's ``skill_manage`` tool, the CLI's
+        ``audit rollback``) set these before invoking ``write`` / ``delete``.
+
+        The fields stay set until explicitly cleared or overridden — they
+        are not auto-reset after a single mutation. That matches the way
+        we use them: a tool handler sets them once and may issue several
+        related writes (e.g. ``write_file`` then a follow-up validate).
+        """
+        if source is not None:
+            self._mutation_source = source
+        if session_id is not None:
+            self._mutation_session_id = session_id
+        if tool_call_id is not None:
+            self._mutation_tool_call_id = tool_call_id
+
+    def _record_mutation(
+        self,
+        *,
+        skill_name: str,
+        action: str,
+        skill_path: Path | None,
+        before_content: bytes | None,
+        after_content: bytes | None,
+    ) -> None:
+        """Best-effort write to the audit log. Failure is logged but never
+        raised — the actual file mutation already succeeded by the time
+        this is called, and breaking the caller because we can't write to
+        the log would be worse than a missing audit row."""
+        if self.audit_log is None:
+            return
+        try:
+            self.audit_log.record(
+                skill_name=skill_name,
+                action=action,
+                before_content=before_content,
+                after_content=after_content,
+                source=self._mutation_source,
+                session_id=self._mutation_session_id,
+                tool_call_id=self._mutation_tool_call_id,
+                skill_path=skill_path,
+            )
+        except Exception:
+            logger.warning("Failed to record %s mutation for skill %s", action, skill_name, exc_info=True)
+
     def write(
         self,
         name: str,
@@ -245,12 +313,19 @@ class SkillLibrary:
         *,
         category: str | None = None,
         target_dir: Path | None = None,
+        audit_action: str | None = None,
     ) -> Path:
         """Create or overwrite ``<dir>/<category>/<name>/SKILL.md``.
 
         Writes to the *last* writable search dir (the user/project dir)
         unless ``target_dir`` is supplied. Validates the frontmatter first
         and raises ``ValueError`` on failure.
+
+        Args:
+            audit_action: Override the action label recorded in the audit
+                log (e.g. ``"create"`` vs ``"write_file"`` vs ``"patch"``).
+                Defaults to ``"write_file"`` for an overwrite of an
+                existing skill, ``"create"`` for a new one.
 
         Returns the path to the written SKILL.md.
         """
@@ -269,8 +344,19 @@ class SkillLibrary:
         skill_root.mkdir(parents=True, exist_ok=True)
         skill_md = skill_root / "SKILL.md"
 
+        before_content = skill_md.read_bytes() if skill_md.exists() else None
         post = frontmatter.Post(body, **frontmatter_data)
-        skill_md.write_bytes(frontmatter.dumps(post).encode("utf-8"))
+        after_bytes = frontmatter.dumps(post).encode("utf-8")
+        skill_md.write_bytes(after_bytes)
+
+        action = audit_action or ("create" if before_content is None else "write_file")
+        self._record_mutation(
+            skill_name=name,
+            action=action,
+            skill_path=skill_md,
+            before_content=before_content,
+            after_content=after_bytes,
+        )
         return skill_md
 
     def delete(self, name: str) -> bool:
@@ -282,6 +368,11 @@ class SkillLibrary:
         skill = self.get(name)
         if skill is None:
             return False
+
+        # Snapshot the SKILL.md before moving so the audit log can record
+        # the pre-delete content (recovery aid — rollback uses this).
+        before_content = skill.path.read_bytes() if skill.path.exists() else None
+        original_path = skill.path
 
         # Archive under the writable dir of origin (which is `skill.directory`'s
         # nearest search-dir ancestor).
@@ -295,6 +386,14 @@ class SkillLibrary:
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         dest = archive_root / f"{skill.name}-{stamp}"
         shutil.move(str(skill.directory), str(dest))
+
+        self._record_mutation(
+            skill_name=name,
+            action="delete",
+            skill_path=original_path,
+            before_content=before_content,
+            after_content=None,
+        )
         return True
 
     def validate_all(self) -> dict[str, list[str]]:

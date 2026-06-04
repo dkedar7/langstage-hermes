@@ -7,7 +7,8 @@ Subcommands:
 
   - ``chat``             — interactive REPL with slash-command dispatch
   - ``tools``            — list registered toolsets + check status
-  - ``skills``           — list / show / install / audit
+  - ``skills``           — list / show / install / audit (validates)
+  - ``audit``            — log / show / diff / rollback (skill mutation history)
   - ``cron``             — list / create / delete / pause / resume / run-due / daemon
   - ``curator``          — status / run / pause / resume / pin / unpin
   - ``plugins``          — list / enable / disable
@@ -298,10 +299,12 @@ def _slash_tools(args: str, state: dict[str, Any]) -> bool:
         names = TOOLSETS.get(ts, [])
         click.echo(f"  ● {ts:<18}  {', '.join(names)}")
     stubbed = len(TOOLSETS) - len(IMPLEMENTED_TOOLSETS)
-    click.echo(click.style(
-        f"  (+{stubbed} declared but stubbed — run `deepagent-hermes tools` for the full taxonomy)",
-        fg="bright_black",
-    ))
+    click.echo(
+        click.style(
+            f"  (+{stubbed} declared but stubbed — run `deepagent-hermes tools` for the full taxonomy)",
+            fg="bright_black",
+        )
+    )
     return False
 
 
@@ -343,10 +346,12 @@ def _slash_skills(args: str, state: dict[str, Any]) -> bool:
         click.echo(skill.body[:1500])
         if len(skill.body) > 1500:
             extra = len(skill.body) - 1500
-            click.echo(click.style(
-                f"\n... (+{extra} more chars — full body via `deepagent-hermes skills show {skill.name}`)",
-                fg="bright_black",
-            ))
+            click.echo(
+                click.style(
+                    f"\n... (+{extra} more chars — full body via `deepagent-hermes skills show {skill.name}`)",
+                    fg="bright_black",
+                )
+            )
         return False
 
     query = parts[0] if parts else ""
@@ -429,14 +434,18 @@ def _slash_memory(args: str, state: dict[str, Any]) -> bool:
         else:
             click.echo(click.style(f"{label}: empty", fg="bright_black"))
     if not shown_anything:
-        click.echo(click.style(
-            "  Memory grows as the reflection subagent decides things are worth saving,",
-            fg="bright_black",
-        ))
-        click.echo(click.style(
-            "  or by user request (\"remember that I prefer X\").",
-            fg="bright_black",
-        ))
+        click.echo(
+            click.style(
+                "  Memory grows as the reflection subagent decides things are worth saving,",
+                fg="bright_black",
+            )
+        )
+        click.echo(
+            click.style(
+                '  or by user request ("remember that I prefer X").',
+                fg="bright_black",
+            )
+        )
     return False
 
 
@@ -601,8 +610,7 @@ def tools(toolset_filter: str | None, implemented_only: bool) -> None:
         header_color = "cyan" if is_impl else "bright_black"
         suffix = "" if is_impl else "  (declared, not implemented in v0.1)"
         click.echo(
-            click.style(f"  {mark} {ts:<20}", fg=header_color)
-            + click.style(f" {len(names)} tool(s){suffix}", fg="bright_black")
+            click.style(f"  {mark} {ts:<20}", fg=header_color) + click.style(f" {len(names)} tool(s){suffix}", fg="bright_black")
         )
         for name in names:
             click.echo(click.style(f"      · {name}", fg="bright_black"))
@@ -626,8 +634,14 @@ def skills() -> None:
     """Inspect / install / audit bundled and user skills."""
 
 
-def _skill_library() -> Any:
-    """Build a SkillLibrary from defaults (bundled + user + project)."""
+def _skill_library(*, with_audit: bool = True) -> Any:
+    """Build a SkillLibrary from defaults (bundled + user + project).
+
+    By default attaches the per-home audit log so CLI mutations land in
+    the same ``skill_mutations`` table the agent writes to. Read-only
+    commands (``list``, ``show``) pass ``with_audit=False`` to skip
+    SQLite startup.
+    """
     from deepagent_hermes.config import hermes_home
     from deepagent_hermes.skills.library import SkillLibrary
 
@@ -639,7 +653,27 @@ def _skill_library() -> Any:
     project = Path.cwd() / ".deepagent-hermes" / "skills"
     if project.is_dir():
         dirs.append(project)
-    return SkillLibrary(dirs=dirs)
+    audit_log = None
+    if with_audit:
+        from deepagent_hermes.skills.audit import SkillAuditLog
+
+        db_path = hermes_home() / "state.db"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        audit_log = SkillAuditLog(db_path=str(db_path))
+    lib = SkillLibrary(dirs=dirs, audit_log=audit_log)
+    if audit_log is not None:
+        lib.set_mutation_context(source="cli")
+    return lib
+
+
+def _audit_log() -> Any:
+    """Open the per-home skill-mutation log."""
+    from deepagent_hermes.config import hermes_home
+    from deepagent_hermes.skills.audit import SkillAuditLog
+
+    db_path = hermes_home() / "state.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return SkillAuditLog(db_path=str(db_path))
 
 
 @skills.command("list")
@@ -752,6 +786,167 @@ def skills_audit() -> None:
     else:
         click.echo(click.style(f"\n  {n_bad} skill(s) failed validation.", fg="red"))
         sys.exit(1)
+
+
+# ── audit ──────────────────────────────────────────────────────────
+
+
+@cli.group()
+def audit() -> None:
+    """Inspect / roll back the skill mutation log.
+
+    Every ``skill_manage`` action the agent runs and every CLI skill
+    mutation appends a row to ``<HERMES_HOME>/state.db``. Use this group
+    to see what changed and to revert.
+    """
+
+
+def _format_mutation_row(row: Any, *, full: bool = False) -> str:
+    """Render a :class:`MutationRow` for terminal output."""
+    from datetime import datetime
+
+    ts = datetime.fromtimestamp(row.timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    source = row.source or "?"
+    head = f"#{row.id}  {ts}  {row.action:<10s}  {row.skill_name}  ({source})"
+    if not full:
+        return head
+    lines = [head]
+    if row.skill_path:
+        lines.append(f"    path: {row.skill_path}")
+    if row.session_id:
+        lines.append(f"    session: {row.session_id}")
+    if row.tool_call_id:
+        lines.append(f"    tool_call_id: {row.tool_call_id}")
+    if row.before_hash:
+        lines.append(f"    before sha256: {row.before_hash[:12]}…")
+    if row.after_hash:
+        lines.append(f"    after  sha256: {row.after_hash[:12]}…")
+    return "\n".join(lines)
+
+
+@audit.command("log")
+@click.option("--skill", "skill_name", default=None, help="Restrict to one skill.")
+@click.option("--limit", type=int, default=20, show_default=True, help="Max rows to show.")
+@click.option("--full", is_flag=True, help="Show full row details (path, hashes, session).")
+def audit_log_cmd(skill_name: str | None, limit: int, full: bool) -> None:
+    """Print recent skill mutations, most recent first."""
+    log = _audit_log()
+    rows = log.list(skill_name=skill_name, limit=limit)
+    if not rows:
+        if skill_name:
+            click.echo(f"No mutations recorded for {skill_name!r}.")
+        else:
+            click.echo("No skill mutations recorded yet.")
+        return
+    for r in rows:
+        click.echo(_format_mutation_row(r, full=full))
+
+
+@audit.command("show")
+@click.argument("mutation_id", type=int)
+@click.option("--diff", "show_diff", is_flag=True, help="Show unified diff of before vs after.")
+def audit_show_cmd(mutation_id: int, show_diff: bool) -> None:
+    """Show full content (or diff) of a single mutation."""
+    import difflib
+
+    log = _audit_log()
+    row = log.get(mutation_id)
+    if row is None:
+        click.echo(click.style(f"mutation #{mutation_id} not found", fg="red"))
+        sys.exit(1)
+    click.echo(_format_mutation_row(row, full=True))
+    click.echo("")
+    if show_diff:
+        before_text = (row.before_content or b"").decode("utf-8", errors="replace").splitlines(keepends=True)
+        after_text = (row.after_content or b"").decode("utf-8", errors="replace").splitlines(keepends=True)
+        diff = "".join(
+            difflib.unified_diff(
+                before_text,
+                after_text,
+                fromfile=f"{row.skill_name}@before",
+                tofile=f"{row.skill_name}@after",
+            )
+        )
+        click.echo(diff if diff else "(no textual change)")
+        return
+    if row.before_content is not None:
+        click.echo(click.style("--- before ---", fg="yellow"))
+        click.echo(row.before_content.decode("utf-8", errors="replace"))
+    if row.after_content is not None:
+        click.echo(click.style("--- after ---", fg="green"))
+        click.echo(row.after_content.decode("utf-8", errors="replace"))
+
+
+@audit.command("diff")
+@click.argument("skill_name")
+@click.argument("mutation_id", type=int)
+def audit_diff_cmd(skill_name: str, mutation_id: int) -> None:
+    """Diff the SKILL.md on disk against the recorded ``after_content`` of MUTATION_ID."""
+    from deepagent_hermes.skills.audit import RollbackError
+
+    log = _audit_log()
+    try:
+        diff_text = log.diff_against_disk(skill_name, mutation_id)
+    except RollbackError as exc:
+        click.echo(click.style(str(exc), fg="red"))
+        sys.exit(1)
+    if not diff_text:
+        click.echo(f"No drift — disk matches mutation #{mutation_id}.")
+        return
+    click.echo(diff_text)
+
+
+@audit.command("rollback")
+@click.argument("skill_name")
+@click.argument("mutation_id", type=int)
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt (use in scripts).")
+def audit_rollback_cmd(skill_name: str, mutation_id: int, yes: bool) -> None:
+    """Restore SKILL_NAME to the state recorded *before* MUTATION_ID.
+
+    The rollback itself is logged as a new mutation (action=``rollback``),
+    so the audit history remains complete. Get the MUTATION_ID from
+    ``hermes audit log``.
+    """
+    from deepagent_hermes.skills.audit import RollbackError
+
+    log = _audit_log()
+    target = log.get(mutation_id)
+    if target is None:
+        click.echo(click.style(f"mutation #{mutation_id} not found", fg="red"))
+        sys.exit(1)
+    if target.skill_name != skill_name:
+        click.echo(
+            click.style(
+                f"mutation #{mutation_id} is for skill {target.skill_name!r}, not {skill_name!r}",
+                fg="red",
+            )
+        )
+        sys.exit(1)
+    if target.before_content is None:
+        click.echo(
+            click.style(
+                f"mutation #{mutation_id} was a {target.action} with no before-state — nothing to roll back to.",
+                fg="red",
+            )
+        )
+        sys.exit(1)
+    if not yes:
+        click.echo(_format_mutation_row(target, full=True))
+        click.echo(
+            click.style(
+                f"\nThis will rewrite {target.skill_path} with its pre-mutation content.",
+                fg="yellow",
+            )
+        )
+        if not click.confirm("Proceed?", default=False):
+            click.echo("Cancelled.")
+            return
+    try:
+        path = log.rollback_to(skill_name, mutation_id, source="cli")
+    except RollbackError as exc:
+        click.echo(click.style(f"rollback failed: {exc}", fg="red"))
+        sys.exit(1)
+    click.echo(click.style(f"Rolled back {skill_name} → {path}", fg="green"))
 
 
 # ── cron ───────────────────────────────────────────────────────────
@@ -1113,8 +1308,11 @@ def verify(model_id: str | None) -> None:
     prompts_dir = pkg_dir / "_prompts"
     skills_dir = pkg_dir / "_bundled_skills"
     needed_prompts = [
-        "default_identity.md", "combined_review.md", "skill_review.md",
-        "memory_review.md", "compression_summary.md",
+        "default_identity.md",
+        "combined_review.md",
+        "skill_review.md",
+        "memory_review.md",
+        "compression_summary.md",
     ]
     missing = [p for p in needed_prompts if not (prompts_dir / p).is_file()]
     if missing:
@@ -1127,10 +1325,12 @@ def verify(model_id: str | None) -> None:
     n_bundled = sum(1 for _ in skills_dir.rglob("SKILL.md")) if skills_dir.is_dir() else 0
     if n_bundled == 0:
         click.echo(click.style("  ⚠ no bundled SKILL.md files found", fg="yellow"))
-        click.echo(click.style(
-            f"    expected at {skills_dir} — agent will still run with an empty library",
-            fg="bright_black",
-        ))
+        click.echo(
+            click.style(
+                f"    expected at {skills_dir} — agent will still run with an empty library",
+                fg="bright_black",
+            )
+        )
     else:
         click.echo(click.style(f"  ✓ bundled skills: {n_bundled} SKILL.md files", fg="green"))
 
@@ -1225,10 +1425,12 @@ def verify(model_id: str | None) -> None:
 
     click.echo()
     click.echo(click.style("VERIFY: PASS — runtime is wired end-to-end.", fg="green", bold=True))
-    click.echo(click.style(
-        "  next: `deepagent-hermes chat`  (or set DEEPAGENT_AGENT_SPEC=deepagent_hermes.agent:graph in a host)",
-        fg="bright_black",
-    ))
+    click.echo(
+        click.style(
+            "  next: `deepagent-hermes chat`  (or set DEEPAGENT_AGENT_SPEC=deepagent_hermes.agent:graph in a host)",
+            fg="bright_black",
+        )
+    )
 
 
 @cli.command()
