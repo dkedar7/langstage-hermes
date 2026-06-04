@@ -36,6 +36,7 @@ dependencies = [
 daytona = ["daytona-sdk>=0.10"]
 modal = ["modal>=0.64"]
 ssh = ["paramiko>=3.0"]
+real = ["langchain-openai>=0.2"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -69,6 +70,7 @@ markers = [
     "needs_singularity: tests requiring Singularity/Apptainer on PATH",
     "needs_daytona: tests requiring Daytona SDK and API key",
     "needs_modal: tests requiring Modal SDK and tokens",
+    "real_model: hits a live LLM via OpenRouter (opt-in; skips without OPENROUTER_API_KEY)",
 ]
 
 [tool.ruff]
