@@ -33,21 +33,52 @@ import sys
 from pathlib import Path
 
 
-def _classify_failure(trial_result: dict) -> str:
-    """Bucket a failed trial into one of: model_error, adapter_error,
-    timeout, wrong_answer. The classification reads only fields that
-    Harbor + our adapter set; if none match, returns ``unknown``."""
-    metadata = trial_result.get("agent_context", {}).get("metadata") or {}
+def _reward(t: dict) -> float:
+    return (t.get("verifier_result") or {}).get("rewards", {}).get("reward", 0.0) or 0.0
+
+
+def _agent_metadata(t: dict) -> dict:
+    return (t.get("agent_result") or {}).get("metadata") or {}
+
+
+def _classify_failure(t: dict) -> str:
+    """Bucket a failed trial — adapter-error vs timeout vs verifier-said-no.
+
+    Harbor records ``exception_info`` for cleanly-raised exceptions
+    (e.g. AgentTimeoutError). Our adapter writes ``metadata.error`` for
+    crashes it caught inside ``run()``. Everything else is the agent
+    ran fine but the verifier returned 0.0.
+    """
+    exc = t.get("exception_info")
+    if exc:
+        kind = str(exc.get("kind") or exc.get("type") or exc).lower()
+        if "timeout" in kind:
+            return "timeout"
+        if "rate" in kind:
+            return "rate_limit"
+        return "exception"
+    metadata = _agent_metadata(t)
     if metadata.get("error"):
         err = str(metadata["error"]).lower()
+        if "argument list too long" in err:
+            return "adapter_argv"
+        if "credit balance" in err or "billing" in err:
+            return "credit_exhausted"
         if "could not resolve authentication" in err or "401" in err:
             return "model_auth"
-        if "timed out" in err or "timeout" in err:
+        if "timeout" in err:
             return "timeout"
         if "rate limit" in err:
             return "rate_limit"
         return "adapter_error"
-    # No adapter error → the agent ran but the verifier said wrong answer
+    # Agent ran with no recorded error but verifier said 0.0. Distinguish
+    # "barely ran" (model returned empty, agent loop exited in seconds) so
+    # the writeup can call those out as a separate failure mode rather
+    # than counting them as honest attempts.
+    n_msgs = metadata.get("n_messages") or 0
+    elapsed = metadata.get("elapsed_sec") or 0
+    if n_msgs <= 4 and elapsed < 30:
+        return "premature_stop"
     return "wrong_answer"
 
 
@@ -67,15 +98,29 @@ def summarise(job_dir: Path) -> dict:
         trial["_task_name"] = d.name
         trials.append(trial)
 
-    resolved = sum(1 for t in trials if t.get("resolved"))
-    walls = [t["elapsed_sec"] for t in trials if "elapsed_sec" in t]
-    costs = [t["agent_context"]["cost_usd"] for t in trials if t.get("agent_context", {}).get("cost_usd")]
-    input_tokens = [t["agent_context"]["n_input_tokens"] for t in trials if t.get("agent_context", {}).get("n_input_tokens")]
-    output_tokens = [t["agent_context"]["n_output_tokens"] for t in trials if t.get("agent_context", {}).get("n_output_tokens")]
+    resolved = sum(1 for t in trials if _reward(t) >= 1.0)
+    walls = [m["elapsed_sec"] for t in trials if (m := _agent_metadata(t)).get("elapsed_sec")]
+    in_tokens = [(t.get("agent_result") or {}).get("n_input_tokens") or 0 for t in trials]
+    out_tokens = [(t.get("agent_result") or {}).get("n_output_tokens") or 0 for t in trials]
+    cache_tokens = [(t.get("agent_result") or {}).get("n_cache_tokens") or 0 for t in trials]
+
+    # Recompute cost properly from raw tokens (the in-trial `cost_usd`
+    # may carry the legacy unit bug). Defaults: Sonnet 4.5 list prices.
+    ipk = 3.00 / 1_000_000  # fresh input $/tok
+    opk = 15.00 / 1_000_000
+    cpk = 0.30 / 1_000_000  # cache read
+    per_trial_cost = []
+    for t in trials:
+        ar = t.get("agent_result") or {}
+        inp = ar.get("n_input_tokens") or 0
+        out = ar.get("n_output_tokens") or 0
+        cache = ar.get("n_cache_tokens") or 0
+        fresh = max(inp - cache, 0)
+        per_trial_cost.append(fresh * ipk + cache * cpk + out * opk)
 
     failures_by_kind: dict[str, int] = {}
     for t in trials:
-        if t.get("resolved"):
+        if _reward(t) >= 1.0:
             continue
         kind = _classify_failure(t)
         failures_by_kind[kind] = failures_by_kind.get(kind, 0) + 1
@@ -86,23 +131,22 @@ def summarise(job_dir: Path) -> dict:
         "resolved_pct": (resolved / len(trials) * 100) if trials else 0.0,
         "mean_wall": statistics.mean(walls) if walls else 0.0,
         "median_wall": statistics.median(walls) if walls else 0.0,
-        "total_cost": sum(costs),
-        "mean_cost": statistics.mean(costs) if costs else 0.0,
-        "total_input_tokens": sum(input_tokens),
-        "total_output_tokens": sum(output_tokens),
+        "total_cost": sum(per_trial_cost),
+        "mean_cost": statistics.mean(per_trial_cost) if per_trial_cost else 0.0,
+        "total_input_tokens": sum(in_tokens),
+        "total_output_tokens": sum(out_tokens),
+        "total_cache_tokens": sum(cache_tokens),
         "failures_by_kind": failures_by_kind,
         "trials": [
             {
                 "task": t["_task_name"],
-                "resolved": t.get("resolved", False),
-                "elapsed_sec": t.get("elapsed_sec"),
-                "cost_usd": t.get("agent_context", {}).get("cost_usd"),
-                "n_messages": t.get("agent_context", {}).get("metadata", {}).get("n_messages")
-                if t.get("agent_context", {}).get("metadata")
-                else None,
-                "failure_kind": _classify_failure(t) if not t.get("resolved") else None,
+                "resolved": _reward(t) >= 1.0,
+                "elapsed_sec": _agent_metadata(t).get("elapsed_sec"),
+                "cost_usd": c,
+                "n_messages": _agent_metadata(t).get("n_messages"),
+                "failure_kind": None if _reward(t) >= 1.0 else _classify_failure(t),
             }
-            for t in trials
+            for t, c in zip(trials, per_trial_cost, strict=True)
         ],
     }
 
@@ -114,7 +158,12 @@ def render_markdown(s: dict) -> str:
     out.append(f"- **Resolved**: {s['resolved']} / {s['n_trials']} ({s['resolved_pct']:.1f}%)")
     out.append(f"- **Mean wall time / task**: {s['mean_wall']:.1f}s  (median {s['median_wall']:.1f}s)")
     out.append(f"- **Total cost**: ${s['total_cost']:.2f}  (mean ${s['mean_cost']:.3f}/task)")
-    out.append(f"- **Total tokens**: {s['total_input_tokens']:,} in / {s['total_output_tokens']:,} out")
+    cache_pct = (s["total_cache_tokens"] / s["total_input_tokens"] * 100) if s["total_input_tokens"] else 0
+    out.append(
+        f"- **Total tokens**: {s['total_input_tokens']:,} in / "
+        f"{s['total_output_tokens']:,} out / "
+        f"{s['total_cache_tokens']:,} cache_read ({cache_pct:.1f}% cache hit)"
+    )
     if s["failures_by_kind"]:
         out.append("")
         out.append("### Failure breakdown")
