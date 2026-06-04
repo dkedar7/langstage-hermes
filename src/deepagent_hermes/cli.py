@@ -28,6 +28,7 @@ import os
 import shutil
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import click
@@ -166,6 +167,12 @@ def chat(model_id: str | None, workspace: str | None) -> None:
         click.echo(click.style(f"Failed to build agent: {e}", fg="red"), err=True)
         sys.exit(2)
 
+    import uuid
+
+    # One session_id for the entire REPL lifetime so the FTS5 recorder
+    # threads turns together; /new can mint a fresh one.
+    session_id = getattr(agent, "deepagent_hermes_session_id", None) or f"sess-{uuid.uuid4().hex[:12]}"
+
     # Session-mutable state surfaced to slash commands.
     state: dict[str, Any] = {
         "messages": [],
@@ -173,9 +180,12 @@ def chat(model_id: str | None, workspace: str | None) -> None:
         "verbose": False,
         "yolo": False,
         "cfg": cfg,
+        "session_id": session_id,
+        "agent": agent,
     }
 
     click.echo("deepagent-hermes chat — type /help for commands, /quit to exit.")
+    click.echo(click.style(f"  session: {session_id}", fg="bright_black"))
     while True:
         try:
             line = input("> ").strip()
@@ -231,8 +241,16 @@ def _slash_help(args: str, state: dict[str, Any]) -> bool:
 
 
 def _slash_new(args: str, state: dict[str, Any]) -> bool:
+    """Fresh session — clears messages AND mints a new session_id so the FTS5
+    recorder starts a new lineage. Previous session stays in the store and
+    will surface in `session_search` queries.
+    """
+    import uuid
+
     state["messages"].clear()
-    click.echo("(new session — messages cleared)")
+    new_id = f"sess-{uuid.uuid4().hex[:12]}"
+    state["session_id"] = new_id
+    click.echo(click.style(f"(new session: {new_id})", fg="bright_black"))
     return False
 
 
@@ -241,7 +259,7 @@ def _slash_reset(args: str, state: dict[str, Any]) -> bool:
     state["model_override"] = None
     state["verbose"] = False
     state["yolo"] = False
-    click.echo("(state reset)")
+    click.echo("(state reset — session_id unchanged; use /new to start a fresh session)")
     return False
 
 
@@ -272,37 +290,159 @@ def _slash_yolo(args: str, state: dict[str, Any]) -> bool:
 
 
 def _slash_tools(args: str, state: dict[str, Any]) -> bool:
-    click.echo("(Tool list TBD — see `deepagent-hermes tools` subcommand.)")
+    """Inline summary of implemented toolsets — full taxonomy via `tools` subcommand."""
+    from deepagent_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, TOOLSETS
+
+    click.echo(click.style("Toolsets (implemented):", fg="cyan"))
+    for ts in sorted(IMPLEMENTED_TOOLSETS):
+        names = TOOLSETS.get(ts, [])
+        click.echo(f"  ● {ts:<18}  {', '.join(names)}")
+    stubbed = len(TOOLSETS) - len(IMPLEMENTED_TOOLSETS)
+    click.echo(click.style(
+        f"  (+{stubbed} declared but stubbed — run `deepagent-hermes tools` for the full taxonomy)",
+        fg="bright_black",
+    ))
     return False
 
 
 def _slash_toolsets(args: str, state: dict[str, Any]) -> bool:
-    click.echo("(Toolset toggling TBD — configure via deepagent-hermes.toml.)")
+    """Shows which toolsets are currently enabled vs disabled in the loaded config."""
+    cfg = state["cfg"]
+    from deepagent_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, resolve_enabled
+
+    disabled = set(cfg.agent_disabled_toolsets or [])
+    enabled = resolve_enabled(disabled_toolsets=disabled, platform=os.getenv("HERMES_PLATFORM", "cli"))
+
+    click.echo(click.style("Toolsets (this session):", fg="cyan"))
+    for ts in sorted(IMPLEMENTED_TOOLSETS):
+        if ts in enabled:
+            click.echo(click.style(f"  ✓ {ts}", fg="green"))
+        else:
+            click.echo(click.style(f"  ✗ {ts}  (disabled in config)", fg="bright_black"))
+    if disabled:
+        click.echo(click.style(f"\n  agent.disabled_toolsets = {sorted(disabled)}", fg="bright_black"))
     return False
 
 
 def _slash_skills(args: str, state: dict[str, Any]) -> bool:
-    click.echo("(Use `deepagent-hermes skills list` for the bundled skills.)")
+    """List skills, or `/skills <query>` to filter, or `/skills show <name>` to view."""
+    lib = state.get("skill_lib") or _skill_library()
+    state["skill_lib"] = lib
+    parts = args.strip().split(maxsplit=1)
+    if parts and parts[0] == "show" and len(parts) == 2:
+        skill = lib.get(parts[1].strip())
+        if not skill:
+            click.echo(click.style(f"No skill named {parts[1]!r}.", fg="yellow"))
+            return False
+        click.echo(click.style(f"# {skill.name}", fg="cyan", bold=True))
+        click.echo(click.style(f"  {skill.category or '(uncategorized)'}", fg="bright_black"))
+        click.echo()
+        click.echo(skill.description)
+        click.echo()
+        click.echo(click.style("─" * 50, fg="bright_black"))
+        click.echo(skill.body[:1500])
+        if len(skill.body) > 1500:
+            extra = len(skill.body) - 1500
+            click.echo(click.style(
+                f"\n... (+{extra} more chars — full body via `deepagent-hermes skills show {skill.name}`)",
+                fg="bright_black",
+            ))
+        return False
+
+    query = parts[0] if parts else ""
+    items = lib.list()
+    if query:
+        q = query.lower()
+        items = [s for s in items if q in s.name.lower() or q in s.description.lower()]
+    if not items:
+        click.echo(f"No skills match {query!r}.")
+        return False
+    click.echo(click.style(f"Skills ({len(items)}):", fg="cyan"))
+    for s in sorted(items, key=lambda x: (x.category or "", x.name))[:25]:
+        desc = (s.description or "").replace("\n", " ").strip()
+        if len(desc) > 60:
+            desc = desc[:57] + "..."
+        click.echo(f"  · {s.name:<32}  {desc}")
+    if len(items) > 25:
+        click.echo(click.style(f"  (+{len(items) - 25} more — `/skills <query>` to filter)", fg="bright_black"))
     return False
 
 
 def _slash_cron(args: str, state: dict[str, Any]) -> bool:
-    click.echo("(Use `deepagent-hermes cron list` for scheduled jobs.)")
+    """List currently-scheduled cron jobs."""
+    from deepagent_hermes.cron.jobs import list_jobs
+
+    items = list_jobs()
+    if not items:
+        click.echo("No cron jobs scheduled. Add one with `deepagent-hermes cron create --prompt ... --schedule ...`.")
+        return False
+    click.echo(click.style(f"Cron jobs ({len(items)}):", fg="cyan"))
+    for job in items:
+        flag = "▶" if job.get("enabled", True) and job.get("state") != "paused" else "⏸"
+        click.echo(
+            f"  {flag} {job['id'][:10]}  {(job.get('name') or '?')[:24]:<24}  "
+            f"[{(job.get('schedule_display') or '?')[:16]:<16}]  next={job.get('next_run_at') or '—'}"
+        )
     return False
 
 
 def _slash_curator(args: str, state: dict[str, Any]) -> bool:
-    click.echo("(Use `deepagent-hermes curator status` for curator info.)")
+    """Inline curator state — same data as `curator status` subcommand."""
+    try:
+        cstate = _curator_state_get()
+    except Exception as e:
+        click.echo(click.style(f"(curator state unavailable: {e})", fg="yellow"))
+        return False
+    cfg = state["cfg"]
+    last_run = float(cstate.get("last_run_at") or 0.0)
+    last_act = float(cstate.get("last_user_activity") or 0.0)
+    paused = bool(cstate.get("paused", False))
+
+    click.echo(click.style("Curator:", fg="cyan"))
+    click.echo(f"  enabled={cfg.curator_enabled}  paused={paused}  interval={cfg.curator_interval_hours}h")
+    click.echo(f"  last run:      {_fmt_ts(last_run)}")
+    click.echo(f"  last activity: {_fmt_ts(last_act)}")
+    lib = state.get("skill_lib") or _skill_library()
+    state["skill_lib"] = lib
+    pinned = [s.name for s in lib.list() if (s.metadata or {}).get("hermes", {}).get("pinned")]
+    if pinned:
+        click.echo(f"  pinned ({len(pinned)}): {', '.join(pinned[:5])}{'...' if len(pinned) > 5 else ''}")
     return False
 
 
 def _slash_memory(args: str, state: dict[str, Any]) -> bool:
-    click.echo("(MEMORY.md / USER.md viewing TBD in v0.1.)")
+    """Show MEMORY.md + USER.md current contents (live disk, not snapshot)."""
+    from deepagent_hermes.config import hermes_home
+
+    home = hermes_home()
+    memory_md = home / "memories" / "MEMORY.md"
+    user_md = home / "memories" / "USER.md"
+    shown_anything = False
+    for label, path in (("USER.md", user_md), ("MEMORY.md", memory_md)):
+        if path.exists() and path.stat().st_size > 0:
+            shown_anything = True
+            content = path.read_text(encoding="utf-8")
+            click.echo(click.style(f"{label}  ({path.stat().st_size} bytes)", fg="cyan", bold=True))
+            click.echo(click.style(f"  {path}", fg="bright_black"))
+            click.echo(content)
+            click.echo()
+        else:
+            click.echo(click.style(f"{label}: empty", fg="bright_black"))
+    if not shown_anything:
+        click.echo(click.style(
+            "  Memory grows as the reflection subagent decides things are worth saving,",
+            fg="bright_black",
+        ))
+        click.echo(click.style(
+            "  or by user request (\"remember that I prefer X\").",
+            fg="bright_black",
+        ))
     return False
 
 
 def _slash_compress(args: str, state: dict[str, Any]) -> bool:
-    click.echo("(Manual /compress TBD — auto-fires at 50% context.)")
+    """Note: compression is automatic at 50% context — manual trigger is a v0.2 item."""
+    click.echo(click.style("Manual compression isn't yet wired (auto-fires at 50% context). v0.2 task.", fg="yellow"))
     return False
 
 
@@ -343,10 +483,17 @@ _SLASH_HANDLERS: dict[str, Callable[[str, dict[str, Any]], bool]] = {
 
 
 def _run_agent_turn(agent: Any, user_text: str, state: dict[str, Any]) -> None:
-    """Send ``user_text`` through ``agent.stream(...)`` and print via the parser."""
+    """Send ``user_text`` through ``agent.stream(...)`` and print via the parser.
+
+    Threads the session id from REPL state so the FTS5 recorder + reflection
+    counters cohere across turns. Wraps the parser's ``PrintAdapter`` with a
+    prettifier so skill / memory / compression events surface as callouts
+    instead of raw ``extracted_type: {...}`` JSON.
+    """
     try:
         from langgraph_stream_parser import StreamParser
         from langgraph_stream_parser.adapters import PrintAdapter
+        from langgraph_stream_parser.events import ToolExtractedEvent
     except ImportError:
         click.echo("(langgraph-stream-parser missing; printing raw response.)")
         try:
@@ -361,15 +508,61 @@ def _run_agent_turn(agent: Any, user_text: str, state: dict[str, Any]) -> None:
 
     parser = StreamParser()
     adapter = PrintAdapter()
+
+    def _pretty_extraction(event: ToolExtractedEvent) -> bool:
+        """Render hermes-specific extractor events as callouts. Returns True
+        when we consumed the event so the default adapter doesn't double-print.
+        """
+        et = event.extracted_type
+        data = event.data if isinstance(event.data, dict) else {}
+        if et == "skill_event":
+            sub = data.get("extracted_subtype") or et
+            name = data.get("name") or "?"
+            verb = {
+                "skill_created": "created",
+                "skill_updated": "updated",
+                "skill_deleted": "deleted",
+            }.get(sub, sub)
+            click.echo(click.style(f"  ◆ skill {verb}: ", fg="magenta") + click.style(name, fg="bright_magenta", bold=True))
+            return True
+        if et == "skill_loaded":
+            chars = data.get("body_chars", "?")
+            click.echo(click.style(f"  ◆ skill loaded into context  ({chars} chars)", fg="magenta"))
+            return True
+        if et == "memory_updated":
+            sub = data.get("extracted_subtype") or et
+            target = data.get("target") or "?"
+            verb = {
+                "memory_added": "added",
+                "memory_replaced": "replaced",
+                "memory_removed": "removed",
+                "memory_read": "read",
+            }.get(sub, sub)
+            click.echo(click.style(f"  ◆ {target} memory {verb}", fg="cyan"))
+            return True
+        if et == "compression_summary":
+            before = data.get("before_tokens", "?")
+            after = data.get("after_tokens", "?")
+            ratio = data.get("ratio")
+            tail = f"  ({ratio:.1f}x)" if isinstance(ratio, (int, float)) else ""
+            click.echo(click.style(f"  ◆ context compressed: {before} → {after}{tail}", fg="yellow"))
+            return True
+        return False
+
     try:
         stream = agent.stream(
             {
                 "messages": [{"role": "user", "content": user_text}],
+                "session_id": state.get("session_id"),
                 "model_override": state.get("model_override"),
+                "iteration_budget_remaining": state["cfg"].agent_max_iterations,
             },
+            config={"configurable": {"thread_id": state.get("session_id")}},
             stream_mode="updates",
         )
         for event in parser.parse(stream):
+            if isinstance(event, ToolExtractedEvent) and _pretty_extraction(event):
+                continue
             adapter.handle(event)
     except Exception as e:
         click.echo(click.style(f"Agent stream failed: {e}", fg="red"))
@@ -379,14 +572,50 @@ def _run_agent_turn(agent: Any, user_text: str, state: dict[str, Any]) -> None:
 
 
 @cli.command()
-def tools() -> None:
-    """List registered toolsets + their check status (cached 30s)."""
-    try:
-        from deepagent_hermes.tools.registry import HermesToolRegistry  # noqa: F401
+@click.option("--toolset", "toolset_filter", default=None, help="Show only one toolset.")
+@click.option(
+    "--implemented-only",
+    is_flag=True,
+    help="Hide stubbed toolsets (those declared by SPEC §11 but not yet implemented).",
+)
+def tools(toolset_filter: str | None, implemented_only: bool) -> None:
+    """List declared toolsets and the tool names each ships.
 
-        click.echo("(Tool registry inspection not yet wired in v0.1.)")
-    except ImportError:
-        click.echo("(deepagent_hermes.tools.registry not yet built — see SPEC §11.)")
+    Shows the toolset taxonomy from SPEC §11 — both implemented sets
+    (filesystem, skills, memory, etc.) and stubbed-but-declared sets
+    (homeassistant, spotify, etc.). For live check-status info, run
+    ``deepagent-hermes doctor``.
+    """
+    from deepagent_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, TOOLSETS
+
+    declared = sorted(TOOLSETS.keys())
+    shown = 0
+    for ts in declared:
+        if toolset_filter and ts != toolset_filter:
+            continue
+        is_impl = ts in IMPLEMENTED_TOOLSETS
+        if implemented_only and not is_impl:
+            continue
+        mark = "●" if is_impl else "○"
+        names = TOOLSETS[ts]
+        header_color = "cyan" if is_impl else "bright_black"
+        suffix = "" if is_impl else "  (declared, not implemented in v0.1)"
+        click.echo(
+            click.style(f"  {mark} {ts:<20}", fg=header_color)
+            + click.style(f" {len(names)} tool(s){suffix}", fg="bright_black")
+        )
+        for name in names:
+            click.echo(click.style(f"      · {name}", fg="bright_black"))
+        shown += 1
+    if shown == 0:
+        if toolset_filter:
+            click.echo(f"No toolset named {toolset_filter!r}. Try `deepagent-hermes tools` for all.")
+        else:
+            click.echo("No toolsets declared.")
+        return
+    click.echo("")
+    click.echo(click.style(f"  ● implemented  ({len(IMPLEMENTED_TOOLSETS)} of {len(TOOLSETS)})", fg="cyan"))
+    click.echo(click.style("  ○ declared but stubbed", fg="bright_black"))
 
 
 # ── skills ─────────────────────────────────────────────────────────
@@ -397,30 +626,133 @@ def skills() -> None:
     """Inspect / install / audit bundled and user skills."""
 
 
+def _skill_library() -> Any:
+    """Build a SkillLibrary from defaults (bundled + user + project)."""
+    from deepagent_hermes.config import hermes_home
+    from deepagent_hermes.skills.library import SkillLibrary
+
+    dirs: list[Path] = []
+    pkg_root = Path(__file__).resolve().parent.parent.parent
+    bundled = pkg_root / "skills"
+    if bundled.is_dir():
+        dirs.append(bundled)
+    dirs.append(hermes_home() / "skills")
+    project = Path.cwd() / ".deepagent-hermes" / "skills"
+    if project.is_dir():
+        dirs.append(project)
+    return SkillLibrary(dirs=dirs)
+
+
 @skills.command("list")
-def skills_list() -> None:
-    """List discovered skills."""
-    click.echo("(Skill library not yet wired in v0.1 — see SPEC §10.)")
+@click.option("--category", default=None, help="Filter by category.")
+@click.option("--query", default="", help="Substring match against name or description.")
+def skills_list(category: str | None, query: str) -> None:
+    """List discovered skills (bundled + user)."""
+    lib = _skill_library()
+    items = lib.list()
+    if category:
+        items = [s for s in items if (s.category or "") == category]
+    if query:
+        q = query.lower()
+        items = [s for s in items if q in s.name.lower() or q in s.description.lower()]
+    if not items:
+        click.echo("No skills match.")
+        return
+    # Group by category.
+    by_cat: dict[str, list[Any]] = {}
+    for s in items:
+        by_cat.setdefault(s.category or "", []).append(s)
+    for cat in sorted(by_cat):
+        click.echo(click.style(f"\n  {cat or '(uncategorized)'}", fg="cyan"))
+        for s in sorted(by_cat[cat], key=lambda x: x.name):
+            desc = (s.description or "").replace("\n", " ").strip()
+            if len(desc) > 80:
+                desc = desc[:77] + "..."
+            click.echo(f"    {s.name:<32}  {desc}")
+    click.echo(click.style(f"\n  {len(items)} skill(s).", fg="bright_black"))
 
 
 @skills.command("show")
 @click.argument("name")
 def skills_show(name: str) -> None:
     """Show full SKILL.md body for ``name``."""
-    click.echo(f"(Skill show for {name!r} TBD — see SPEC §10.)")
+    lib = _skill_library()
+    skill = lib.get(name)
+    if skill is None:
+        click.echo(click.style(f"No skill named {name!r}.", fg="yellow"))
+        sys.exit(1)
+    click.echo(click.style(f"# {skill.name}", fg="cyan", bold=True))
+    click.echo(click.style(f"  category: {skill.category or '(uncategorized)'}", fg="bright_black"))
+    click.echo(click.style(f"  path: {skill.path}", fg="bright_black"))
+    if skill.version:
+        click.echo(click.style(f"  version: {skill.version}", fg="bright_black"))
+    click.echo()
+    click.echo(skill.description)
+    click.echo()
+    click.echo(click.style("─" * 60, fg="bright_black"))
+    click.echo(skill.body)
 
 
 @skills.command("install")
-@click.argument("path", type=click.Path(exists=True))
-def skills_install(path: str) -> None:
-    """Install a skill directory into ``<HERMES_HOME>/skills/``."""
-    click.echo(f"(Skill install from {path!r} TBD — see SPEC §10.)")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+def skills_install(path: Path) -> None:
+    """Install a skill directory into ``<HERMES_HOME>/skills/``.
+
+    PATH may be either a SKILL.md file or a directory containing one.
+    """
+    import shutil
+
+    from deepagent_hermes.config import hermes_home
+    from deepagent_hermes.skills.validator import validate as validate_frontmatter
+
+    src_dir = path if path.is_dir() else path.parent
+    skill_md = src_dir / "SKILL.md"
+    if not skill_md.is_file():
+        click.echo(click.style(f"No SKILL.md found at {src_dir}.", fg="yellow"))
+        sys.exit(2)
+
+    import frontmatter
+
+    post = frontmatter.load(skill_md)
+    fm = dict(post.metadata)
+    errs = validate_frontmatter(fm, parent_dir_name=src_dir.name)
+    if errs:
+        click.echo(click.style("SKILL.md frontmatter is invalid:", fg="red"))
+        for e in errs:
+            click.echo(f"  - {e}")
+        sys.exit(2)
+
+    target = hermes_home() / "skills" / src_dir.name
+    if target.exists():
+        click.echo(click.style(f"Already installed at {target} — won't overwrite.", fg="yellow"))
+        sys.exit(1)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src_dir, target)
+    click.echo(click.style(f"Installed {fm.get('name', '?')} → {target}", fg="green"))
 
 
 @skills.command("audit")
 def skills_audit() -> None:
     """Validate every skill against agentskills.io rules."""
-    click.echo("(Skill audit TBD — see SPEC §10.)")
+    lib = _skill_library()
+    errs_by_skill = lib.validate_all()
+    if not errs_by_skill:
+        n = len(lib.list())
+        click.echo(click.style(f"All {n} skill(s) pass validation.", fg="green"))
+        return
+    n_bad = 0
+    for skill_name, errs in errs_by_skill.items():
+        if not errs:
+            continue
+        n_bad += 1
+        click.echo(click.style(f"  ✗ {skill_name}", fg="red"))
+        for e in errs:
+            click.echo(f"      {e}")
+    if n_bad == 0:
+        click.echo(click.style("All skills pass validation.", fg="green"))
+    else:
+        click.echo(click.style(f"\n  {n_bad} skill(s) failed validation.", fg="red"))
+        sys.exit(1)
 
 
 # ── cron ───────────────────────────────────────────────────────────
@@ -521,42 +853,190 @@ def curator() -> None:
     """Skill curator lifecycle controls (SPEC §9 + §10)."""
 
 
+def _curator_store() -> Any:
+    """Open the SQLite store at ``<HERMES_HOME>/state.db``."""
+    from deepagent_hermes.config import hermes_home
+    from deepagent_hermes.store.sqlite_fts import SqliteFtsStore
+
+    db_path = hermes_home() / "state.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return SqliteFtsStore(db_path=str(db_path))
+
+
+def _curator_state_get() -> dict[str, Any]:
+    from deepagent_hermes.curator import _load_curator_state
+
+    return _load_curator_state(_curator_store())
+
+
+def _curator_state_save(state: dict[str, Any]) -> None:
+    from deepagent_hermes.curator import _save_curator_state
+
+    _save_curator_state(_curator_store(), state)
+
+
+def _fmt_ts(ts: float | None) -> str:
+    if not ts:
+        return "—"
+    import datetime as dt
+
+    return dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+
 @curator.command("status")
 def curator_status() -> None:
-    """Print curator state (last run, next run, pinned skills)."""
-    click.echo("(Curator status TBD — see SPEC §9.4.)")
+    """Print curator state (last run, last activity, paused flag, pinned skills)."""
+    state = _curator_state_get()
+    cfg = _load_config()
+    last_run = float(state.get("last_run_at") or 0.0)
+    last_act = float(state.get("last_user_activity") or 0.0)
+    paused = bool(state.get("paused", False))
+    interval_s = cfg.curator_interval_hours * 3600
+
+    click.echo(click.style("Curator state", fg="cyan", bold=True))
+    click.echo(f"  enabled:           {cfg.curator_enabled}")
+    click.echo(f"  paused:            {paused}")
+    click.echo(f"  interval:          {cfg.curator_interval_hours} h ({cfg.curator_interval_hours / 24:.1f} d)")
+    click.echo(f"  min idle:          {cfg.curator_min_idle_hours} h")
+    click.echo(f"  stale after:       {cfg.curator_stale_after_days} d")
+    click.echo(f"  archive after:     {cfg.curator_archive_after_days} d")
+    click.echo(f"  last_run_at:       {_fmt_ts(last_run)}")
+    click.echo(f"  last_user_act.:    {_fmt_ts(last_act)}")
+
+    import time
+
+    now = time.time()
+    if last_run > 0:
+        next_run = last_run + interval_s
+        delta_h = (next_run - now) / 3600
+        if delta_h > 0:
+            click.echo(click.style(f"  next eligible:     {_fmt_ts(next_run)}  (~{delta_h:.1f}h)", fg="bright_black"))
+        else:
+            click.echo(click.style(f"  next eligible:     overdue by {-delta_h:.1f}h", fg="yellow"))
+
+    # Pinned skills
+    lib = _skill_library()
+    pinned = [s for s in lib.list() if (s.metadata or {}).get("hermes", {}).get("pinned")]
+    if pinned:
+        click.echo(click.style(f"\nPinned skills ({len(pinned)}):", fg="cyan"))
+        for s in sorted(pinned, key=lambda x: x.name):
+            click.echo(f"  · {s.name}")
+    else:
+        click.echo(click.style("\nPinned skills: none", fg="bright_black"))
 
 
 @curator.command("run")
-def curator_run() -> None:
-    """Manually run a curator pass now."""
-    click.echo("(Manual curator run TBD — see SPEC §9.4.)")
+@click.option("--dry-run", is_flag=True, help="Print proposed actions without writing.")
+def curator_run(dry_run: bool) -> None:
+    """Manually run a curator lifecycle pass now (mark stale + archive).
+
+    Bypasses the interval + idle gates — useful for one-off cleanup.
+    """
+    from deepagent_hermes.curator import mark_stale_and_archive
+
+    cfg = _load_config()
+    lib = _skill_library()
+    if dry_run:
+        # Run against a no-op library wrapper so nothing persists.
+        class _Wrap:
+            def __init__(self, inner: Any) -> None:
+                self._i = inner
+
+            def list(self) -> Any:
+                return self._i.list()
+
+            def write(self, *a: Any, **k: Any) -> Any:
+                return None
+
+            def delete(self, *a: Any, **k: Any) -> Any:
+                return True
+
+        result = mark_stale_and_archive(
+            _Wrap(lib),
+            stale_days=cfg.curator_stale_after_days,
+            archive_days=cfg.curator_archive_after_days,
+        )
+        click.echo(click.style("(dry-run — no changes written)", fg="yellow"))
+    else:
+        result = mark_stale_and_archive(
+            lib,
+            stale_days=cfg.curator_stale_after_days,
+            archive_days=cfg.curator_archive_after_days,
+        )
+        import time
+
+        state = _curator_state_get()
+        state["last_run_at"] = time.time()
+        _curator_state_save(state)
+
+    click.echo(click.style("Curator pass", fg="cyan", bold=True))
+    for key in ("marked_stale", "archived", "skipped_pinned"):
+        names = result.get(key, [])
+        label = key.replace("_", " ")
+        if names:
+            click.echo(f"  {label} ({len(names)}):")
+            for n in names:
+                click.echo(f"    · {n}")
+        else:
+            click.echo(click.style(f"  {label}: none", fg="bright_black"))
 
 
 @curator.command("pause")
 def curator_pause() -> None:
-    """Pause the curator's scheduled runs."""
-    click.echo("(Curator pause TBD.)")
+    """Pause the curator's scheduled runs (status flag only)."""
+    state = _curator_state_get()
+    state["paused"] = True
+    _curator_state_save(state)
+    click.echo("Curator paused. Resume with `curator resume`.")
 
 
 @curator.command("resume")
 def curator_resume() -> None:
     """Resume the curator's scheduled runs."""
-    click.echo("(Curator resume TBD.)")
+    state = _curator_state_get()
+    state["paused"] = False
+    _curator_state_save(state)
+    click.echo("Curator resumed.")
+
+
+def _set_pinned(name: str, value: bool) -> int:
+    import frontmatter
+
+    lib = _skill_library()
+    skill = lib.get(name)
+    if skill is None:
+        click.echo(click.style(f"No skill named {name!r}.", fg="yellow"))
+        return 1
+    post = frontmatter.load(skill.path)
+    fm = dict(post.metadata)
+    hermes_meta = dict(fm.get("hermes") or {})
+    if value:
+        hermes_meta["pinned"] = True
+    else:
+        hermes_meta.pop("pinned", None)
+    if hermes_meta:
+        fm["hermes"] = hermes_meta
+    elif "hermes" in fm:
+        del fm["hermes"]
+    post.metadata = fm
+    skill.path.write_text(frontmatter.dumps(post), encoding="utf-8")
+    verb = "pinned" if value else "unpinned"
+    click.echo(click.style(f"{verb}: {name}", fg="green"))
+    return 0
 
 
 @curator.command("pin")
 @click.argument("name")
 def curator_pin(name: str) -> None:
     """Pin skill ``name`` so the curator never archives it."""
-    click.echo(f"(Pin {name!r} TBD.)")
+    sys.exit(_set_pinned(name, True))
 
 
 @curator.command("unpin")
 @click.argument("name")
 def curator_unpin(name: str) -> None:
     """Unpin skill ``name`` so it's eligible for curator lifecycle."""
-    click.echo(f"(Unpin {name!r} TBD.)")
+    sys.exit(_set_pinned(name, False))
 
 
 # ── plugins ────────────────────────────────────────────────────────
@@ -648,6 +1128,17 @@ def doctor() -> None:
 
 def main() -> None:
     """Console-script entry point (``deepagent-hermes`` in pyproject)."""
+    # On Windows the default stdout codec is cp1252; that chokes on the
+    # unicode characters bundled skills + agent responses routinely contain
+    # (em-dashes, arrows, the section sign). Reconfigure to UTF-8 with a
+    # `replace` errors handler so we never crash the CLI on a bad byte.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
     cli(prog_name="deepagent-hermes")
 
 
