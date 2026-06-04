@@ -57,11 +57,12 @@ fi
 
 export PYTHONPATH="$REPO/examples:${PYTHONPATH:-}"
 
-# Cost-per-Ktoken estimates (Anthropic list price; OpenRouter charges
+# Cost-per-megatoken estimates (Anthropic list price; OpenRouter charges
 # the same plus a small markup). Override via env for exact accounting.
-# Sonnet 4.5 list: $3/MTok in, $15/MTok out, $0.30/MTok cache-read.
-export HERMES_BENCH_COST_PER_INPUT_KTOK="${HERMES_BENCH_COST_PER_INPUT_KTOK:-3.00}"
-export HERMES_BENCH_COST_PER_OUTPUT_KTOK="${HERMES_BENCH_COST_PER_OUTPUT_KTOK:-15.00}"
+# Sonnet 4.5 list: $3/MTok fresh input, $0.30/MTok cache-read, $15/MTok output.
+export HERMES_BENCH_COST_PER_INPUT_MTOK="${HERMES_BENCH_COST_PER_INPUT_MTOK:-3.00}"
+export HERMES_BENCH_COST_PER_CACHE_READ_MTOK="${HERMES_BENCH_COST_PER_CACHE_READ_MTOK:-0.30}"
+export HERMES_BENCH_COST_PER_OUTPUT_MTOK="${HERMES_BENCH_COST_PER_OUTPUT_MTOK:-15.00}"
 
 # shellcheck disable=SC1090
 source "$VENV/bin/activate"

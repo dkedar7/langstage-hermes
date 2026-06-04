@@ -377,11 +377,19 @@ class DeepagentHermesAgent(BaseAgent):
         context.n_cache_tokens = usage["cache_read"]
         context.n_output_tokens = usage["output_tokens"]
         # Cost is provider-specific; we leave it 0.0 unless the user
-        # exports HERMES_BENCH_COST_PER_INPUT_KTOK / _OUTPUT_KTOK as a
-        # rough back-of-envelope estimator.
-        ipk = float(os.environ.get("HERMES_BENCH_COST_PER_INPUT_KTOK", "0") or 0)
-        opk = float(os.environ.get("HERMES_BENCH_COST_PER_OUTPUT_KTOK", "0") or 0)
-        context.cost_usd = (usage["input_tokens"] / 1000 * ipk) + (usage["output_tokens"] / 1000 * opk)
+        # exports per-megatoken rates. Splitting fresh-input vs cached-
+        # input matters: Anthropic's cache-read tier is ~10x cheaper than
+        # fresh input, so for hermes (high cache-hit rate) the headline
+        # number lies if we charge all input at the fresh rate.
+        i_mtok = float(os.environ.get("HERMES_BENCH_COST_PER_INPUT_MTOK", "0") or 0)
+        o_mtok = float(os.environ.get("HERMES_BENCH_COST_PER_OUTPUT_MTOK", "0") or 0)
+        c_mtok = float(os.environ.get("HERMES_BENCH_COST_PER_CACHE_READ_MTOK", "0") or 0)
+        fresh_input = max(usage["input_tokens"] - usage["cache_read"], 0)
+        context.cost_usd = (
+            fresh_input / 1_000_000 * i_mtok
+            + usage["cache_read"] / 1_000_000 * c_mtok
+            + usage["output_tokens"] / 1_000_000 * o_mtok
+        )
         context.metadata.update(
             {
                 "elapsed_sec": round(elapsed, 1),
