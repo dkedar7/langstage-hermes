@@ -91,15 +91,26 @@ def create_hermes_agent(
     workspace: str | Path | None = None,
     session_id: str | None = None,
     extra_middleware: list[Any] | None = None,
+    backend: Any = None,
 ) -> Any:
     """Build a fresh Hermes agent graph.
 
     Args:
         config: Resolved configuration; defaults to ``HermesConfig.resolve()``.
         workspace: Filesystem root for the file toolset; defaults to ``cwd``.
+            Ignored when ``backend`` is supplied — the backend owns its own
+            root.
         session_id: Optional session id; auto-generated UUID if not provided.
         extra_middleware: Additional middleware appended after the standard
             stack — useful for hosts that want to inject tracing or auth.
+        backend: Optional ``BackendProtocol`` instance to use for filesystem
+            and exec tools (and the review subagent). When ``None`` (default),
+            a local :class:`~deepagents.backends.filesystem.FilesystemBackend`
+            rooted at ``workspace`` is constructed. Pass a
+            :class:`~deepagents.backends.protocol.SandboxBackendProtocol`
+            implementation (e.g. the Harbor adapter in
+            ``examples/terminal_bench.py``) to run hermes against a remote
+            sandbox.
 
     Returns:
         A compiled LangGraph ``CompiledStateGraph`` ready for ``.invoke()`` /
@@ -146,13 +157,19 @@ def create_hermes_agent(
     from deepagents.middleware.subagents import SubAgentMiddleware
     from langchain.agents.middleware import HumanInTheLoopMiddleware, TodoListMiddleware
 
-    # virtual_mode=True so the agent's '/workspace/foo.py' (its natural
-    # absolute-path convention from the system prompt) resolves under our
-    # configured root rather than literal C:\workspace\foo.py. Without this,
-    # the agent silently writes to / reads from a path the user can't
-    # introspect — surfaced in the 2026-06-02 dogfood when reported file
-    # writes didn't appear on disk.
-    fs_backend = FilesystemBackend(root_dir=str(ws), virtual_mode=True)
+    if backend is not None:
+        # External sandbox backend (e.g. Harbor proxy) — paths are real and
+        # the host has full control. virtual_mode/root_dir semantics belong
+        # to the supplied backend, not us.
+        fs_backend = backend
+    else:
+        # virtual_mode=True so the agent's '/workspace/foo.py' (its natural
+        # absolute-path convention from the system prompt) resolves under our
+        # configured root rather than literal C:\workspace\foo.py. Without this,
+        # the agent silently writes to / reads from a path the user can't
+        # introspect — surfaced in the 2026-06-02 dogfood when reported file
+        # writes didn't appear on disk.
+        fs_backend = FilesystemBackend(root_dir=str(ws), virtual_mode=True)
 
     # ── review subagent (reflection target) ──────────────────────────────
     # Wire the memory + skill_manage tools so the review fork can actually
