@@ -3,7 +3,7 @@
 Faithful reproduction of Nous Research's Hermes Agent design ideas. See SPEC.md and NOTICE.
 """
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 
 # Re-exports populated by submodule integration (see agent.py).
 # Subagents wire these in; importing here would create circular deps during build.
