@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "deepagent-hermes"
-version = "0.1.2"
+version = "0.1.3"
 description = "Closed-loop reflection / skill creation agent on LangGraph + deepagents. Faithful reproduction of Nous Research's Hermes Agent."
 readme = "README.md"
 license = { text = "MIT" }
@@ -66,11 +66,15 @@ packages = ["src/deepagent_hermes"]
 # chat.
 
 [tool.hatch.build.targets.sdist]
-# Include the bundled markdown assets so `pip install <sdist>` is also runnable.
-include = [
-    "src/deepagent_hermes/_prompts/**/*.md",
-    "src/deepagent_hermes/_bundled_skills/**",
-]
+# Default sdist behaviour is "include all git-tracked files" — which is what
+# we want. The earlier explicit `include = [_prompts, _bundled_skills]` here
+# was *restrictive*: it shipped only those two trees and dropped every .py
+# file, so `python -m build` (sdist → wheel-from-sdist) produced a 183-entry
+# wheel with no Python code. The published v0.1.2 wheel is that broken wheel;
+# every install crashes with `ModuleNotFoundError: deepagent_hermes.cli`.
+# Local `python -m build --wheel` worked because it skipped the sdist step;
+# release CI's `python -m build` did not. Leaving the section empty restores
+# hatch's "all tracked files" default for both sdist and wheel-from-sdist.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
