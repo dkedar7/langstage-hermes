@@ -70,6 +70,42 @@ BUILTIN_SLASH_COMMANDS: dict[str, str] = {
 }
 
 
+# ── banner ─────────────────────────────────────────────────────────
+# Pre-rendered FIGlet (font: small) for "hermes". Hard-coded rather than
+# generated at startup so we don't pull in pyfiglet as a runtime dep,
+# don't pay the render cost on every invocation, and don't risk a font
+# lookup failing on a stripped install. Width: 28 cols, height: 4 lines
+# — fits any terminal that can run a CLI at all.
+_BANNER_ASCII = r""" _
+| |_  ___ _ _ _ __  ___ ___
+| ' \/ -_) '_| '  \/ -_|_-<
+|_||_\___|_| |_|_|_\___/__/"""
+
+
+def _print_banner(*, tagline: str | None = None) -> None:
+    """Render the splash banner — cyan ASCII art over a dim tagline + version.
+
+    Called from the chat REPL on startup and from the bare ``deepagent-hermes``
+    invocation (above the help text). Skipped silently if stdout isn't a TTY
+    so piped invocations stay clean (``deepagent-hermes --version | grep``,
+    test harnesses, etc.).
+    """
+    try:
+        is_tty = sys.stdout.isatty()
+    except Exception:
+        is_tty = False
+    if not is_tty:
+        return
+    from deepagent_hermes import __version__
+
+    click.echo(click.style(_BANNER_ASCII, fg="cyan", bold=True))
+    # ASCII separators — middle-dot looks nicer but mojibakes in cp1252
+    # terminals (Windows default before sys.stdout.reconfigure runs).
+    sub = tagline or "reflection | skills | memory"
+    click.echo(click.style(f"  {sub}  |  v{__version__}", fg="bright_black"))
+    click.echo()
+
+
 # ── helpers ────────────────────────────────────────────────────────
 
 
@@ -125,6 +161,7 @@ def cli(ctx: click.Context, show_config: bool, version: bool) -> None:
         click.echo(cfg.describe())
         ctx.exit(0)
     if ctx.invoked_subcommand is None:
+        _print_banner()
         click.echo(ctx.get_help())
 
 
@@ -185,7 +222,7 @@ def chat(model_id: str | None, workspace: str | None) -> None:
         "agent": agent,
     }
 
-    click.echo("deepagent-hermes chat — type /help for commands, /quit to exit.")
+    _print_banner(tagline="chat · type /help for commands, /quit to exit")
     click.echo(click.style(f"  session: {session_id}", fg="bright_black"))
     while True:
         try:
