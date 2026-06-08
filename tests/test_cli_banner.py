@@ -64,3 +64,83 @@ def test_help_does_not_explode_on_banner(monkeypatch):
     assert result.exit_code == 0
     # Banner is silent on non-TTY; help text always shows.
     assert "deepagent-hermes" in result.output.lower()
+
+
+# ── _print_chat_context ─────────────────────────────────────────────
+
+
+def test_chat_context_silent_on_non_tty(capsys):
+    """Same TTY gate as the banner — piped chat invocations don't leak
+    config to stdout (though `chat` itself is interactive, so this is
+    a defence-in-depth check, not a primary use case)."""
+    from deepagent_hermes.cli import _print_chat_context
+
+    _print_chat_context(
+        cfg=type("C", (), {"model_default": "anthropic:foo", "hermes_home": "/tmp/h"})(),
+        workspace="/tmp/ws",
+        session_id="sess-abc",
+        agent=lambda x: x,
+    )
+    assert capsys.readouterr().out == ""
+
+
+def test_chat_context_renders_core_fields_on_tty(monkeypatch, capsys):
+    from deepagent_hermes.cli import _print_chat_context
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.delenv("DEEPAGENT_AGENT_SPEC", raising=False)
+
+    def my_factory(cfg):  # so we can read its qualname back out
+        return None
+
+    cfg = type("C", (), {"model_default": "anthropic:claude-sonnet-4-5", "hermes_home": "/h/dah"})()
+    _print_chat_context(
+        cfg=cfg,
+        workspace="/path/to/ws",
+        session_id="sess-7094182fad7f",
+        agent=my_factory,
+    )
+    out = capsys.readouterr().out
+    # Core fields all present.
+    assert "agent" in out and "my_factory" in out
+    assert "anthropic:claude-sonnet-4-5" in out
+    assert "/path/to/ws" in out
+    assert "/h/dah" in out
+    assert "sess-7094182fad7f" in out
+    # No spec line when env var is unset.
+    assert "spec" not in out.lower()
+
+
+def test_chat_context_shows_advisory_spec_when_set(monkeypatch, capsys):
+    """If DEEPAGENT_AGENT_SPEC is in env, surface it with an annotation
+    that it's not consumed by this CLI — keeps the user from being
+    confused when the spec they set "doesn't work" here."""
+    from deepagent_hermes.cli import _print_chat_context
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.setenv("DEEPAGENT_AGENT_SPEC", "custom.module:graph")
+
+    cfg = type("C", (), {"model_default": "m", "hermes_home": "/h"})()
+    _print_chat_context(cfg=cfg, workspace="/ws", session_id="s", agent=lambda c: None)
+    out = capsys.readouterr().out
+    assert "custom.module:graph" in out
+    assert "advisory" in out.lower()
+
+
+def test_chat_context_shortens_long_paths(monkeypatch, capsys):
+    """Long absolute paths get middle-ellipsised so the block fits in
+    a normal terminal width."""
+    from deepagent_hermes.cli import _print_chat_context, _shorten_path
+
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+    long_ws = "/very/long/absolute/path/" + "x" * 200 + "/workspace"
+    cfg = type("C", (), {"model_default": "m", "hermes_home": long_ws})()
+    _print_chat_context(cfg=cfg, workspace=long_ws, session_id="s", agent=lambda c: None)
+    out = capsys.readouterr().out
+    # Ellipsis marker present (paths got shortened).
+    assert "..." in out
+    # Direct shortener check too.
+    assert _shorten_path(long_ws) != long_ws
+    assert "..." in _shorten_path(long_ws)
+    assert _shorten_path("/short/path") == "/short/path"
