@@ -115,21 +115,53 @@ def _shorten_path(p: str, *, max_len: int = 56) -> str:
     return f"{p[:keep]}...{p[-keep:]}"
 
 
-def _print_chat_context(*, cfg: Any, workspace: Any, session_id: str, agent: Any) -> None:
+def _instantiate_factory(target: Any, cfg: Any) -> Any:
+    """Call a spec-loaded or built-in factory, falling back to bare call.
+
+    The built-in factory is ``create_hermes_agent(cfg)``. User factories
+    loaded via DEEPAGENT_AGENT_SPEC may not accept a config arg — they
+    might be a zero-arg ``def make_graph(): ...`` or a partial. Try
+    cfg-aware first, fall back to bare on TypeError. Anything else
+    propagates (so a real bug in the factory body still surfaces).
+    """
+    try:
+        return target(cfg)
+    except TypeError as e:
+        # The TypeError must come from the *signature* mismatch, not
+        # from some downstream code that happens to raise TypeError.
+        # Heuristic: cfg-rejecting signatures fail with "positional
+        # arguments" / "unexpected keyword". If the message doesn't
+        # match those patterns, re-raise — it was a real bug.
+        msg = str(e).lower()
+        if "positional argument" in msg or "unexpected keyword" in msg or "takes 0" in msg:
+            return target()
+        raise
+
+
+def _print_chat_context(
+    *,
+    cfg: Any,
+    workspace: Any,
+    session_id: str,
+    agent: Any,
+    agent_source: str = "builtin",
+) -> None:
     """Print the per-session config block below the banner.
 
     Surfaces *what's actually being rendered* — the model, workspace,
-    HERMES_HOME, session id, and the (built-in) agent factory. The
-    historical chat startup printed just the session id, which left a
-    user staring at a prompt with no way to tell which model they were
-    burning credits on or where their state.db would land.
+    HERMES_HOME, session id, and the agent (factory or graph) loaded
+    for this session. The historical chat startup printed just the
+    session id, which left a user staring at a prompt with no way to
+    tell which model they were burning credits on or where their
+    state.db would land.
 
-    Also surfaces the ``DEEPAGENT_AGENT_SPEC`` env var if set — even
-    though this CLI doesn't consume it (it always uses the built-in
-    agent factory), the env var is the host-adoption knob other
-    deepagent-* surfaces respect. If the user has it set and is
-    expecting this REPL to obey it, the line acts as a heads-up that
-    it's been read but ignored.
+    Args:
+        agent_source: ``"spec"`` if the agent was loaded via
+            ``DEEPAGENT_AGENT_SPEC``, ``"builtin"`` otherwise. Drives
+            the framing of the ``spec`` row — when spec is *consumed*
+            we drop the "advisory" annotation; when spec is *set but
+            ignored* (e.g., on the bare invocation help path) the
+            annotation reminds the user it's only advisory there.
     """
     try:
         is_tty = sys.stdout.isatty()
@@ -138,31 +170,40 @@ def _print_chat_context(*, cfg: Any, workspace: Any, session_id: str, agent: Any
     if not is_tty:
         return
 
-    # The "agent" the chat REPL is using = the one returned by
-    # _try_import_agent — always the built-in factory unless someone
-    # patches it. Show its import path so the user knows what they're
-    # talking to.
-    agent_qualname = (
-        f"{getattr(agent, '__module__', '?')}.{getattr(agent, '__name__', '?')}"
-        if callable(agent)
-        else f"{type(agent).__module__}.{type(agent).__name__}"
-    )
+    # The "agent" surfaced here is whatever _resolve_agent returned —
+    # either the built-in factory or the spec target. Render its import
+    # path so the user knows what they're talking to.
+    if callable(agent) and hasattr(agent, "__name__"):
+        agent_qualname = f"{getattr(agent, '__module__', '?')}.{agent.__name__}"
+    else:
+        agent_qualname = f"{type(agent).__module__}.{type(agent).__name__}"
 
     # Model: prefer explicit override on cfg, fall back to default.
-    model_id = getattr(cfg, "model_default", None) or "(default: anthropic:claude-sonnet-4-5-20250929)"
+    # When the agent comes from a spec it holds its own model binding;
+    # showing cfg.model_default would be misleading, so we annotate.
+    model_id_raw = getattr(cfg, "model_default", None) or "(default: anthropic:claude-sonnet-4-5-20250929)"
+    if agent_source == "spec":
+        model_id = f"{model_id_raw}  (cfg default -- the spec graph owns its actual model)"
+    else:
+        model_id = str(model_id_raw)
 
     rows: list[tuple[str, str]] = [
         ("agent", agent_qualname),
-        ("model", str(model_id)),
+        ("model", model_id),
         ("workspace", _shorten_path(str(workspace))),
         ("home", _shorten_path(str(getattr(cfg, "hermes_home", "(unset)")))),
         ("session", session_id),
     ]
     spec = os.environ.get("DEEPAGENT_AGENT_SPEC")
     if spec:
-        # Flag that this CLI ignores the spec — the spec is consumed by
-        # external hosts (deepagent-code / deepagent-lab / cowork-dash).
-        rows.append(("spec", f"{spec}  (advisory -- built-in agent used here)"))
+        # Spec consumed → no advisory annotation; the env var is doing
+        # work. Spec set but not consumed (e.g., bare invocation that
+        # bypassed _resolve_agent) → keep the advisory annotation so
+        # the user knows the var isn't shaping this output.
+        if agent_source == "spec":
+            rows.append(("spec", f"{spec}  (active)"))
+        else:
+            rows.append(("spec", f"{spec}  (advisory -- built-in agent used here)"))
 
     label_w = max(len(k) for k, _ in rows)
     for label, value in rows:
@@ -182,7 +223,7 @@ def _load_config() -> Any:
 
 
 def _try_import_agent() -> tuple[Any | None, str | None]:
-    """Lazy-import the agent module; return (factory, error_message)."""
+    """Lazy-import the built-in agent module; return (factory, error_message)."""
     try:
         agent_mod = importlib.import_module("deepagent_hermes.agent")
     except ImportError as e:
@@ -194,6 +235,67 @@ def _try_import_agent() -> tuple[Any | None, str | None]:
             "nor a 'graph' symbol. CLI cannot start an agent yet."
         )
     return factory, None
+
+
+def _resolve_agent() -> tuple[Any | None, str, str | None]:
+    """Resolve the chat agent source — spec env var or built-in factory.
+
+    The ``DEEPAGENT_AGENT_SPEC`` env var is the host-adoption convention
+    every deep-agent surface respects (cowork-dash, deepagent-code, …).
+    If it's set, honour it here too: load the named callable/graph via
+    :func:`langgraph_stream_parser.load_agent_spec`. If not, fall through
+    to the built-in ``create_hermes_agent`` factory.
+
+    Returns:
+        ``(agent_or_factory, source, error_message)``:
+
+        - ``agent_or_factory`` is the resolved object. When ``source ==
+          "spec"`` it is the spec target itself (already a graph, or a
+          callable that returns one); when ``source == "builtin"`` it
+          is the ``create_hermes_agent`` factory.
+        - ``source`` is ``"spec"`` when the env var was honoured,
+          ``"builtin"`` otherwise.
+        - ``error_message`` is non-None when loading failed.
+
+    Contract check on spec-loaded agents is intentionally light — we
+    verify the object is either invokable (``has .invoke``) or callable
+    (a factory returning a graph), and let the actual invocation
+    surface deeper schema issues. A heavier check (probe-invoke with a
+    fake message) would burn API budget on a setup smoke; the contract
+    check below catches the common typo ("pointed the spec at a
+    module, not a graph") without that cost.
+    """
+    spec = os.environ.get("DEEPAGENT_AGENT_SPEC")
+    if spec:
+        try:
+            from langgraph_stream_parser import load_agent_spec
+        except ImportError as e:
+            return (
+                None,
+                "spec",
+                (
+                    f"DEEPAGENT_AGENT_SPEC={spec!r} is set but langgraph-stream-parser "
+                    f"is not installed (or load_agent_spec is missing): {e}"
+                ),
+            )
+        try:
+            target = load_agent_spec(spec)
+        except Exception as e:
+            return None, "spec", f"DEEPAGENT_AGENT_SPEC={spec!r} failed to load: {e}"
+        if not (hasattr(target, "invoke") or callable(target)):
+            return (
+                None,
+                "spec",
+                (
+                    f"DEEPAGENT_AGENT_SPEC={spec!r} loaded but the result is neither "
+                    f"invokable nor callable (got {type(target).__name__}). The spec "
+                    f"must point at a compiled LangGraph object or a callable that "
+                    f"returns one."
+                ),
+            )
+        return target, "spec", None
+    factory, err = _try_import_agent()
+    return factory, "builtin", err
 
 
 # ── root ───────────────────────────────────────────────────────────
@@ -244,13 +346,14 @@ def cli(ctx: click.Context, show_config: bool, version: bool) -> None:
 )
 def chat(model_id: str | None, workspace: str | None) -> None:
     """Interactive chat REPL with slash-command dispatch."""
-    factory, err = _try_import_agent()
+    target, source, err = _resolve_agent()
     if err:
-        click.echo(click.style(err, fg="yellow"), err=True)
-        click.echo(
-            "(The rest of the CLI — cron, plugins, doctor, --show-config — still works.)",
-            err=True,
-        )
+        click.echo(click.style(err, fg="red" if source == "spec" else "yellow"), err=True)
+        if source == "builtin":
+            click.echo(
+                "(The rest of the CLI — cron, plugins, doctor, --show-config — still works.)",
+                err=True,
+            )
         sys.exit(1)
 
     cfg = _load_config()
@@ -264,8 +367,18 @@ def chat(model_id: str | None, workspace: str | None) -> None:
 
         cfg = HermesConfig.resolve(overrides=overrides)
 
+    # Spec target may itself be a graph (use as-is) or a callable
+    # (factory we should invoke). The built-in path is always a factory.
+    # Distinguish: graphs expose ``.invoke``; callables don't (until
+    # called). If it has .invoke we treat it as a ready graph.
     try:
-        agent = factory(cfg) if callable(factory) else factory
+        if source == "spec" and hasattr(target, "invoke"):
+            agent = target
+        else:
+            # Factory path: call with cfg if the signature accepts it,
+            # else call bare (so user-supplied callables that take no
+            # args still work without forcing them to accept HermesConfig).
+            agent = _instantiate_factory(target, cfg)
     except Exception as e:
         click.echo(click.style(f"Failed to build agent: {e}", fg="red"), err=True)
         sys.exit(2)
@@ -292,7 +405,8 @@ def chat(model_id: str | None, workspace: str | None) -> None:
         cfg=cfg,
         workspace=workspace or os.getcwd(),
         session_id=session_id,
-        agent=factory,
+        agent=target,
+        agent_source=source,
     )
     while True:
         try:
