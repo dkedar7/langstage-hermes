@@ -92,6 +92,8 @@ def create_hermes_agent(
     session_id: str | None = None,
     extra_middleware: list[Any] | None = None,
     backend: Any = None,
+    model: Any = None,
+    aux_model: Any = None,
 ) -> Any:
     """Build a fresh Hermes agent graph.
 
@@ -111,6 +113,21 @@ def create_hermes_agent(
             implementation (e.g. the Harbor adapter in
             ``examples/terminal_bench.py``) to run hermes against a remote
             sandbox.
+        model: Optional ``langchain_core.language_models.BaseChatModel``
+            instance to use as the main model. When supplied, overrides
+            ``config.model_default`` and bypasses ``init_chat_model``. Use
+            this for bring-your-own-model setups that ``init_chat_model``'s
+            ``provider:name`` string can't express cleanly —
+            ``AzureChatOpenAI``, ``ChatBedrock``, an OpenAI-compatible
+            proxy with a custom ``base_url``, etc. The instance is used
+            as-is (no rewrapping); responsibility for credentials,
+            ``cache_control`` headers, retry config, etc. stays with the
+            caller.
+        aux_model: Same as ``model`` but for the auxiliary model the
+            reflection subagent and the compression summariser use.
+            Defaults to ``model`` if ``model`` is set and ``aux_model`` is
+            not; otherwise falls back to ``config.model_aux`` via
+            ``init_chat_model``.
 
     Returns:
         A compiled LangGraph ``CompiledStateGraph`` ready for ``.invoke()`` /
@@ -138,8 +155,20 @@ def create_hermes_agent(
     library = SkillLibrary(_default_skill_dirs(cfg), audit_log=audit_log)
     library.set_mutation_context(session_id=sid, source="agent")
 
-    main_model = _init_chat_model(cfg.model_default)
-    aux_model = _init_chat_model(cfg.model_aux) if cfg.model_aux else main_model
+    # Bring-your-own-model: caller-supplied instances bypass init_chat_model
+    # entirely so Azure / Bedrock / OpenAI-compatible proxies / anything
+    # whose config doesn't fit the `provider:name` string format works
+    # without forcing the user to wrap it. Default behaviour (None,None)
+    # is unchanged — string-driven init via cfg.model_default / model_aux.
+    main_model = model if model is not None else _init_chat_model(cfg.model_default)
+    if aux_model is not None:
+        pass  # caller supplied it explicitly
+    elif model is not None:
+        # Caller gave a main model but no aux — share it. This matches the
+        # string-driven path's behaviour when only `model_default` is set.
+        aux_model = main_model
+    else:
+        aux_model = _init_chat_model(cfg.model_aux) if cfg.model_aux else main_model
 
     # ── memory provider plugin (single-select) ───────────────────────────
     provider_name = cfg.memory_provider or ""
