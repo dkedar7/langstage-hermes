@@ -70,6 +70,107 @@ BUILTIN_SLASH_COMMANDS: dict[str, str] = {
 }
 
 
+# ── banner ─────────────────────────────────────────────────────────
+# Pre-rendered FIGlet (font: small) for "hermes". Hard-coded rather than
+# generated at startup so we don't pull in pyfiglet as a runtime dep,
+# don't pay the render cost on every invocation, and don't risk a font
+# lookup failing on a stripped install. Width: 28 cols, height: 4 lines
+# — fits any terminal that can run a CLI at all.
+_BANNER_ASCII = r""" _
+| |_  ___ _ _ _ __  ___ ___
+| ' \/ -_) '_| '  \/ -_|_-<
+|_||_\___|_| |_|_|_\___/__/"""
+
+
+def _print_banner(*, tagline: str | None = None) -> None:
+    """Render the splash banner — cyan ASCII art over a dim tagline + version.
+
+    Called from the chat REPL on startup and from the bare ``deepagent-hermes``
+    invocation (above the help text). Skipped silently if stdout isn't a TTY
+    so piped invocations stay clean (``deepagent-hermes --version | grep``,
+    test harnesses, etc.).
+    """
+    try:
+        is_tty = sys.stdout.isatty()
+    except Exception:
+        is_tty = False
+    if not is_tty:
+        return
+    from deepagent_hermes import __version__
+
+    click.echo(click.style(_BANNER_ASCII, fg="cyan", bold=True))
+    # ASCII separators — middle-dot looks nicer but mojibakes in cp1252
+    # terminals (Windows default before sys.stdout.reconfigure runs).
+    sub = tagline or "reflection | skills | memory"
+    click.echo(click.style(f"  {sub}  |  v{__version__}", fg="bright_black"))
+    click.echo()
+
+
+def _shorten_path(p: str, *, max_len: int = 56) -> str:
+    """Trim long absolute paths to fit on one line — keeps the head + tail,
+    ellipsises the middle. Pure cosmetic; never used for any lookup."""
+    if len(p) <= max_len:
+        return p
+    keep = (max_len - 3) // 2
+    return f"{p[:keep]}...{p[-keep:]}"
+
+
+def _print_chat_context(*, cfg: Any, workspace: Any, session_id: str, agent: Any) -> None:
+    """Print the per-session config block below the banner.
+
+    Surfaces *what's actually being rendered* — the model, workspace,
+    HERMES_HOME, session id, and the (built-in) agent factory. The
+    historical chat startup printed just the session id, which left a
+    user staring at a prompt with no way to tell which model they were
+    burning credits on or where their state.db would land.
+
+    Also surfaces the ``DEEPAGENT_AGENT_SPEC`` env var if set — even
+    though this CLI doesn't consume it (it always uses the built-in
+    agent factory), the env var is the host-adoption knob other
+    deepagent-* surfaces respect. If the user has it set and is
+    expecting this REPL to obey it, the line acts as a heads-up that
+    it's been read but ignored.
+    """
+    try:
+        is_tty = sys.stdout.isatty()
+    except Exception:
+        is_tty = False
+    if not is_tty:
+        return
+
+    # The "agent" the chat REPL is using = the one returned by
+    # _try_import_agent — always the built-in factory unless someone
+    # patches it. Show its import path so the user knows what they're
+    # talking to.
+    agent_qualname = (
+        f"{getattr(agent, '__module__', '?')}.{getattr(agent, '__name__', '?')}"
+        if callable(agent)
+        else f"{type(agent).__module__}.{type(agent).__name__}"
+    )
+
+    # Model: prefer explicit override on cfg, fall back to default.
+    model_id = getattr(cfg, "model_default", None) or "(default: anthropic:claude-sonnet-4-5-20250929)"
+
+    rows: list[tuple[str, str]] = [
+        ("agent", agent_qualname),
+        ("model", str(model_id)),
+        ("workspace", _shorten_path(str(workspace))),
+        ("home", _shorten_path(str(getattr(cfg, "hermes_home", "(unset)")))),
+        ("session", session_id),
+    ]
+    spec = os.environ.get("DEEPAGENT_AGENT_SPEC")
+    if spec:
+        # Flag that this CLI ignores the spec — the spec is consumed by
+        # external hosts (deepagent-code / deepagent-lab / cowork-dash).
+        rows.append(("spec", f"{spec}  (advisory -- built-in agent used here)"))
+
+    label_w = max(len(k) for k, _ in rows)
+    for label, value in rows:
+        line = f"  {label:<{label_w}} : {value}"
+        click.echo(click.style(line, fg="bright_black"))
+    click.echo()
+
+
 # ── helpers ────────────────────────────────────────────────────────
 
 
@@ -125,6 +226,7 @@ def cli(ctx: click.Context, show_config: bool, version: bool) -> None:
         click.echo(cfg.describe())
         ctx.exit(0)
     if ctx.invoked_subcommand is None:
+        _print_banner()
         click.echo(ctx.get_help())
 
 
@@ -185,8 +287,13 @@ def chat(model_id: str | None, workspace: str | None) -> None:
         "agent": agent,
     }
 
-    click.echo("deepagent-hermes chat — type /help for commands, /quit to exit.")
-    click.echo(click.style(f"  session: {session_id}", fg="bright_black"))
+    _print_banner(tagline="chat | type /help for commands, /quit to exit")
+    _print_chat_context(
+        cfg=cfg,
+        workspace=workspace or os.getcwd(),
+        session_id=session_id,
+        agent=factory,
+    )
     while True:
         try:
             line = input("> ").strip()
