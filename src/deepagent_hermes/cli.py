@@ -274,10 +274,7 @@ def _resolve_agent(spec: str | None = None) -> tuple[Any | None, str, str | None
             return (
                 None,
                 "spec",
-                (
-                    f"agent spec {spec!r} is set but langgraph-stream-parser "
-                    f"is not installed (or load_agent_spec is missing): {e}"
-                ),
+                (f"agent spec {spec!r} is set but langgraph-stream-parser is not installed (or load_agent_spec is missing): {e}"),
             )
         try:
             target = load_agent_spec(spec)
