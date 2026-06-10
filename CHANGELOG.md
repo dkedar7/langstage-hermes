@@ -5,6 +5,27 @@ All notable changes to `deepagent-hermes` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] — 2026-06-10
+
+### Added
+
+- **`chat -a/--agent <spec>`** — pick the chat agent explicitly, with the same flag spelling and spec format (`module:attr` / `path/to/file.py:attr`) as `deepagent-code -a` and `cowork-dash run -a`. The flag wins over `DEEPAGENT_AGENT_SPEC`.
+- **README: "One agent, every surface"** family table cross-linking all six deep-agent repos.
+
+## [0.1.4] — 2026-06-08
+
+### Added
+
+- **`create_hermes_agent(model=...)` accepts LangChain model instances directly** (#11) — bring-your-own-model instead of only `provider:model` id strings.
+- **FIGlet banner** on the chat REPL and bare CLI invocation (#12).
+- **`chat` consumes `DEEPAGENT_AGENT_SPEC`** (#13) — the spec env var now actually drives which agent the REPL runs (it was display-only "advisory" before).
+
+## [0.1.3] — 2026-06-04
+
+### Fixed
+
+- **v0.1.2 wheel shipped no Python code** (#10). The explicit `[tool.hatch.build.targets.sdist]` include list was *restrictive*: release CI's `python -m build` (sdist → wheel-from-sdist) produced a wheel with prompts and skills but **zero `.py` files**, so every install crashed with `ModuleNotFoundError: deepagent_hermes.cli`. Removed the restrictive include so hatch ships all tracked files.
+
 ## [0.1.2] — 2026-06-04
 
 ### Fixed — fresh-install ship-blockers
