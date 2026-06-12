@@ -120,7 +120,7 @@ def main() -> int:
     print("Building agent (skills/memory nudge_interval=4)...")
     t0 = time.perf_counter()
 
-    from deepagent_hermes import HermesConfig, create_hermes_agent
+    from langstage_hermes import HermesConfig, create_hermes_agent
 
     cfg = HermesConfig.resolve()
     sid = "proc-dogfood-001"

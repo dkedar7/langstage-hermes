@@ -81,12 +81,12 @@ def main() -> int:
     print()
 
     t0 = time.perf_counter()
-    from deepagent_hermes import HermesConfig, create_hermes_agent
+    from langstage_hermes import HermesConfig, create_hermes_agent
 
     cfg = HermesConfig.resolve()
     sid = "openrouter-dogfood-001"
     agent = create_hermes_agent(cfg, workspace=workspace, session_id=sid)
-    print(f"agent built in {time.perf_counter() - t0:.2f}s ({len(agent.deepagent_hermes_library.list())} bundled skills)")
+    print(f"agent built in {time.perf_counter() - t0:.2f}s ({len(agent.langstage_hermes_library.list())} bundled skills)")
     print()
 
     memory_md = tmp_home / "memories" / "MEMORY.md"

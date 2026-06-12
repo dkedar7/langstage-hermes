@@ -110,13 +110,13 @@ def main() -> int:
     print("Building agent (default thresholds: 10 iters / 10 turns)...")
     t0 = time.perf_counter()
 
-    from deepagent_hermes import HermesConfig, create_hermes_agent
+    from langstage_hermes import HermesConfig, create_hermes_agent
 
     cfg = HermesConfig.resolve()
     sid = "dogfood-001"
     agent = create_hermes_agent(cfg, workspace=workspace, session_id=sid)
     print(f"  built in {time.perf_counter() - t0:.2f}s")
-    print(f"  bundled skills: {len(agent.deepagent_hermes_library.list())}")
+    print(f"  bundled skills: {len(agent.langstage_hermes_library.list())}")
     print()
 
     memory_md = tmp_home / "memories" / "MEMORY.md"
@@ -155,7 +155,7 @@ def main() -> int:
         print(f"    counters: iters_since_skill={iss} turns_since_memory={tsm} pending={prk!r} msgs={msgs}")
 
         # Skill / memory deltas
-        user_skills = _list_user_skills(agent.deepagent_hermes_library, tmp_home)
+        user_skills = _list_user_skills(agent.langstage_hermes_library, tmp_home)
         new_skills = len(user_skills) - last_skill_count
         mem_delta = _file_size(memory_md) - last_memory_size
         user_delta = _file_size(user_md) - last_user_size
@@ -178,7 +178,7 @@ def main() -> int:
     print("FINAL STATE")
     print("=" * 78)
 
-    user_skills = _list_user_skills(agent.deepagent_hermes_library, tmp_home)
+    user_skills = _list_user_skills(agent.langstage_hermes_library, tmp_home)
     print(f"\nUser-written skills: {len(user_skills)}")
     for p in user_skills:
         body = p.read_text(encoding="utf-8")

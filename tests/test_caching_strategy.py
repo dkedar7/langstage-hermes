@@ -17,7 +17,7 @@ from langchain.agents.middleware.types import ModelRequest
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from deepagent_hermes.caching import AnthropicCachingS3Middleware
+from langstage_hermes.caching import AnthropicCachingS3Middleware
 
 # ── helpers ──────────────────────────────────────────────────────────
 

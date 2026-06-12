@@ -1,4 +1,4 @@
-"""Tests for the ``deepagent-hermes`` CLI surface — focused on ``--show-config``."""
+"""Tests for the ``langstage-hermes`` CLI surface — focused on ``--show-config``."""
 
 from __future__ import annotations
 
@@ -7,14 +7,14 @@ import sys
 
 
 def test_show_config_exits_zero_and_prints_sections():
-    """``python -m deepagent_hermes.cli --show-config`` prints the resolved config.
+    """``python -m langstage_hermes.cli --show-config`` prints the resolved config.
 
     Per SPEC §2 acceptance: every field with its source. We assert exit code 0
     plus presence of two ``model`` / ``agent`` field prefixes (HermesConfig
     fields are flat — ``model_default``, ``agent_max_iterations``, ...).
     """
     result = subprocess.run(
-        [sys.executable, "-m", "deepagent_hermes.cli", "--show-config"],
+        [sys.executable, "-m", "langstage_hermes.cli", "--show-config"],
         capture_output=True,
         text=True,
         timeout=30,
@@ -27,9 +27,9 @@ def test_show_config_exits_zero_and_prints_sections():
 
 
 def test_root_without_subcommand_shows_help():
-    """Bare ``python -m deepagent_hermes.cli`` should not crash; prints help."""
+    """Bare ``python -m langstage_hermes.cli`` should not crash; prints help."""
     result = subprocess.run(
-        [sys.executable, "-m", "deepagent_hermes.cli"],
+        [sys.executable, "-m", "langstage_hermes.cli"],
         capture_output=True,
         text=True,
         timeout=15,
@@ -41,10 +41,10 @@ def test_root_without_subcommand_shows_help():
 def test_version_flag():
     """``--version`` prints the package version."""
     result = subprocess.run(
-        [sys.executable, "-m", "deepagent_hermes.cli", "--version"],
+        [sys.executable, "-m", "langstage_hermes.cli", "--version"],
         capture_output=True,
         text=True,
         timeout=15,
     )
     assert result.returncode == 0
-    assert "deepagent-hermes" in result.stdout
+    assert "langstage-hermes" in result.stdout

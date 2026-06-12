@@ -1,7 +1,7 @@
 """Host-adoption smoke: load the Hermes graph via the deepagent-code host machinery.
 
 Validates the contract every deepagent-* host depends on:
-``DEEPAGENT_AGENT_SPEC=deepagent_hermes.agent:graph`` resolves through
+``DEEPAGENT_AGENT_SPEC=langstage_hermes.agent:graph`` resolves through
 ``langgraph_stream_parser.host.load_agent_spec`` and the resulting graph
 is invokable.
 
@@ -27,24 +27,24 @@ def main() -> int:
     tmp_home = Path(tempfile.mkdtemp(prefix="deepagent-hermes-host-"))
     os.environ["DEEPAGENT_HERMES_HOME"] = str(tmp_home)
     os.environ["HERMES_HOME"] = str(tmp_home)
-    os.environ["DEEPAGENT_AGENT_SPEC"] = "deepagent_hermes.agent:graph"
+    os.environ["DEEPAGENT_AGENT_SPEC"] = "langstage_hermes.agent:graph"
 
     print(f"HERMES_HOME = {tmp_home}")
     print(f"DEEPAGENT_AGENT_SPEC = {os.environ['DEEPAGENT_AGENT_SPEC']}")
     print()
 
     # ─── 1. Verify load_agent_spec resolves the entry point ────────────
-    print("[1] load_agent_spec('deepagent_hermes.agent:graph') ...")
+    print("[1] load_agent_spec('langstage_hermes.agent:graph') ...")
     t0 = time.perf_counter()
     from langgraph_stream_parser.host import load_agent_spec
 
-    graph = load_agent_spec("deepagent_hermes.agent:graph")
+    graph = load_agent_spec("langstage_hermes.agent:graph")
     print(f"    resolved in {time.perf_counter() - t0:.2f}s -> {type(graph).__name__}")
     assert hasattr(graph, "invoke")
     assert hasattr(graph, "stream")
-    print(f"    config = {getattr(graph, 'deepagent_hermes_config', None)!r}"[:120])
-    print(f"    session_id = {getattr(graph, 'deepagent_hermes_session_id', None)!r}")
-    print(f"    bundled skills = {len(graph.deepagent_hermes_library.list())}")
+    print(f"    config = {getattr(graph, 'langstage_hermes_config', None)!r}"[:120])
+    print(f"    session_id = {getattr(graph, 'langstage_hermes_session_id', None)!r}")
+    print(f"    bundled skills = {len(graph.langstage_hermes_library.list())}")
     print()
 
     # ─── 2. Verify deepagent-code can construct its config + load same spec ─
@@ -62,7 +62,7 @@ def main() -> int:
         cfg = CodeConfig.resolve()
         spec = getattr(cfg, "agent_spec", None)
         print(f"    cfg.agent_spec = {spec!r}")
-        assert spec == "deepagent_hermes.agent:graph", f"expected hermes spec, got {spec!r}"
+        assert spec == "langstage_hermes.agent:graph", f"expected hermes spec, got {spec!r}"
         print("    OK — deepagent-code would load the hermes agent")
     print()
 

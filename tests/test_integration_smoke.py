@@ -23,10 +23,10 @@ def integration_env(tmp_hermes_home, tmp_workspace, monkeypatch):
 
 def test_create_hermes_agent_builds(integration_env):
     """The graph compiles, attaches its config + store + library + session id."""
-    from deepagent_hermes.agent import create_hermes_agent
-    from deepagent_hermes.config import HermesConfig
-    from deepagent_hermes.skills.library import SkillLibrary
-    from deepagent_hermes.store.sqlite_fts import SqliteFtsStore
+    from langstage_hermes.agent import create_hermes_agent
+    from langstage_hermes.config import HermesConfig
+    from langstage_hermes.skills.library import SkillLibrary
+    from langstage_hermes.store.sqlite_fts import SqliteFtsStore
 
     _, ws = integration_env
     cfg = HermesConfig.resolve()
@@ -38,17 +38,17 @@ def test_create_hermes_agent_builds(integration_env):
     assert hasattr(agent, "ainvoke")
 
     # Attached refs are present.
-    assert agent.deepagent_hermes_config is cfg
-    assert agent.deepagent_hermes_session_id == "test-session-123"
-    assert isinstance(agent.deepagent_hermes_store, SqliteFtsStore)
-    assert isinstance(agent.deepagent_hermes_library, SkillLibrary)
+    assert agent.langstage_hermes_config is cfg
+    assert agent.langstage_hermes_session_id == "test-session-123"
+    assert isinstance(agent.langstage_hermes_store, SqliteFtsStore)
+    assert isinstance(agent.langstage_hermes_library, SkillLibrary)
 
 
 def test_state_db_created_under_hermes_home(integration_env):
     """The SQLite state.db lands at <HERMES_HOME>/state.db and has the FTS5 tables."""
     import sqlite3
 
-    from deepagent_hermes.agent import create_hermes_agent
+    from langstage_hermes.agent import create_hermes_agent
 
     home, ws = integration_env
     create_hermes_agent(workspace=ws)
@@ -69,18 +69,18 @@ def test_state_db_created_under_hermes_home(integration_env):
 
 def test_auto_session_id_when_omitted(integration_env):
     """No session_id arg → generates a sess-<hex> id."""
-    from deepagent_hermes.agent import create_hermes_agent
+    from langstage_hermes.agent import create_hermes_agent
 
     _, ws = integration_env
     agent = create_hermes_agent(workspace=ws)
-    sid = agent.deepagent_hermes_session_id
+    sid = agent.langstage_hermes_session_id
     assert sid.startswith("sess-")
     assert len(sid) > len("sess-")
 
 
 def test_module_level_graph_is_lazy(integration_env, monkeypatch):
-    """`import deepagent_hermes.agent` does NOT build the graph; first access does."""
-    import deepagent_hermes.agent as agent_mod
+    """`import langstage_hermes.agent` does NOT build the graph; first access does."""
+    import langstage_hermes.agent as agent_mod
 
     # Reset module-level cache (test isolation).
     monkeypatch.setattr(agent_mod, "_graph", None)
@@ -97,7 +97,7 @@ def test_module_level_graph_is_lazy(integration_env, monkeypatch):
 
 
 def test_skill_manage_extractor_handles_create():
-    from deepagent_hermes.extractors import SkillManageExtractor
+    from langstage_hermes.extractors import SkillManageExtractor
 
     ex = SkillManageExtractor()
     result = ex.extract(json.dumps({"action": "create", "name": "pdf-merging"}))
@@ -109,7 +109,7 @@ def test_skill_manage_extractor_handles_create():
 
 
 def test_skill_manage_extractor_handles_patch():
-    from deepagent_hermes.extractors import SkillManageExtractor
+    from langstage_hermes.extractors import SkillManageExtractor
 
     ex = SkillManageExtractor()
     result = ex.extract({"action": "patch", "name": "csv-cleaning"})
@@ -121,7 +121,7 @@ def test_skill_manage_extractor_handles_patch():
 
 
 def test_skill_view_extractor():
-    from deepagent_hermes.extractors import SkillViewExtractor
+    from langstage_hermes.extractors import SkillViewExtractor
 
     ex = SkillViewExtractor()
     body = "Here is the body of the skill: do X then Y."
@@ -130,7 +130,7 @@ def test_skill_view_extractor():
 
 
 def test_compression_extractor():
-    from deepagent_hermes.extractors import CompressionExtractor
+    from langstage_hermes.extractors import CompressionExtractor
 
     ex = CompressionExtractor()
     payload = {"before_tokens": 47_000, "after_tokens": 9_000, "ratio": 5.2, "section_count": 13}
@@ -139,7 +139,7 @@ def test_compression_extractor():
 
 
 def test_memory_extractor():
-    from deepagent_hermes.extractors import MemoryExtractor
+    from langstage_hermes.extractors import MemoryExtractor
 
     ex = MemoryExtractor()
     result = ex.extract(json.dumps({"action": "add", "target": "user", "entry": "..."}))
@@ -147,7 +147,7 @@ def test_memory_extractor():
 
 
 def test_extractors_return_none_on_unrelated_content():
-    from deepagent_hermes.extractors import (
+    from langstage_hermes.extractors import (
         CompressionExtractor,
         MemoryExtractor,
         SkillManageExtractor,
@@ -163,13 +163,13 @@ def test_extractors_return_none_on_unrelated_content():
 
 
 def test_deepagent_agent_spec_resolves(integration_env):
-    """The DEEPAGENT_AGENT_SPEC convention: 'deepagent_hermes.agent:graph' should resolve.
+    """The DEEPAGENT_AGENT_SPEC convention: 'langstage_hermes.agent:graph' should resolve.
 
     Hosts in the deepagent-* family use langgraph_stream_parser.host.load_agent_spec
     to load an agent. We verify the spec string maps to a usable graph.
     """
     from langgraph_stream_parser.host import load_agent_spec
 
-    graph = load_agent_spec("deepagent_hermes.agent:graph")
+    graph = load_agent_spec("langstage_hermes.agent:graph")
     assert hasattr(graph, "invoke")
     assert hasattr(graph, "stream")

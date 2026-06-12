@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from deepagent_hermes.search.session_search import (
+from langstage_hermes.search.session_search import (
     make_session_search_tool,
     run_session_search,
 )
-from deepagent_hermes.store.sqlite_fts import SqliteFtsStore
+from langstage_hermes.store.sqlite_fts import SqliteFtsStore
 
 # ---------------------------------------------------------------------------
 # fixtures

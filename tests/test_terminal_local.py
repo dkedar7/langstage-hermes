@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from deepagent_hermes.tools.environments.base import ExecuteResponse
-from deepagent_hermes.tools.environments.local import LocalEnvironment, _find_bash
+from langstage_hermes.tools.environments.base import ExecuteResponse
+from langstage_hermes.tools.environments.local import LocalEnvironment, _find_bash
 
 # ── Fixture ──────────────────────────────────────────────────────────
 

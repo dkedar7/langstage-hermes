@@ -11,10 +11,10 @@ from pathlib import Path
 import frontmatter
 import pytest
 
-from deepagent_hermes.skills.validator import validate
+from langstage_hermes.skills.validator import validate
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-BUNDLED_DIR = REPO_ROOT / "src" / "deepagent_hermes" / "_bundled_skills"
+BUNDLED_DIR = REPO_ROOT / "src" / "langstage_hermes" / "_bundled_skills"
 
 
 def _all_skill_files() -> list[Path]:

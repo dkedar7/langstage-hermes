@@ -129,11 +129,11 @@ def test_harbor_backend_download_missing_file_returns_not_found():
     asyncio.run(run())
 
 
-def test_deepagent_hermes_agent_metadata():
+def test_langstage_hermes_agent_metadata():
     """``name()`` and ``version()`` should match the installed package."""
     from terminal_bench import DeepagentHermesAgent
 
-    assert DeepagentHermesAgent.name() == "deepagent-hermes"
+    assert DeepagentHermesAgent.name() == "langstage-hermes"
     # version() returns None if the package isn't importable; if it IS
     # importable, the value must be a non-empty string.
     instance = DeepagentHermesAgent.__new__(DeepagentHermesAgent)

@@ -18,8 +18,8 @@ from unittest.mock import patch
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-from deepagent_hermes.agent import create_hermes_agent
-from deepagent_hermes.config import HermesConfig
+from langstage_hermes.agent import create_hermes_agent
+from langstage_hermes.config import HermesConfig
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ def test_supplied_model_bypasses_init_chat_model(home: Path):
     cfg = HermesConfig.resolve()
     model = _stub_model()
 
-    with patch("deepagent_hermes.agent._init_chat_model") as init_mock:
+    with patch("langstage_hermes.agent._init_chat_model") as init_mock:
         graph = create_hermes_agent(cfg, model=model)
 
     assert init_mock.call_count == 0, (
@@ -55,7 +55,7 @@ def test_supplied_model_bypasses_init_chat_model(home: Path):
     )
     assert graph is not None
     # Belt-and-suspenders: the compiled graph should be useable.
-    assert hasattr(graph, "deepagent_hermes_session_id")
+    assert hasattr(graph, "langstage_hermes_session_id")
 
 
 def test_no_model_kwarg_uses_init_chat_model(home: Path):
@@ -64,7 +64,7 @@ def test_no_model_kwarg_uses_init_chat_model(home: Path):
     cfg.model_default = "anthropic:claude-haiku-4-5-20250929"
 
     stub = _stub_model()
-    with patch("deepagent_hermes.agent._init_chat_model", return_value=stub) as init_mock:
+    with patch("langstage_hermes.agent._init_chat_model", return_value=stub) as init_mock:
         graph = create_hermes_agent(cfg)
 
     assert init_mock.call_count >= 1, "init_chat_model should be the fallback when no model is supplied"
@@ -81,7 +81,7 @@ def test_explicit_aux_model_kwarg_is_respected(home: Path):
     aux = _stub_model()
     assert main is not aux  # sanity: distinct instances
 
-    with patch("deepagent_hermes.agent._init_chat_model") as init_mock:
+    with patch("langstage_hermes.agent._init_chat_model") as init_mock:
         graph = create_hermes_agent(cfg, model=main, aux_model=aux)
 
     assert init_mock.call_count == 0, "Both main and aux were supplied — init_chat_model should not be touched"
@@ -100,7 +100,7 @@ def test_main_model_only_shares_with_aux(home: Path):
 
     # If the factory wrongly tried to init aux from the config string when
     # only `model` was supplied, this patch would catch it.
-    with patch("deepagent_hermes.agent._init_chat_model") as init_mock:
+    with patch("langstage_hermes.agent._init_chat_model") as init_mock:
         graph = create_hermes_agent(cfg, model=main)
 
     assert init_mock.call_count == 0
@@ -110,7 +110,7 @@ def test_main_model_only_shares_with_aux(home: Path):
 def test_byom_model_accepted_with_no_config(home: Path):
     """The most ergonomic call site: just hand a model, take all other defaults."""
     model = _stub_model()
-    with patch("deepagent_hermes.agent._init_chat_model") as init_mock:
+    with patch("langstage_hermes.agent._init_chat_model") as init_mock:
         graph = create_hermes_agent(model=model)
     assert init_mock.call_count == 0
     assert graph is not None

@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.types import Command
 
-from deepagent_hermes.budget import IterationBudgetMiddleware
+from langstage_hermes.budget import IterationBudgetMiddleware
 
 # ── helpers ──────────────────────────────────────────────────────────
 

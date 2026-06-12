@@ -1,4 +1,4 @@
-"""Tests for ``deepagent_hermes.state.HermesState`` + ``initial_hermes_state``."""
+"""Tests for ``langstage_hermes.state.HermesState`` + ``initial_hermes_state``."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import get_args, get_type_hints
 
 from langchain.agents.middleware.types import AgentState, PrivateStateAttr
 
-from deepagent_hermes.state import HermesState, initial_hermes_state
+from langstage_hermes.state import HermesState, initial_hermes_state
 
 # ── factory: every documented field is present with the right default ──
 

@@ -32,13 +32,13 @@ def main() -> int:
     print("Building agent (skills nudge_interval=3, memory nudge_interval=3)...")
     t0 = time.perf_counter()
 
-    from deepagent_hermes import HermesConfig, create_hermes_agent
+    from langstage_hermes import HermesConfig, create_hermes_agent
 
     cfg = HermesConfig.resolve()
     sid = "reflect-smoke-001"
     agent = create_hermes_agent(cfg, workspace=tmp_home, session_id=sid)
     print(f"  built in {time.perf_counter() - t0:.2f}s")
-    print(f"  bundled skills loaded: {len(agent.deepagent_hermes_library.list())}")
+    print(f"  bundled skills loaded: {len(agent.langstage_hermes_library.list())}")
     print()
 
     prompts = [
@@ -76,7 +76,7 @@ def main() -> int:
 
     print()
     print("--- Skill library inspection ---")
-    library = agent.deepagent_hermes_library
+    library = agent.langstage_hermes_library
     bundled = library.list()
     print(f"Total skills in library: {len(bundled)}")
     # Filter to user-created (not under the bundled dir)

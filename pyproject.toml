@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "deepagent-hermes"
-version = "0.1.5"
+name = "langstage-hermes"
+version = "0.2.0"
 description = "Closed-loop reflection / skill creation agent on LangGraph + deepagents. Faithful reproduction of Nous Research's Hermes Agent."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 authors = [{ name = "Kedar Dabhadkar", email = "kdabhadk@gmail.com" }]
-keywords = ["langgraph", "deepagents", "agents", "skills", "hermes", "reflection"]
+keywords = ["langgraph", "langchain", "langstage", "agents", "skills", "hermes", "reflection"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "License :: OSI Approved :: MIT License",
@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "langgraph-stream-parser>=0.2,<0.3",
+    "langgraph-stream-parser>=0.3,<0.4",
     "deepagents>=0.6",
     "langchain>=1.0",
     "langchain-anthropic>=0.3",
@@ -49,15 +49,17 @@ dev = [
 ]
 
 [project.scripts]
-deepagent-hermes = "deepagent_hermes.cli:main"
+langstage-hermes = "langstage_hermes.cli:main"
+# Deprecated alias command - kept for one transition window.
+deepagent-hermes = "langstage_hermes.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/dkedar7/deepagent-hermes"
-Repository = "https://github.com/dkedar7/deepagent-hermes"
-Issues = "https://github.com/dkedar7/deepagent-hermes/issues"
+Homepage = "https://github.com/dkedar7/langstage-hermes"
+Repository = "https://github.com/dkedar7/langstage-hermes"
+Issues = "https://github.com/dkedar7/langstage-hermes/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/deepagent_hermes"]
+packages = ["src/langstage_hermes", "src/deepagent_hermes"]
 # Bundled prompt files + 26 SKILL.md library both live inside the package
 # tree now (src/deepagent_hermes/_prompts/, src/deepagent_hermes/_bundled_skills/);
 # hatch's default file selection picks them up automatically. The earlier
@@ -96,7 +98,7 @@ target-version = "py311"
 # Vendored, standalone agent-skill scripts inside bundled SKILL.md packages —
 # upstream patterns ruff dislikes (sys.path setup before imports, re-export
 # aliases, etc.). Not part of our source surface; don't lint or reformat.
-extend-exclude = ["src/deepagent_hermes/_bundled_skills/**"]
+extend-exclude = ["src/langstage_hermes/_bundled_skills/**"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "PL", "RUF"]

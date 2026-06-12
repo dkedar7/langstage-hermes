@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from deepagent_hermes.tools.registry import HermesToolRegistry, registry
+from langstage_hermes.tools.registry import HermesToolRegistry, registry
 
 # ── Test doubles ─────────────────────────────────────────────────────
 
@@ -131,7 +131,7 @@ def test_check_status_caches_for_30s(monkeypatch, reg: HermesToolRegistry) -> No
     # Freeze monotonic clock at t=100.
     fake_now = [100.0]
     monkeypatch.setattr(
-        "deepagent_hermes.tools.registry.time.monotonic",
+        "langstage_hermes.tools.registry.time.monotonic",
         lambda: fake_now[0],
     )
 
@@ -195,7 +195,7 @@ def test_invalidate_check_cache_forces_re_probe(monkeypatch, reg: HermesToolRegi
 
     fake_now = [100.0]
     monkeypatch.setattr(
-        "deepagent_hermes.tools.registry.time.monotonic",
+        "langstage_hermes.tools.registry.time.monotonic",
         lambda: fake_now[0],
     )
 

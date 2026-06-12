@@ -287,7 +287,7 @@ class DeepagentHermesAgent(BaseAgent):
 
     def version(self) -> str | None:
         try:
-            from deepagent_hermes import __version__
+            from langstage_hermes import __version__
 
             return __version__
         except Exception:
@@ -314,8 +314,8 @@ class DeepagentHermesAgent(BaseAgent):
         context: AgentContext,
     ) -> None:
         # Lazy import — saves Harbor's `--help` from pulling the whole graph.
-        from deepagent_hermes.agent import create_hermes_agent
-        from deepagent_hermes.config import HermesConfig
+        from langstage_hermes.agent import create_hermes_agent
+        from langstage_hermes.config import HermesConfig
 
         loop = asyncio.get_running_loop()
         backend = HarborSandboxBackend(environment, loop)
@@ -359,7 +359,7 @@ class DeepagentHermesAgent(BaseAgent):
             final = await asyncio.to_thread(
                 graph.invoke,
                 {"messages": [{"role": "user", "content": instruction}]},
-                {"configurable": {"thread_id": graph.deepagent_hermes_session_id}},
+                {"configurable": {"thread_id": graph.langstage_hermes_session_id}},
             )
         except Exception as exc:
             elapsed = time.monotonic() - start
@@ -394,7 +394,7 @@ class DeepagentHermesAgent(BaseAgent):
             {
                 "elapsed_sec": round(elapsed, 1),
                 "hermes_home": str(host_home),
-                "session_id": graph.deepagent_hermes_session_id,
+                "session_id": graph.langstage_hermes_session_id,
                 "n_messages": len(final.get("messages") or []),
                 "version": self.version() or "unknown",
             }

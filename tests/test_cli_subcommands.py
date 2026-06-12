@@ -10,7 +10,7 @@ import frontmatter
 import pytest
 from click.testing import CliRunner
 
-from deepagent_hermes.cli import cli
+from langstage_hermes.cli import cli
 
 
 def _write_skill(notes_dir: Path, name: str, description: str, body: str = "test body", category: str | None = None) -> Path:
@@ -209,11 +209,11 @@ def test_curator_pause_resume_round_trip(tmp_hermes_home: Path):
 def test_slash_skills_lists_inline(tmp_hermes_home: Path, monkeypatch):
     """The /skills inline handler should produce a real listing, not a
     'use the subcommand' redirect."""
-    from deepagent_hermes.cli import _slash_skills
+    from langstage_hermes.cli import _slash_skills
 
     _write_skill(tmp_hermes_home, "inline-test-skill", "for the inline check")
 
-    from deepagent_hermes.config import HermesConfig
+    from langstage_hermes.config import HermesConfig
 
     state: dict = {"cfg": HermesConfig.resolve()}
     # Capture click.echo output.
@@ -226,11 +226,11 @@ def test_slash_skills_lists_inline(tmp_hermes_home: Path, monkeypatch):
 
 
 def test_slash_skills_show_inline(tmp_hermes_home: Path, monkeypatch):
-    from deepagent_hermes.cli import _slash_skills
+    from langstage_hermes.cli import _slash_skills
 
     _write_skill(tmp_hermes_home, "show-inline", "for the show inline check", body="inline body content")
 
-    from deepagent_hermes.config import HermesConfig
+    from langstage_hermes.config import HermesConfig
 
     state: dict = {"cfg": HermesConfig.resolve()}
     captured: list[str] = []
@@ -242,7 +242,7 @@ def test_slash_skills_show_inline(tmp_hermes_home: Path, monkeypatch):
 
 
 def test_slash_memory_handles_empty(tmp_hermes_home: Path, monkeypatch):
-    from deepagent_hermes.cli import _slash_memory
+    from langstage_hermes.cli import _slash_memory
 
     captured: list[str] = []
     monkeypatch.setattr("click.echo", lambda *a, **kw: captured.append(a[0] if a else ""))
@@ -252,7 +252,7 @@ def test_slash_memory_handles_empty(tmp_hermes_home: Path, monkeypatch):
 
 
 def test_slash_memory_shows_content(tmp_hermes_home: Path, monkeypatch):
-    from deepagent_hermes.cli import _slash_memory
+    from langstage_hermes.cli import _slash_memory
 
     mem_dir = tmp_hermes_home / "memories"
     mem_dir.mkdir(parents=True, exist_ok=True)
@@ -266,7 +266,7 @@ def test_slash_memory_shows_content(tmp_hermes_home: Path, monkeypatch):
 
 
 def test_slash_tools_lists_implemented(monkeypatch):
-    from deepagent_hermes.cli import _slash_tools
+    from langstage_hermes.cli import _slash_tools
 
     captured: list[str] = []
     monkeypatch.setattr("click.echo", lambda *a, **kw: captured.append(a[0] if a else ""))
@@ -277,8 +277,8 @@ def test_slash_tools_lists_implemented(monkeypatch):
 
 
 def test_slash_curator_renders(tmp_hermes_home: Path, monkeypatch):
-    from deepagent_hermes.cli import _slash_curator
-    from deepagent_hermes.config import HermesConfig
+    from langstage_hermes.cli import _slash_curator
+    from langstage_hermes.config import HermesConfig
 
     state: dict = {"cfg": HermesConfig.resolve()}
     captured: list[str] = []
@@ -290,7 +290,7 @@ def test_slash_curator_renders(tmp_hermes_home: Path, monkeypatch):
 
 
 def test_slash_cron_empty_state(tmp_hermes_home: Path, monkeypatch):
-    from deepagent_hermes.cli import _slash_cron
+    from langstage_hermes.cli import _slash_cron
 
     captured: list[str] = []
     monkeypatch.setattr("click.echo", lambda *a, **kw: captured.append(a[0] if a else ""))

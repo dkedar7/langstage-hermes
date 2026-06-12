@@ -1,4 +1,4 @@
-"""Tests for ``deepagent_hermes.plugins.loader.HermesPluginLoader``.
+"""Tests for ``langstage_hermes.plugins.loader.HermesPluginLoader``.
 
 Covers SPEC §15: directory discovery (bundled / user / project), entry-point
 discovery, allow-list / deny-list, hook validation.
@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from deepagent_hermes.plugins.context import VALID_HOOKS, PluginContext
-from deepagent_hermes.plugins.loader import HermesPluginLoader
+from langstage_hermes.plugins.context import VALID_HOOKS, PluginContext
+from langstage_hermes.plugins.loader import HermesPluginLoader
 
 # ── fixtures ────────────────────────────────────────────────────────
 
@@ -111,8 +111,8 @@ def test_valid_hooks_has_17_entries():
 
 
 def test_project_plugins_off_by_default(tmp_path: Path, monkeypatch):
-    """./.deepagent-hermes/plugins/ is ignored unless the env var opts in."""
-    project = tmp_path / "proj" / ".deepagent-hermes" / "plugins"
+    """./.langstage-hermes/plugins/ is ignored unless the env var opts in."""
+    project = tmp_path / "proj" / ".langstage-hermes" / "plugins"
     project.mkdir(parents=True)
     _write_plugin(project, "projonly")
     monkeypatch.delenv("DEEPAGENT_HERMES_ENABLE_PROJECT_PLUGINS", raising=False)
@@ -125,7 +125,7 @@ def test_project_plugins_off_by_default(tmp_path: Path, monkeypatch):
 
 def test_project_plugins_on_when_opted_in(tmp_path: Path, monkeypatch):
     """Setting DEEPAGENT_HERMES_ENABLE_PROJECT_PLUGINS=1 turns project discovery on."""
-    project = tmp_path / "proj" / ".deepagent-hermes" / "plugins"
+    project = tmp_path / "proj" / ".langstage-hermes" / "plugins"
     project.mkdir(parents=True)
     _write_plugin(project, "projonly")
     monkeypatch.setenv("DEEPAGENT_HERMES_ENABLE_PROJECT_PLUGINS", "1")

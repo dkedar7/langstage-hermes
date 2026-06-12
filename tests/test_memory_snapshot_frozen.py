@@ -13,7 +13,7 @@ from pathlib import Path
 
 from langchain_core.messages import ToolMessage
 
-from deepagent_hermes.memory.tool import (
+from langstage_hermes.memory.tool import (
     DEFAULT_MEMORY_CHAR_LIMIT,
     DEFAULT_USER_CHAR_LIMIT,
     ENTRY_DELIMITER,

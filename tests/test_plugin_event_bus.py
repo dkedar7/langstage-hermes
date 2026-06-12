@@ -1,4 +1,4 @@
-"""Tests for ``deepagent_hermes.plugins.event_bus.PluginEventBus``.
+"""Tests for ``langstage_hermes.plugins.event_bus.PluginEventBus``.
 
 Covers the v0.2 wiring of the 8 hooks that fire from middleware events:
 ``pre_llm_call``, ``post_llm_call``, ``transform_llm_output``,
@@ -18,11 +18,11 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
 
-from deepagent_hermes.plugins.context import (
+from langstage_hermes.plugins.context import (
     PluginContext,
     get_global_hook_registry,
 )
-from deepagent_hermes.plugins.event_bus import PluginEventBus
+from langstage_hermes.plugins.event_bus import PluginEventBus
 
 # ── helpers ─────────────────────────────────────────────────────────
 

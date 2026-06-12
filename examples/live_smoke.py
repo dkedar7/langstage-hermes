@@ -30,14 +30,14 @@ def main() -> int:
     print("Building agent...")
     t0 = time.perf_counter()
 
-    from deepagent_hermes import HermesConfig, create_hermes_agent
+    from langstage_hermes import HermesConfig, create_hermes_agent
 
     cfg = HermesConfig.resolve()
     agent = create_hermes_agent(cfg, workspace=tmp_home, session_id="live-smoke-001")
 
     print(f"  built in {time.perf_counter() - t0:.2f}s")
     print(f"  model: {cfg.model_default}")
-    print(f"  session_id: {agent.deepagent_hermes_session_id}")
+    print(f"  session_id: {agent.langstage_hermes_session_id}")
     print(f"  state.db: {tmp_home / 'state.db'} ({(tmp_home / 'state.db').stat().st_size} bytes)")
     print()
     print("Invoking with: 'Reply with exactly one word: hello'")
