@@ -61,3 +61,8 @@ Icon
 
 # uv
 uv.lock
+
+# Artifacts written to cwd when the local-terminal tests run under a
+# path-mangling bash (e.g. WSL bash on Windows picking up C:\ paths).
+*hermes-cwd-test-*
+*hermes-snap-test-*
