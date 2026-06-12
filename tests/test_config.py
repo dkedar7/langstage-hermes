@@ -1,4 +1,4 @@
-"""Tests for ``deepagent_hermes.config.HermesConfig``.
+"""Tests for ``langstage_hermes.config.HermesConfig``.
 
 Verify SPEC §2 defaults, env-var precedence, and that ``describe()`` reports
 the resolution source for each field.
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from deepagent_hermes.config import HermesConfig, hermes_home
+from langstage_hermes.config import HermesConfig, hermes_home
 
 # ── defaults (SPEC §2 verbatim) ──────────────────────────────────────
 
@@ -151,13 +151,13 @@ def test_explicit_override_beats_env(monkeypatch):
 
 
 def test_project_toml_overrides_defaults(monkeypatch, tmp_path):
-    """A ``deepagent-hermes.toml`` in the toml_start dir wins over defaults."""
+    """A ``langstage-hermes.toml`` in the toml_start dir wins over defaults."""
     # Isolate from any real config files / env on the host.
     _strip_env(monkeypatch)
     monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "no_global"))
     monkeypatch.chdir(tmp_path)
 
-    (tmp_path / "deepagent-hermes.toml").write_text(
+    (tmp_path / "langstage-hermes.toml").write_text(
         "[skills]\ncreation_nudge_interval = 25\n[memory]\nnudge_interval = 3\n",
         encoding="utf-8",
     )
@@ -166,7 +166,7 @@ def test_project_toml_overrides_defaults(monkeypatch, tmp_path):
     assert cfg.skills_creation_nudge_interval == 25
     assert cfg.memory_nudge_interval == 3
     # Source should be the TOML file we just wrote.
-    assert "deepagent-hermes.toml" in cfg.sources["skills_creation_nudge_interval"]
+    assert "langstage-hermes.toml" in cfg.sources["skills_creation_nudge_interval"]
 
 
 def test_env_beats_toml(monkeypatch, tmp_path):
@@ -174,7 +174,7 @@ def test_env_beats_toml(monkeypatch, tmp_path):
     monkeypatch.setenv("DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL", "99")
     monkeypatch.chdir(tmp_path)
 
-    (tmp_path / "deepagent-hermes.toml").write_text("[skills]\ncreation_nudge_interval = 25\n", encoding="utf-8")
+    (tmp_path / "langstage-hermes.toml").write_text("[skills]\ncreation_nudge_interval = 25\n", encoding="utf-8")
 
     cfg = HermesConfig.resolve(toml_start=tmp_path)
     assert cfg.skills_creation_nudge_interval == 99
@@ -222,7 +222,7 @@ def test_describe_includes_env_var_hint_for_hermes_fields(monkeypatch):
 def test_hermes_home_default(monkeypatch):
     monkeypatch.delenv("DEEPAGENT_HERMES_HOME", raising=False)
     monkeypatch.delenv("HERMES_HOME", raising=False)
-    assert hermes_home() == Path.home() / ".deepagent-hermes"
+    assert hermes_home() == Path.home() / ".langstage-hermes"
 
 
 def test_hermes_home_from_deepagent_env(monkeypatch, tmp_path):

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from deepagent_hermes.store.sqlite_fts import (
+from langstage_hermes.store.sqlite_fts import (
     SqliteFtsStore,
     contains_cjk,
     default_db_path,

@@ -21,8 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from deepagent_hermes.tools.environments.base import ExecuteResponse
-from deepagent_hermes.tools.environments.singularity import (
+from langstage_hermes.tools.environments.base import ExecuteResponse
+from langstage_hermes.tools.environments.singularity import (
     SingularityEnvironment,
     _find_singularity,
 )

@@ -16,7 +16,7 @@ from datetime import datetime
 
 import pytest
 
-from deepagent_hermes.prompts import PromptAssemblyMiddleware, load_prompt
+from langstage_hermes.prompts import PromptAssemblyMiddleware, load_prompt
 
 
 @pytest.fixture

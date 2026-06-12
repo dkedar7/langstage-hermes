@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for deepagent-hermes."""
+"""Shared pytest fixtures for langstage-hermes."""
 
 from __future__ import annotations
 

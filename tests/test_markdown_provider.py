@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from deepagent_hermes.memory.provider import get_provider
-from deepagent_hermes.plugins.builtin.markdown_provider import (
+from langstage_hermes.memory.provider import get_provider
+from langstage_hermes.plugins.builtin.markdown_provider import (
     MarkdownProvider,
     _split_into_sections,
     _tokenize_query,

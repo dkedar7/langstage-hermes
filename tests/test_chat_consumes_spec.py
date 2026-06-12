@@ -1,6 +1,6 @@
 """Tests for the DEEPAGENT_AGENT_SPEC consumption path in the chat REPL.
 
-The chat REPL used to always import ``deepagent_hermes.agent`` and call
+The chat REPL used to always import ``langstage_hermes.agent`` and call
 ``create_hermes_agent``. The ``DEEPAGENT_AGENT_SPEC`` env var was read
 for display only (``"advisory"`` annotation). After this change, chat
 honours the spec — loading any importable ``module:object`` and using
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from deepagent_hermes.cli import (
+from langstage_hermes.cli import (
     _instantiate_factory,
     _print_chat_context,
     _resolve_agent,

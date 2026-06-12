@@ -53,7 +53,7 @@ def test_real_reflection_cycle_runs_and_persists_state(tmp_path: Path):
     os.environ["DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL"] = "2"
     os.environ["DEEPAGENT_HERMES_MEMORY_NUDGE_INTERVAL"] = "2"
 
-    from deepagent_hermes import HermesConfig, create_hermes_agent
+    from langstage_hermes import HermesConfig, create_hermes_agent
 
     cfg = HermesConfig.resolve()
     assert cfg.model_default == "openai:openai/gpt-4o-mini"

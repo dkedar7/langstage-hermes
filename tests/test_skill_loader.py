@@ -1,4 +1,4 @@
-"""Tests for ``deepagent_hermes.skills.loader.SkillLoaderMiddleware``.
+"""Tests for ``langstage_hermes.skills.loader.SkillLoaderMiddleware``.
 
 We exercise ``wrap_model_call`` directly with a stub ``ModelRequest`` so the
 test stays out of the langchain wiring.
@@ -16,9 +16,9 @@ from langchain_core.language_models.fake_chat_models import FakeMessagesListChat
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
-from deepagent_hermes.skills.library import SkillLibrary
-from deepagent_hermes.skills.loader import SkillLoaderMiddleware
-from deepagent_hermes.skills.prompt import clear_prompt_cache
+from langstage_hermes.skills.library import SkillLibrary
+from langstage_hermes.skills.loader import SkillLoaderMiddleware
+from langstage_hermes.skills.prompt import clear_prompt_cache
 
 # ---------------------------------------------------------------------------
 # Helpers

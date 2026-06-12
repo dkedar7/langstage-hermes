@@ -1,10 +1,10 @@
-"""Tests for ``deepagent_hermes.memory.provider`` — ABC + registry + noop."""
+"""Tests for ``langstage_hermes.memory.provider`` — ABC + registry + noop."""
 
 from __future__ import annotations
 
 import pytest
 
-from deepagent_hermes.memory.provider import (
+from langstage_hermes.memory.provider import (
     MemoryProvider,
     NoopMemoryProvider,
     available_providers,
@@ -103,7 +103,7 @@ def test_abc_cannot_be_instantiated_directly() -> None:
 def test_markdown_provider_registers_on_import() -> None:
     """Importing the bundled markdown plug-in module should register it under
     the name 'markdown' — the zero-dep default provider."""
-    import deepagent_hermes.plugins.builtin.markdown_provider  # noqa: F401
+    import langstage_hermes.plugins.builtin.markdown_provider  # noqa: F401
 
     cls = get_provider("markdown")
     assert cls is not None

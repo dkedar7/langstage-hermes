@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from deepagent_hermes.compression import (
+from langstage_hermes.compression import (
     SUMMARY_PREFIX,
     HermesCompressionMiddleware,
     _estimate_tokens,

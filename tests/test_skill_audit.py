@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from deepagent_hermes.skills.audit import RollbackError, SkillAuditLog
-from deepagent_hermes.skills.library import SkillLibrary
-from deepagent_hermes.skills.tools import _skill_manage_impl
+from langstage_hermes.skills.audit import RollbackError, SkillAuditLog
+from langstage_hermes.skills.library import SkillLibrary
+from langstage_hermes.skills.tools import _skill_manage_impl
 
 
 @pytest.fixture

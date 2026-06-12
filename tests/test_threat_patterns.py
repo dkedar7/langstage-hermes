@@ -1,4 +1,4 @@
-"""Tests for ``deepagent_hermes.memory.threat_patterns``.
+"""Tests for ``langstage_hermes.memory.threat_patterns``.
 
 The scanner is conservative by design — false positives are a worse failure
 mode than false negatives here, because a flagged entry is silently replaced
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from deepagent_hermes.memory.threat_patterns import (
+from langstage_hermes.memory.threat_patterns import (
     INVISIBLE_CHARS,
     scan,
     scan_for_threats,

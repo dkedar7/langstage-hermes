@@ -17,7 +17,7 @@ from __future__ import annotations
 from langgraph_stream_parser import StreamParser
 from langgraph_stream_parser.adapters import PrintAdapter
 
-from deepagent_hermes import HermesConfig, create_hermes_agent
+from langstage_hermes import HermesConfig, create_hermes_agent
 
 
 def main() -> None:

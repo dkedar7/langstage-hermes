@@ -15,8 +15,8 @@ import subprocess
 
 import pytest
 
-from deepagent_hermes.tools.environments.base import ExecuteResponse
-from deepagent_hermes.tools.environments.docker import (
+from langstage_hermes.tools.environments.base import ExecuteResponse
+from langstage_hermes.tools.environments.docker import (
     DockerEnvironment,
     _docker_available,
     _sanitize_container_name,
@@ -48,7 +48,7 @@ def env():
     """Fresh DockerEnvironment per test; always cleanup, even on failure.
 
     Session id is randomized so concurrent test runs don't collide on the
-    container name (the sanitized form lands in ``deepagent-hermes-<id>``).
+    container name (the sanitized form lands in ``langstage-hermes-<id>``).
     """
     e = DockerEnvironment(session_id="test-" + os.urandom(4).hex())
     try:
@@ -65,7 +65,7 @@ def test_sanitize_container_name_respects_docker_limits() -> None:
     long_id = "x" * 200
     name = _sanitize_container_name(long_id)
     assert len(name) <= 63
-    assert name.startswith("deepagent-hermes-")
+    assert name.startswith("langstage-hermes-")
 
 
 def test_sanitize_container_name_replaces_invalid_chars() -> None:

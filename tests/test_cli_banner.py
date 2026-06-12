@@ -13,7 +13,7 @@ import io
 
 from click.testing import CliRunner
 
-from deepagent_hermes.cli import _BANNER_ASCII, _print_banner, cli
+from langstage_hermes.cli import _BANNER_ASCII, _print_banner, cli
 
 
 def test_banner_constant_shape():
@@ -27,7 +27,7 @@ def test_banner_constant_shape():
 
 def test_print_banner_silent_on_non_tty(capsys):
     """Piped invocations (CI, `| grep`, test harnesses) must not see
-    the banner — keeps `deepagent-hermes --version | head -1` clean."""
+    the banner — keeps `langstage-hermes --version | head -1` clean."""
     _print_banner()
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -50,7 +50,7 @@ def test_print_banner_prints_on_tty(monkeypatch, capsys):
     assert "hermes" in out.lower() or "_||_" in out, "ascii body missing"
     assert "testing" in out, "custom tagline missing"
     # Version line must be live (read from __version__), not hard-coded.
-    from deepagent_hermes import __version__
+    from langstage_hermes import __version__
 
     assert __version__ in out
 
@@ -63,7 +63,7 @@ def test_help_does_not_explode_on_banner(monkeypatch):
     result = runner.invoke(cli, [])
     assert result.exit_code == 0
     # Banner is silent on non-TTY; help text always shows.
-    assert "deepagent-hermes" in result.output.lower()
+    assert "langstage-hermes" in result.output.lower()
 
 
 # ── _print_chat_context ─────────────────────────────────────────────
@@ -73,7 +73,7 @@ def test_chat_context_silent_on_non_tty(capsys):
     """Same TTY gate as the banner — piped chat invocations don't leak
     config to stdout (though `chat` itself is interactive, so this is
     a defence-in-depth check, not a primary use case)."""
-    from deepagent_hermes.cli import _print_chat_context
+    from langstage_hermes.cli import _print_chat_context
 
     _print_chat_context(
         cfg=type("C", (), {"model_default": "anthropic:foo", "hermes_home": "/tmp/h"})(),
@@ -85,7 +85,7 @@ def test_chat_context_silent_on_non_tty(capsys):
 
 
 def test_chat_context_renders_core_fields_on_tty(monkeypatch, capsys):
-    from deepagent_hermes.cli import _print_chat_context
+    from langstage_hermes.cli import _print_chat_context
 
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
     monkeypatch.delenv("DEEPAGENT_AGENT_SPEC", raising=False)
@@ -115,7 +115,7 @@ def test_chat_context_shows_advisory_spec_when_set(monkeypatch, capsys):
     """If DEEPAGENT_AGENT_SPEC is in env, surface it with an annotation
     that it's not consumed by this CLI — keeps the user from being
     confused when the spec they set "doesn't work" here."""
-    from deepagent_hermes.cli import _print_chat_context
+    from langstage_hermes.cli import _print_chat_context
 
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
     monkeypatch.setenv("DEEPAGENT_AGENT_SPEC", "custom.module:graph")
@@ -130,7 +130,7 @@ def test_chat_context_shows_advisory_spec_when_set(monkeypatch, capsys):
 def test_chat_context_shortens_long_paths(monkeypatch, capsys):
     """Long absolute paths get middle-ellipsised so the block fits in
     a normal terminal width."""
-    from deepagent_hermes.cli import _print_chat_context, _shorten_path
+    from langstage_hermes.cli import _print_chat_context, _shorten_path
 
     monkeypatch.setattr("sys.stdout.isatty", lambda: True)
 

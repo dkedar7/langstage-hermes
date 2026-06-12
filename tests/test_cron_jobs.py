@@ -1,4 +1,4 @@
-"""Tests for ``deepagent_hermes.cron.jobs`` — CRUD + schedule parsing."""
+"""Tests for ``langstage_hermes.cron.jobs`` — CRUD + schedule parsing."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from deepagent_hermes.cron import jobs as cron_jobs
+from langstage_hermes.cron import jobs as cron_jobs
 
 
 def test_parse_schedule_interval():

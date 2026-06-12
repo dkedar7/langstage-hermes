@@ -1,4 +1,4 @@
-"""Tests for ``deepagent_hermes.skills.library.SkillLibrary``."""
+"""Tests for ``langstage_hermes.skills.library.SkillLibrary``."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 import frontmatter
 import pytest
 
-from deepagent_hermes.skills.library import SkillLibrary
+from langstage_hermes.skills.library import SkillLibrary
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -22,8 +22,8 @@ import pytest
 # required — but we do it for symmetry and to make sure cached state from
 # previous tests doesn't leak.
 
-DAYTONA_MODPATH = "deepagent_hermes.tools.environments.daytona"
-MODAL_MODPATH = "deepagent_hermes.tools.environments.modal"
+DAYTONA_MODPATH = "langstage_hermes.tools.environments.daytona"
+MODAL_MODPATH = "langstage_hermes.tools.environments.modal"
 
 
 @pytest.fixture(autouse=True)
@@ -58,11 +58,11 @@ def test_daytona_raises_without_sdk():
     # Reload the backend module to ensure no cached SDK reference survives.
     if DAYTONA_MODPATH in sys.modules:
         importlib.reload(sys.modules[DAYTONA_MODPATH])
-    from deepagent_hermes.tools.environments.daytona import DaytonaEnvironment
+    from langstage_hermes.tools.environments.daytona import DaytonaEnvironment
 
     with pytest.raises(ImportError) as excinfo:
         DaytonaEnvironment(session_id="x")
-    assert "pip install deepagent-hermes[daytona]" in str(excinfo.value)
+    assert "pip install langstage-hermes[daytona]" in str(excinfo.value)
 
 
 def test_modal_raises_without_sdk():
@@ -70,11 +70,11 @@ def test_modal_raises_without_sdk():
     sys.modules["modal"] = None  # type: ignore[assignment]
     if MODAL_MODPATH in sys.modules:
         importlib.reload(sys.modules[MODAL_MODPATH])
-    from deepagent_hermes.tools.environments.modal import ModalEnvironment
+    from langstage_hermes.tools.environments.modal import ModalEnvironment
 
     with pytest.raises(ImportError) as excinfo:
         ModalEnvironment(session_id="x")
-    assert "pip install deepagent-hermes[modal]" in str(excinfo.value)
+    assert "pip install langstage-hermes[modal]" in str(excinfo.value)
 
 
 # ── Auth env-var resolution (with mocked SDK) ─────────────────────────
@@ -128,7 +128,7 @@ def test_daytona_uses_api_key_env(monkeypatch):
     # Reload to bind the freshly-installed fake SDK.
     if DAYTONA_MODPATH in sys.modules:
         importlib.reload(sys.modules[DAYTONA_MODPATH])
-    from deepagent_hermes.tools.environments.daytona import DaytonaEnvironment
+    from langstage_hermes.tools.environments.daytona import DaytonaEnvironment
 
     env = DaytonaEnvironment(session_id="test")
     env.init_session()  # this is where the Daytona client is constructed
@@ -143,7 +143,7 @@ def test_daytona_prefers_namespaced_env_when_official_missing(monkeypatch):
     _, daytona_cls, _ = _install_fake_daytona_sdk()
     if DAYTONA_MODPATH in sys.modules:
         importlib.reload(sys.modules[DAYTONA_MODPATH])
-    from deepagent_hermes.tools.environments.daytona import DaytonaEnvironment
+    from langstage_hermes.tools.environments.daytona import DaytonaEnvironment
 
     env = DaytonaEnvironment(session_id="test")
     env.init_session()
@@ -164,7 +164,7 @@ def test_modal_uses_token_env(monkeypatch):
     fake_sdk, sandbox_cls = _install_fake_modal_sdk()
     if MODAL_MODPATH in sys.modules:
         importlib.reload(sys.modules[MODAL_MODPATH])
-    from deepagent_hermes.tools.environments.modal import ModalEnvironment
+    from langstage_hermes.tools.environments.modal import ModalEnvironment
 
     env = ModalEnvironment(session_id="test")
     env.init_session()
@@ -172,7 +172,7 @@ def test_modal_uses_token_env(monkeypatch):
     # App lookup must have used the documented app name.
     fake_sdk.App.lookup.assert_called_once()
     args, kwargs = fake_sdk.App.lookup.call_args
-    assert args[0] == "deepagent-hermes"
+    assert args[0] == "langstage-hermes"
     assert kwargs.get("create_if_missing") is True
 
     # And Sandbox.create must have been called with the image + app.
@@ -190,7 +190,7 @@ def test_modal_raises_without_tokens(monkeypatch):
     _install_fake_modal_sdk()
     if MODAL_MODPATH in sys.modules:
         importlib.reload(sys.modules[MODAL_MODPATH])
-    from deepagent_hermes.tools.environments.modal import ModalEnvironment
+    from langstage_hermes.tools.environments.modal import ModalEnvironment
 
     env = ModalEnvironment(session_id="test")
     with pytest.raises(RuntimeError) as excinfo:

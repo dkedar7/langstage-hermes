@@ -1,9 +1,20 @@
 # Changelog
 
-All notable changes to `deepagent-hermes` will be documented in this file.
+All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.2.0] — 2026-06-12
+
+**deepagent-hermes is now `langstage-hermes`** — the reference agent of the LangStage family ("every stage for your LangGraph agent").
+
+### Changed
+
+- Distribution `deepagent-hermes` → **`langstage-hermes`**; module `deepagent_hermes` → **`langstage_hermes`**. A deprecated alias package keeps `import deepagent_hermes` — and crucially the documented host spec string `deepagent_hermes.agent:graph` — working with a `DeprecationWarning`. The `deepagent-hermes` command remains as an alias of `langstage-hermes`.
+- Canonical env vocabulary: `LANGSTAGE_HERMES_*` (and `LANGSTAGE_AGENT_SPEC` for the chat spec), with every `DEEPAGENT_HERMES_*` name still resolving as a fallback — both through `HermesConfig` and at the raw `os.environ` call sites (terminal backends, home resolution, plugins).
+- Hermes home: `~/.langstage-hermes` is the new default, but **existing `~/.deepagent-hermes` installs keep winning** when present, so no skills/memories/state are orphaned by the upgrade. `LANGSTAGE_HERMES_HOME` > `DEEPAGENT_HERMES_HOME` > `HERMES_HOME` env overrides. Project config `langstage-hermes.toml` (legacy `deepagent-hermes.toml` still read; new name wins per directory). Six modules that duplicated home resolution now delegate to `config.hermes_home()`.
+- Parser pinned `>=0.3,<0.4`.
 
 ## [0.1.5] — 2026-06-10
 

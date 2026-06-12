@@ -39,7 +39,7 @@ def _install_fake_paramiko(monkeypatch) -> MagicMock:
     # Also overwrite the module-level cached _paramiko in our ssh module so
     # the kwarg-resolution branch (when sys.modules and module-level both
     # have something) picks up our mock.
-    from deepagent_hermes.tools.environments import ssh as ssh_mod
+    from langstage_hermes.tools.environments import ssh as ssh_mod
 
     monkeypatch.setattr(ssh_mod, "_paramiko", fake, raising=False)
     return fake
@@ -87,7 +87,7 @@ def test_init_requires_host_env(monkeypatch):
     _install_fake_paramiko(monkeypatch)
     monkeypatch.delenv("DEEPAGENT_HERMES_SSH_HOST", raising=False)
 
-    from deepagent_hermes.tools.environments.ssh import SshEnvironment
+    from langstage_hermes.tools.environments.ssh import SshEnvironment
 
     with pytest.raises(ValueError, match="DEEPAGENT_HERMES_SSH_HOST"):
         SshEnvironment(session_id="t1")
@@ -111,7 +111,7 @@ def test_init_session_uses_paramiko_client(monkeypatch):
     # Pretend the key file exists so the connect kwargs include key_filename.
     monkeypatch.setattr("os.path.isfile", lambda p: p == "/tmp/fake_key")
 
-    from deepagent_hermes.tools.environments.ssh import SshEnvironment
+    from langstage_hermes.tools.environments.ssh import SshEnvironment
 
     env = SshEnvironment(session_id="t2")
     env.init_session()
@@ -143,7 +143,7 @@ def test_execute_runs_via_exec_command(monkeypatch):
     fake.SSHClient = MagicMock(return_value=client_instance)
     monkeypatch.setattr("os.path.isfile", lambda p: False)
 
-    from deepagent_hermes.tools.environments.ssh import SshEnvironment
+    from langstage_hermes.tools.environments.ssh import SshEnvironment
 
     env = SshEnvironment(session_id="t3")
     env.execute("echo hello")
@@ -158,7 +158,7 @@ def test_execute_runs_via_exec_command(monkeypatch):
     found_wrapper = False
     for call in calls:
         cmd_arg = call.args[0] if call.args else call.kwargs.get("command", "")
-        if "eval " in cmd_arg and "deepagent-hermes-snap-t3" in cmd_arg and "deepagent-hermes-cwd-t3" in cmd_arg:
+        if "eval " in cmd_arg and "langstage-hermes-snap-t3" in cmd_arg and "langstage-hermes-cwd-t3" in cmd_arg:
             assert "source " in cmd_arg
             assert "cd " in cmd_arg
             assert "pwd -P" in cmd_arg
@@ -181,7 +181,7 @@ def test_cwd_persists_via_marker_file(monkeypatch):
     fake.SSHClient = MagicMock(return_value=client_instance)
     monkeypatch.setattr("os.path.isfile", lambda p: False)
 
-    from deepagent_hermes.tools.environments.ssh import SshEnvironment
+    from langstage_hermes.tools.environments.ssh import SshEnvironment
 
     env = SshEnvironment(session_id="t4")
     env.execute("cd /var/log")
@@ -192,7 +192,7 @@ def test_cwd_persists_via_marker_file(monkeypatch):
     user_calls = [c for c in client_instance.exec_command.call_args_list if "eval " in (c.args[0] if c.args else "")]
     assert len(user_calls) >= 2, f"expected 2 user execs, got {len(user_calls)}"
 
-    marker = "deepagent-hermes-cwd-t4"
+    marker = "langstage-hermes-cwd-t4"
     for c in user_calls:
         cmd = c.args[0]
         assert "cat " in cmd and marker in cmd, f"call should read cwd marker via cat, got: {cmd!r}"
@@ -212,7 +212,7 @@ def test_cleanup_closes_client(monkeypatch):
     fake.SSHClient = MagicMock(return_value=client_instance)
     monkeypatch.setattr("os.path.isfile", lambda p: False)
 
-    from deepagent_hermes.tools.environments.ssh import SshEnvironment
+    from langstage_hermes.tools.environments.ssh import SshEnvironment
 
     env = SshEnvironment(session_id="t5")
     env.execute("echo x")
@@ -230,11 +230,11 @@ def test_paramiko_missing_raises_helpful(monkeypatch):
     monkeypatch.setitem(sys.modules, "paramiko", None)
 
     # Also wipe the cached module-level _paramiko so the check picks up our None.
-    from deepagent_hermes.tools.environments import ssh as ssh_mod
+    from langstage_hermes.tools.environments import ssh as ssh_mod
 
     monkeypatch.setattr(ssh_mod, "_paramiko", None, raising=False)
 
-    with pytest.raises(ImportError, match=r"pip install.*deepagent-hermes\[ssh\]"):
+    with pytest.raises(ImportError, match=r"pip install.*langstage-hermes\[ssh\]"):
         ssh_mod.SshEnvironment(session_id="t6")
 
 
@@ -274,7 +274,7 @@ def test_reconnect_on_broken_pipe(monkeypatch):
     fake.SSHClient = MagicMock(side_effect=_new_client)
     monkeypatch.setattr("os.path.isfile", lambda p: False)
 
-    from deepagent_hermes.tools.environments.ssh import SshEnvironment
+    from langstage_hermes.tools.environments.ssh import SshEnvironment
 
     env = SshEnvironment(session_id="t7")
     # Manually drive _exec to avoid intermixing with snapshot init.

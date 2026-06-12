@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from deepagent_hermes.curator import (
+from langstage_hermes.curator import (
     CuratorMiddleware,
     mark_stale_and_archive,
 )

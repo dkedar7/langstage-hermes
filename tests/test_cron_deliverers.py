@@ -17,9 +17,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from deepagent_hermes.cron import deliverers as deliverer_mod
-from deepagent_hermes.cron import scheduler as scheduler_mod
-from deepagent_hermes.cron.deliverers import (
+from langstage_hermes.cron import deliverers as deliverer_mod
+from langstage_hermes.cron import scheduler as scheduler_mod
+from langstage_hermes.cron.deliverers import (
     AgentMailDeliverer,
     Deliverer,
     LocalDeliverer,
@@ -103,7 +103,7 @@ def test_agentmail_deliverer_posts_to_endpoint(monkeypatch):
 
     # JSON body has the canonical AgentMail shape.
     payload = kwargs["json"]
-    assert payload["subject"] == "[deepagent-hermes] weekly-digest"
+    assert payload["subject"] == "[langstage-hermes] weekly-digest"
     assert payload["text"] == "## Digest\n- item 1"
     assert payload["to"] == ["someone@example.com"]
 
@@ -183,7 +183,7 @@ def test_register_get_deliverer_round_trip():
 def test_unknown_deliverer_falls_back_to_local_with_warning(caplog):
     """Unknown deliverer name → warning log + LocalDeliverer fallback (no crash)."""
     job = _job(deliver="nope-not-real")
-    with caplog.at_level(logging.WARNING, logger="deepagent_hermes.cron.scheduler"):
+    with caplog.at_level(logging.WARNING, logger="langstage_hermes.cron.scheduler"):
         # Must not raise; LocalDeliverer is a no-op.
         scheduler_mod._deliver_output(job, "some output", None)
     assert any("no deliverer registered for 'nope-not-real'" in rec.getMessage() for rec in caplog.records)

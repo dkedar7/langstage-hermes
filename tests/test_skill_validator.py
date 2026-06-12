@@ -1,11 +1,11 @@
-"""Tests for ``deepagent_hermes.skills.validator``.
+"""Tests for ``langstage_hermes.skills.validator``.
 
 Covers every agentskills.io rule plus the Hermes extensions.
 """
 
 from __future__ import annotations
 
-from deepagent_hermes.skills.validator import (
+from langstage_hermes.skills.validator import (
     MAX_COMPATIBILITY_LENGTH,
     MAX_DESCRIPTION_LENGTH,
     MAX_NAME_LENGTH,

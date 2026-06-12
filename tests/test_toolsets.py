@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from deepagent_hermes.tools.registry import HermesToolRegistry
-from deepagent_hermes.tools.toolsets import (
+from langstage_hermes.tools.registry import HermesToolRegistry
+from langstage_hermes.tools.toolsets import (
     IMPLEMENTED_TOOLSETS,
     TOOLSETS,
     all_toolset_names,

@@ -17,7 +17,7 @@ from langchain_core.tools import tool as tool_decorator
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-from deepagent_hermes.reflection import (
+from langstage_hermes.reflection import (
     ReflectionMiddleware,
     build_review_subagent,
     load_prompt,
