@@ -5,6 +5,12 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-06-13
+
+### Fixed
+
+- `langstage-hermes --version` (and the CLI banner) reported `0.1.4` regardless of the installed version — a hand-maintained `__version__` constant in `__init__.py` that had been stuck since before 0.1.5. It now reads from installed package metadata (`importlib.metadata.version`), so it can never drift from `pyproject.toml` again.
+
 ## [0.2.0] — 2026-06-12
 
 **deepagent-hermes is now `langstage-hermes`** — the reference agent of the LangStage family ("every stage for your LangGraph agent").
