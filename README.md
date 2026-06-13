@@ -38,6 +38,8 @@ langstage-hermes is the reference agent of the **LangStage family**: write your 
 | Reference agent | langstage-hermes | **you are here** |
 | Shared core | [langgraph-stream-parser](https://github.com/dkedar7/langgraph-stream-parser) | typed events + config resolver behind every stage |
 
+📖 **Full documentation:** <https://dkedar7.github.io/langstage-docs/>
+
 ## Installation
 
 ```bash
