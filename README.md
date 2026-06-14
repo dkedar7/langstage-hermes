@@ -38,6 +38,15 @@ langstage-hermes is the reference agent of the **LangStage family**: write your 
 | Reference agent | langstage-hermes | **you are here** |
 | Shared core | [langgraph-stream-parser](https://github.com/dkedar7/langgraph-stream-parser) | typed events + config resolver behind every stage |
 
+### Serve over AG-UI
+
+This surface's agent — any LangGraph `CompiledGraph` — can also be served over the [AG-UI protocol](https://github.com/dkedar7/langgraph-stream-parser). Install the extra and point the bundled console script at your agent spec:
+
+```bash
+pip install "langgraph-stream-parser[agui]"
+langstage-agui --agent langstage_hermes.agent:graph
+```
+
 📖 **Full documentation:** <https://dkedar7.github.io/langstage-docs/>
 
 ## Installation

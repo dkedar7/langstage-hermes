@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langstage-hermes"
-version = "0.2.1"
+version = "0.3.0"
 description = "Closed-loop reflection / skill creation agent on LangGraph + deepagents. Faithful reproduction of Nous Research's Hermes Agent."
 readme = "README.md"
 license = { text = "MIT" }
@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "langgraph-stream-parser>=0.3,<0.4",
+    "langgraph-stream-parser>=0.3,<0.5",
     "deepagents>=0.6",
     "langchain>=1.0",
     "langchain-anthropic>=0.3",
@@ -34,6 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 openai = ["langchain-openai>=0.2"]
+agui = ["langgraph-stream-parser[agui]>=0.4,<0.5"]
 daytona = ["daytona-sdk>=0.10"]
 modal = ["modal>=0.64"]
 ssh = ["paramiko>=3.0"]
