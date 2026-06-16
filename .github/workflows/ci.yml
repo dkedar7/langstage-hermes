@@ -53,3 +53,19 @@ jobs:
         run: python -c "from deepagent_hermes import create_hermes_agent, HermesConfig; print('OK')"
       - name: --show-config
         run: deepagent-hermes --show-config
+
+  minimal-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install with NO extras (declared deps only)
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+      - name: Import + CLI smoke on a minimal install
+        run: |
+          python -c "import langstage_hermes; print('ok')"
+          langstage-hermes --version
