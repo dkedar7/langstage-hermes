@@ -1548,8 +1548,25 @@ def verify(model_id: str | None) -> None:
         sys.exit(2)
     click.echo(click.style(f"  ✓ bundled prompts ({len(needed_prompts)} critical) present", fg="green"))
 
-    n_bundled = sum(1 for _ in skills_dir.rglob("SKILL.md")) if skills_dir.is_dir() else 0
-    if n_bundled == 0:
+    # Count what the SkillLibrary actually LOADS, not just files on disk. A
+    # green check here must mean the agent can really use the skills: a path bug
+    # once let the file glob report 26 while the library loaded 0 (gh #-dogfood),
+    # so verify counted from a different path than the runtime and masked a dead
+    # subsystem. Loading via the library makes that impossible to hide.
+    n_files = sum(1 for _ in skills_dir.rglob("SKILL.md")) if skills_dir.is_dir() else 0
+    try:
+        from langstage_hermes.skills.library import (
+            SkillLibrary,
+            _bundled_skills_dir,
+        )
+
+        n_loaded = len(SkillLibrary(dirs=[_bundled_skills_dir()]).list())
+    except Exception as exc:  # pragma: no cover - defensive
+        n_loaded = 0
+        click.echo(click.style(f"  ✗ failed to load bundled skills: {exc}", fg="red"))
+        sys.exit(2)
+
+    if n_files == 0:
         click.echo(click.style("  ⚠ no bundled SKILL.md files found", fg="yellow"))
         click.echo(
             click.style(
@@ -1557,8 +1574,18 @@ def verify(model_id: str | None) -> None:
                 fg="bright_black",
             )
         )
+    elif n_loaded == 0:
+        click.echo(
+            click.style(
+                f"  ✗ {n_files} bundled SKILL.md files ship but the SkillLibrary loaded 0 — "
+                "bundled skills are not reaching the agent",
+                fg="red",
+            )
+        )
+        sys.exit(2)
     else:
-        click.echo(click.style(f"  ✓ bundled skills: {n_bundled} SKILL.md files", fg="green"))
+        suffix = "" if n_loaded == n_files else f" ({n_files} shipped; rest platform-gated)"
+        click.echo(click.style(f"  ✓ bundled skills: {n_loaded} loaded{suffix}", fg="green"))
 
     # ── (2) HERMES_HOME writability ──────────────────────────────────────
     home = hermes_home()

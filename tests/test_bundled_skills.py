@@ -43,3 +43,38 @@ def test_no_duplicate_skill_names():
         if name in seen:
             pytest.fail(f"duplicate name {name!r} at {p} and {seen[name]}")
         seen[name] = p
+
+
+# ── Runtime loading path (gh #-dogfood) ──────────────────────────────
+#
+# The tests above validate the SKILL.md files on disk via a hard-coded path —
+# they never exercise `_bundled_skills_dir()` / `SkillLibrary`, so a bug there
+# (it resolved `parents[3] / "skills"`, a nonexistent repo-root dir, instead of
+# the in-package `_bundled_skills/`) loaded ZERO skills at runtime while these
+# file tests stayed green. These tests go through the real runtime path.
+
+
+def test_bundled_skills_dir_resolves_to_existing_dir():
+    from langstage_hermes.skills.library import _bundled_skills_dir
+
+    d = _bundled_skills_dir()
+    assert d.is_dir(), f"_bundled_skills_dir() -> {d} does not exist"
+    assert list(d.rglob("SKILL.md")), f"no SKILL.md under {d}"
+
+
+def test_skilllibrary_loads_bundled_skills():
+    """The library must actually LOAD bundled skills, not just ship the files."""
+    from langstage_hermes.skills.library import SkillLibrary, _bundled_skills_dir
+
+    loaded = SkillLibrary(dirs=[_bundled_skills_dir()]).list()
+    assert len(loaded) >= 20, f"bundled SkillLibrary loaded only {len(loaded)}"
+
+
+def test_default_skilllibrary_includes_bundled(tmp_path, monkeypatch):
+    """The public-API default SkillLibrary() (bundled+user+project) loads bundled
+    even with an empty HERMES_HOME — the path the dogfood repro hit."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "empty-home"))
+    monkeypatch.delenv("LANGSTAGE_HERMES_HOME", raising=False)
+    from langstage_hermes.skills.library import SkillLibrary
+
+    assert len(SkillLibrary().list()) >= 20
