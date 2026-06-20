@@ -81,7 +81,9 @@ def _init_chat_model(model_id: str | None) -> Any:
     from langchain.chat_models import init_chat_model
 
     if not model_id:
-        model_id = "anthropic:claude-sonnet-4-5-20250929"
+        # Must match HermesConfig.model_default (SPEC §2) — a stale literal here
+        # silently disagreed with the configured default (gh #-dogfood).
+        model_id = "anthropic:claude-sonnet-4-6"
     return init_chat_model(model_id)
 
 

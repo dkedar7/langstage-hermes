@@ -93,10 +93,17 @@ def _hermes_home() -> Path:
 
 
 def _bundled_skills_dir() -> Path:
-    """The bundled ``skills/`` directory shipped with the package."""
-    # ``library.py`` lives at src/langstage_hermes/skills/library.py
-    # bundled skills live at <repo>/skills/
-    return Path(__file__).resolve().parents[3] / "skills"
+    """The bundled skills directory shipped *inside* the package.
+
+    ``library.py`` lives at ``langstage_hermes/skills/library.py`` and the
+    bundled SKILL.md tree is packaged at ``langstage_hermes/_bundled_skills/``
+    (``parent.parent`` is the ``langstage_hermes`` package dir). Resolving it
+    relative to the package — not the repo root — works identically in a source
+    checkout and an installed wheel. The old ``parents[3] / "skills"`` pointed
+    at a nonexistent repo-root ``skills/`` dir, so zero of the bundled skills
+    loaded anywhere (gh #-dogfood).
+    """
+    return Path(__file__).resolve().parent.parent / "_bundled_skills"
 
 
 def _default_search_dirs() -> list[Path]:

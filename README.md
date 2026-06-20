@@ -76,7 +76,7 @@ pip install "langstage-hermes[dev]"        # tests + lint (contributors only)
 
 ## Picking a model
 
-By default the agent uses `anthropic:claude-sonnet-4-5-20250929` and needs `ANTHROPIC_API_KEY` set. Swap the model via `--model` on the CLI or `model.default` in `langstage-hermes.toml` — any [`init_chat_model`](https://python.langchain.com/api_reference/langchain/chat_models/langchain.chat_models.base.init_chat_model.html) string works.
+By default the agent uses `anthropic:claude-sonnet-4-6` and needs `ANTHROPIC_API_KEY` set. Swap the model via `--model` on the CLI or `model.default` in `langstage-hermes.toml` — any [`init_chat_model`](https://python.langchain.com/api_reference/langchain/chat_models/langchain.chat_models.base.init_chat_model.html) string works.
 
 ### OpenAI / OpenRouter
 

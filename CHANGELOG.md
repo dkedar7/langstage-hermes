@@ -5,6 +5,18 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] — 2026-06-20
+
+### Fixed
+
+- **Zero of the 26 bundled skills loaded (gh #-dogfood).** `_bundled_skills_dir()` resolved `parents[3] / "skills"` — a nonexistent repo-root `skills/` dir — instead of the in-package `langstage_hermes/_bundled_skills/`, so a clean install loaded **no** bundled skills (`skills list` → "No skills match", `SkillLibrary().list()` → 0). It now resolves relative to the package (`parent.parent / "_bundled_skills"`), working identically in source checkouts and installed wheels. Bundled skills load again (23 on the `cli` platform; 26 shipped).
+- **`verify` reported a false green for bundled skills.** It counted SKILL.md files with a raw glob (26) from a *different* path than the runtime loaded, so it printed `✓ 26` while the agent had 0 — exactly the false-positive `verify` exists to prevent. It now counts what `SkillLibrary` actually **loads** and fails (red, exit 2) if files ship but none load.
+- **Keyless model fallback disagreed with the configured default.** `agent.py`'s `_init_chat_model(None)` hard-coded `anthropic:claude-sonnet-4-5-20250929` while `HermesConfig.model_default` is `anthropic:claude-sonnet-4-6`; aligned both. README's documented default corrected to match.
+
+### Tests
+
+- New runtime-path tests that load bundled skills through `_bundled_skills_dir()` / `SkillLibrary` (the existing tests only validated the SKILL.md files via a hard-coded path, so the loader bug was invisible to them).
+
 ## [0.3.1] — 2026-06-20
 
 ### Fixed
