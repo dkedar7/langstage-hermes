@@ -8,7 +8,10 @@ skills / compression / delegation / curator / cron / plugins).
 Resolution chain (lowest to highest precedence):
 
     defaults  <  ~/.langstage-hermes/config.toml  <  ./langstage-hermes.toml
-              <  DEEPAGENT_HERMES_* env vars     <  explicit overrides
+              <  LANGSTAGE_HERMES_* env vars      <  explicit overrides
+
+(The legacy ``DEEPAGENT_HERMES_*`` spelling still resolves as a fallback and
+emits a ``DeprecationWarning``; the canonical ``LANGSTAGE_HERMES_*`` wins.)
 
 The base class' resolution chain still loads ``deepagents.toml`` first, so
 shared keys (agent_spec, workspace, ...) keep working unchanged. Hermes-specific
@@ -31,8 +34,10 @@ from langgraph_stream_parser.host.config import (
     _coerce,
     _deep_merge,
     _env_bool,
+    _env_pair,
     _get_dotted,
     _read_toml,
+    _warn_legacy_env,
     load_toml_config,
 )
 
@@ -368,7 +373,9 @@ class HermesConfig(HostConfig):
           1. Dataclass defaults (SPEC §2 verbatim)
           2. ``deepagents.toml`` (cross-host shared keys only — base behavior)
           3. ``~/.langstage-hermes/config.toml`` then ``./langstage-hermes.toml``
-          4. ``DEEPAGENT_*`` (core) and ``DEEPAGENT_HERMES_*`` (this class) env vars
+          4. ``LANGSTAGE_*`` (core) and ``LANGSTAGE_HERMES_*`` (this class) env
+             vars — the legacy ``DEEPAGENT_*`` spellings still resolve as a
+             fallback (canonical wins) and warn.
           5. Explicit ``overrides`` keyword
 
         ``use_toml=False`` skips both TOML layers.
@@ -412,10 +419,23 @@ class HermesConfig(HostConfig):
 
             if name in env_map:
                 var, caster = env_map[name]
-                ev = env.get(var)
+                # Normalize to (canonical LANGSTAGE_*, legacy DEEPAGENT_*) and
+                # check canonical first, falling back to legacy with a warning —
+                # identical to the base HostConfig.resolve(). The override used to
+                # read only the raw declared name, so the canonical names this
+                # class advertises (and describe() prints) were silently dead
+                # while only the legacy spelling worked (gh #24).
+                canonical, legacy = _env_pair(var)
+                ev = env.get(canonical)
+                used = canonical
+                if ev is None or ev == "":
+                    ev = env.get(legacy)
+                    used = legacy
+                    if ev not in (None, "") and legacy != canonical:
+                        _warn_legacy_env(legacy, canonical)
                 if ev is not None and ev != "":
                     val = caster(ev)
-                    src = f"env:{var}"
+                    src = f"env:{used}"
 
             if name in overrides:
                 val = overrides[name]
