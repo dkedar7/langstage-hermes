@@ -59,8 +59,8 @@ def _setup_openrouter() -> None:
         sys.exit(2)
     os.environ["OPENAI_BASE_URL"] = "https://openrouter.ai/api/v1"
     os.environ["OPENAI_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
-    os.environ["DEEPAGENT_HERMES_MODEL_DEFAULT"] = "openai:openai/gpt-4o-mini"
-    os.environ["DEEPAGENT_HERMES_MODEL_AUX"] = "openai:openai/gpt-4o-mini"
+    os.environ["LANGSTAGE_HERMES_MODEL_DEFAULT"] = "openai:openai/gpt-4o-mini"
+    os.environ["LANGSTAGE_HERMES_MODEL_AUX"] = "openai:openai/gpt-4o-mini"
 
 
 def main() -> int:
@@ -69,10 +69,10 @@ def main() -> int:
     tmp_home = Path(tempfile.mkdtemp(prefix="dah-openrouter-"))
     workspace = tmp_home / "workspace"
     workspace.mkdir()
-    os.environ["DEEPAGENT_HERMES_HOME"] = str(tmp_home)
+    os.environ["LANGSTAGE_HERMES_HOME"] = str(tmp_home)
     os.environ["HERMES_HOME"] = str(tmp_home)
-    os.environ["DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL"] = "3"
-    os.environ["DEEPAGENT_HERMES_MEMORY_NUDGE_INTERVAL"] = "3"
+    os.environ["LANGSTAGE_HERMES_SKILLS_CREATION_NUDGE_INTERVAL"] = "3"
+    os.environ["LANGSTAGE_HERMES_MEMORY_NUDGE_INTERVAL"] = "3"
 
     print(f"HERMES_HOME = {tmp_home}")
     print(f"workspace   = {workspace}")

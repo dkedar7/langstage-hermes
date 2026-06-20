@@ -17,9 +17,10 @@ from langstage_hermes.config import HermesConfig, hermes_home
 
 
 def _strip_env(monkeypatch):
-    """Remove any DEEPAGENT_* / DEEPAGENT_HERMES_* env vars so defaults stand."""
+    """Remove any LANGSTAGE_* / DEEPAGENT_* (canonical + legacy) env vars so
+    defaults stand. Both prefixes now resolve, so both must be cleared."""
     for var in list(os.environ.keys()):
-        if var.startswith("DEEPAGENT_"):
+        if var.startswith(("LANGSTAGE_", "DEEPAGENT_")):
             monkeypatch.delenv(var, raising=False)
 
 
@@ -145,6 +146,58 @@ def test_explicit_override_beats_env(monkeypatch):
     cfg = HermesConfig.resolve(use_toml=False, overrides={"agent_max_iterations": 7})
     assert cfg.agent_max_iterations == 7
     assert cfg.sources["agent_max_iterations"] == "override"
+
+
+# ── canonical (LANGSTAGE_*) env aliasing — regression for gh #24 ──────
+#
+# The resolve() override used to read only the raw declared (legacy) name, so
+# the canonical LANGSTAGE_HERMES_* vars it advertises were silently ignored and
+# the legacy DEEPAGENT_* core fallback was dead under Hermes.
+
+
+def test_canonical_hermes_env_overrides_model_default(monkeypatch):
+    """The headline #24 case: LANGSTAGE_HERMES_* must take effect."""
+    _strip_env(monkeypatch)
+    monkeypatch.setenv("LANGSTAGE_HERMES_MODEL_DEFAULT", "openai:openai/gpt-4o-mini")
+    cfg = HermesConfig.resolve(use_toml=False)
+    assert cfg.model_default == "openai:openai/gpt-4o-mini"
+    assert cfg.sources["model_default"] == "env:LANGSTAGE_HERMES_MODEL_DEFAULT"
+
+
+def test_canonical_hermes_env_beats_legacy(monkeypatch):
+    """When both spellings are set, canonical wins (documented precedence)."""
+    _strip_env(monkeypatch)
+    monkeypatch.setenv("DEEPAGENT_HERMES_MODEL_DEFAULT", "openai:legacy/loses")
+    monkeypatch.setenv("LANGSTAGE_HERMES_MODEL_DEFAULT", "openai:canonical/wins")
+    cfg = HermesConfig.resolve(use_toml=False)
+    assert cfg.model_default == "openai:canonical/wins"
+    assert cfg.sources["model_default"] == "env:LANGSTAGE_HERMES_MODEL_DEFAULT"
+
+
+def test_legacy_hermes_env_still_works_and_warns(monkeypatch):
+    """Legacy DEEPAGENT_HERMES_* still resolves, now with a DeprecationWarning."""
+    from langgraph_stream_parser.host.config import _warned_legacy_env
+
+    _strip_env(monkeypatch)
+    _warned_legacy_env.clear()  # warn-dedup is process-global; reset for this assertion
+    monkeypatch.setenv("DEEPAGENT_HERMES_MODEL_DEFAULT", "openai:legacy/still-works")
+    with pytest.warns(DeprecationWarning, match="LANGSTAGE_HERMES_MODEL_DEFAULT"):
+        cfg = HermesConfig.resolve(use_toml=False)
+    assert cfg.model_default == "openai:legacy/still-works"
+    assert cfg.sources["model_default"] == "env:DEEPAGENT_HERMES_MODEL_DEFAULT"
+
+
+def test_legacy_core_env_resolves_under_hermes(monkeypatch):
+    """Inherited core vars' legacy DEEPAGENT_* fallback also works under Hermes."""
+    from langgraph_stream_parser.host.config import _warned_legacy_env
+
+    _strip_env(monkeypatch)
+    _warned_legacy_env.clear()
+    monkeypatch.setenv("DEEPAGENT_AGENT_SPEC", "legacy_core.py:graph")
+    with pytest.warns(DeprecationWarning, match="LANGSTAGE_AGENT_SPEC"):
+        cfg = HermesConfig.resolve(use_toml=False)
+    assert cfg.agent_spec == "legacy_core.py:graph"
+    assert cfg.sources["agent_spec"] == "env:DEEPAGENT_AGENT_SPEC"
 
 
 # ── TOML resolution ──────────────────────────────────────────────────

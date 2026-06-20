@@ -5,6 +5,12 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-06-20
+
+### Fixed
+
+- **Canonical `LANGSTAGE_HERMES_*` (and legacy core `DEEPAGENT_*`) env vars were silently ignored (gh #24).** `HermesConfig.resolve()` overrode the base resolver and read env vars by their raw declared (legacy) name, so the canonical `LANGSTAGE_HERMES_*` names it advertises — and that `--show-config`/`describe()` print — had no effect, and the legacy `DEEPAGENT_*` fallback for inherited core vars was dead under Hermes. This broke the README's documented OpenRouter setup *silently* (wrong value, no warning → confusing downstream `ANTHROPIC_API_KEY not set`). The override now routes every env read through the base's `_env_pair()`/`_warn_legacy_env()`: canonical wins, legacy resolves as a deprecated fallback with a `DeprecationWarning`. Added regression tests, and switched `examples/dogfood_openrouter.py` to the canonical names (the legacy-only examples were why this went unnoticed).
+
 ## [0.3.0] — 2026-06-14
 
 ### Added
