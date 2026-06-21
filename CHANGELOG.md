@@ -5,6 +5,18 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] — 2026-06-21
+
+### Fixed
+- **`skills install <dir>` now installs under the skill's frontmatter `name`**,
+  regardless of the source directory's name. Previously it required the directory
+  to be named exactly after the skill (it validated/installed by dir name), so
+  pointing `install` at any working dir failed with `name: must match parent
+  directory name`. (gh #-dogfood)
+- **`--show-config`'s "no TOML found" message** named only the cross-host
+  `langstage.toml`/`deepagents.toml`; it now lists the real search order, leading
+  with the documented `langstage-hermes.toml` / `~/.langstage-hermes/config.toml`.
+
 ## [0.3.3] — 2026-06-21
 
 ### Fixed
