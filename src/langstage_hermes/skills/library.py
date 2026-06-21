@@ -467,10 +467,23 @@ class SkillLibrary:
 
     @staticmethod
     def _iter_skill_md_files(directory: Path) -> Iterator[Path]:
-        """Yield all SKILL.md files under ``directory``, skipping excluded dirs."""
+        """Yield all SKILL.md files under ``directory``, skipping excluded dirs.
+
+        Exclusions are matched against the path **relative to** ``directory`` —
+        i.e. junk dirs *inside* the skill tree (``.venv``, ``node_modules``,
+        ``__pycache__`` …). They must NOT be matched against the absolute path,
+        or the install *prefix* collides with them: a package installed into a
+        venv named ``.venv`` (e.g. the README's ``uv venv .venv``) would have
+        ``.venv`` in every bundled skill's absolute path and load ZERO skills
+        (gh #-dogfood).
+        """
+        directory = Path(directory)
         for skill_md in directory.rglob("SKILL.md"):
-            parts = set(skill_md.parts)
-            if parts & _EXCLUDED_DIR_NAMES:
+            try:
+                rel_parts = set(skill_md.relative_to(directory).parts)
+            except ValueError:  # pragma: no cover - rglob result is always under directory
+                rel_parts = set(skill_md.parts)
+            if rel_parts & _EXCLUDED_DIR_NAMES:
                 continue
             yield skill_md
 

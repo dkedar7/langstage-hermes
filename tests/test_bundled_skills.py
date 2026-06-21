@@ -78,3 +78,48 @@ def test_default_skilllibrary_includes_bundled(tmp_path, monkeypatch):
     from langstage_hermes.skills.library import SkillLibrary
 
     assert len(SkillLibrary().list()) >= 20
+
+
+# ── exclusions are relative to the search dir, not the install prefix ──
+#
+# gh #-dogfood: the README's `uv venv .venv` puts the package under a `.venv`
+# path; `_EXCLUDED_DIR_NAMES` was matched against the ABSOLUTE path, so every
+# bundled skill's path contained `.venv` and ZERO skills loaded (verify -> exit 2).
+
+
+def test_iter_skill_md_ignores_excluded_name_in_install_prefix(tmp_path):
+    """A `.venv` in the install prefix (above the search dir) must NOT exclude skills."""
+    from langstage_hermes.skills.library import SkillLibrary
+
+    root = tmp_path / ".venv" / "Lib" / "site-packages" / "pkg" / "_bundled_skills"
+    (root / "demo").mkdir(parents=True)
+    (root / "demo" / "SKILL.md").write_text("placeholder", encoding="utf-8")
+    found = list(SkillLibrary._iter_skill_md_files(root))
+    assert len(found) == 1, found
+
+
+def test_iter_skill_md_still_skips_excluded_dirs_inside_tree(tmp_path):
+    """Junk dirs *inside* the skill tree are still skipped (relative match)."""
+    from langstage_hermes.skills.library import SkillLibrary
+
+    root = tmp_path / "skills"
+    (root / "real").mkdir(parents=True)
+    (root / "real" / "SKILL.md").write_text("placeholder", encoding="utf-8")
+    (root / ".venv" / "junk").mkdir(parents=True)
+    (root / ".venv" / "junk" / "SKILL.md").write_text("placeholder", encoding="utf-8")
+    found = {p.parent.name for p in SkillLibrary._iter_skill_md_files(root)}
+    assert found == {"real"}, found
+
+
+def test_skilllibrary_loads_from_venv_named_install_path(tmp_path):
+    """End-to-end: a valid skill under a `.venv` path loads (the real failure)."""
+    from langstage_hermes.skills.library import SkillLibrary
+
+    root = tmp_path / ".venv" / "Lib" / "site-packages" / "langstage_hermes" / "_bundled_skills"
+    (root / "demo-skill").mkdir(parents=True)
+    (root / "demo-skill" / "SKILL.md").write_text(
+        "---\nname: demo-skill\ndescription: A demo skill.\nversion: 1.0.0\nplatforms: [linux, macos, windows]\n---\nbody\n",
+        encoding="utf-8",
+    )
+    names = [s.name for s in SkillLibrary(dirs=[root]).list()]
+    assert "demo-skill" in names, names

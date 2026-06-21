@@ -5,6 +5,18 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] — 2026-06-21
+
+### Fixed
+- **`uv venv .venv` install (the README's own command) silently dropped ALL bundled
+  skills (gh #-dogfood).** The skill scanner's `_EXCLUDED_DIR_NAMES` (`.venv`, `venv`,
+  `node_modules`, …) was matched against each SKILL.md's **absolute** path, so a package
+  installed into a venv named `.venv` had `.venv` in every bundled-skill path → 0 loaded
+  and `verify` failed (exit 2). Exclusions are now matched **relative to the search
+  directory**, so junk dirs *inside* a skill tree are still skipped but the install prefix
+  no longer collides. (Regression-sibling of the 0.3.2 bundled-skills fix — different root
+  cause, exposed by the documented `uv venv .venv`.)
+
 ## [0.3.2] — 2026-06-20
 
 ### Fixed
