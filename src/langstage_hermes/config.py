@@ -449,6 +449,19 @@ class HermesConfig(HostConfig):
         obj._toml_paths = base_toml_paths + hermes_toml_paths  # type: ignore[attr-defined]
         return obj
 
+    def describe(self) -> str:
+        """Like the base dump, but the 'no TOML found' line lists the search
+        order Hermes actually uses — leading with the documented
+        ``langstage-hermes.toml`` (the base message only named the cross-host
+        ``langstage.toml``/``deepagents.toml``). (gh #-dogfood)
+        """
+        text = super().describe()
+        return text.replace(
+            "TOML: no langstage.toml (or legacy deepagents.toml) found",
+            "TOML: no config found (looked for ./langstage-hermes.toml, "
+            "~/.langstage-hermes/config.toml, ./langstage.toml, ./deepagents.toml)",
+        )
+
 
 __all__ = [
     "HERMES_GLOBAL_TOML",

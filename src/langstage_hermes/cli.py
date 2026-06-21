@@ -955,9 +955,11 @@ def skills_show(name: str) -> None:
 @skills.command("install")
 @click.argument("path", type=click.Path(exists=True, path_type=Path))
 def skills_install(path: Path) -> None:
-    """Install a skill directory into ``<HERMES_HOME>/skills/``.
+    """Install a skill directory into ``<HERMES_HOME>/skills/<name>/``.
 
-    PATH may be either a SKILL.md file or a directory containing one.
+    PATH may be either a SKILL.md file or a directory containing one. It is
+    installed under the skill's frontmatter ``name`` regardless of the source
+    directory's name, so you can point this at any working directory.
     """
     import shutil
 
@@ -974,20 +976,26 @@ def skills_install(path: Path) -> None:
 
     post = frontmatter.load(skill_md)
     fm = dict(post.metadata)
-    errs = validate_frontmatter(fm, parent_dir_name=src_dir.name)
+    # Install under the skill's own `name`, not the source dir's — so pointing
+    # `install` at a working dir whose name differs from the skill name just works
+    # (and the installed layout has parent-dir == name, which the validator wants).
+    # (gh #-dogfood)
+    raw_name = fm.get("name")
+    install_name = raw_name if isinstance(raw_name, str) and raw_name else src_dir.name
+    errs = validate_frontmatter(fm, parent_dir_name=install_name)
     if errs:
         click.echo(click.style("SKILL.md frontmatter is invalid:", fg="red"))
         for e in errs:
             click.echo(f"  - {e}")
         sys.exit(2)
 
-    target = hermes_home() / "skills" / src_dir.name
+    target = hermes_home() / "skills" / install_name
     if target.exists():
         click.echo(click.style(f"Already installed at {target} — won't overwrite.", fg="yellow"))
         sys.exit(1)
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src_dir, target)
-    click.echo(click.style(f"Installed {fm.get('name', '?')} → {target}", fg="green"))
+    click.echo(click.style(f"Installed {install_name} → {target}", fg="green"))
 
 
 @skills.command("audit")
