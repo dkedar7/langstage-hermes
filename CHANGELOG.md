@@ -5,6 +5,15 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] — 2026-06-22
+
+### Fixed
+- **Stale `~/.deepagent-hermes` paths in shipped text.** The `markdown-provider`
+  plugin description (and the bundled skills README) still advertised the
+  pre-rename `~/.deepagent-hermes/...` location, though the runtime correctly uses
+  `HERMES_HOME` (`~/.langstage-hermes`). Updated both to the canonical path.
+  (gh #-dogfood, cosmetic)
+
 ## [0.3.4] — 2026-06-21
 
 ### Fixed
