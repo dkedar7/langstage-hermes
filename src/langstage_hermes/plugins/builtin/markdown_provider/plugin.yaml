@@ -1,6 +1,6 @@
 name: markdown-provider
 version: 0.1.0
-description: Zero-dependency MemoryProvider that recalls from ~/.deepagent-hermes/memories/notes/*.md via keyword search.
+description: Zero-dependency MemoryProvider that recalls from HERMES_HOME (~/.langstage-hermes)/memories/notes/*.md via keyword search.
 hooks: []
 provides:
   - memory_provider: markdown

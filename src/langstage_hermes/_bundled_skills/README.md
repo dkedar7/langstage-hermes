@@ -19,8 +19,8 @@ Every bundled SKILL.md validates against the [agentskills.io spec](https://agent
 The library resolves dirs in this order (later wins on name collision):
 
 1. **Bundled** — this directory
-2. **User** — `~/.deepagent-hermes/skills/<name>/SKILL.md`
-3. **Project shadow** — `./.deepagent-hermes/skills/<name>/SKILL.md`
+2. **User** — `~/.langstage-hermes/skills/<name>/SKILL.md`
+3. **Project shadow** — `./.langstage-hermes/skills/<name>/SKILL.md`
 4. **Extras** — anything in `config.skills.external_dirs`
 
 So you can override any bundled skill by dropping a same-named SKILL.md into your user or project dir.
