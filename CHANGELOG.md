@@ -5,6 +5,21 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] — 2026-06-22
+
+### Fixed
+- **Stale `langgraph-stream-parser` floor stranded hermes on core 0.4.x.** The
+  pin was `>=0.3,<0.5`, two minor versions behind the rest of the family — so a
+  clean install missed every 0.6.x core fix: BOM-safe `langstage.toml` parsing,
+  the keyless stub compiling without a checkpointer, the *visible* legacy-env
+  deprecation notice, dict-form message rendering, and the `tool_end` name
+  backfill. Bumped to `>=0.6.10,<0.7` (and the `agui` extra likewise). The full
+  suite passes on modern core (the visible `DEEPAGENT_HERMES_*` notice now
+  reaches console-script users too). (Found by the dogfood routine.)
+- **`verify` now points at the `[openai]` extra** when an OpenAI-compatible
+  model fails to build for lack of `langchain-openai`, instead of surfacing only
+  langchain's raw "install langchain-openai" message.
+
 ## [0.3.5] — 2026-06-22
 
 ### Fixed
