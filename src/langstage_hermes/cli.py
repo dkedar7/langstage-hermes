@@ -1634,6 +1634,15 @@ def verify(model_id: str | None) -> None:
         agent = create_hermes_agent(cfg_for_run, workspace=workspace, session_id="verify-001")
     except Exception as e:
         click.echo(click.style(f"  ✗ agent build failed: {type(e).__name__}: {e}", fg="red"))
+        # A missing provider package surfaces langchain's raw "install
+        # langchain-openai" message; point at the hermes extra that bundles it.
+        if isinstance(e, ImportError) and "langchain-openai" in str(e):
+            click.echo(
+                click.style(
+                    '    for OpenAI-compatible models install: pip install "langstage-hermes[openai]"',
+                    fg="yellow",
+                )
+            )
         sys.exit(2)
     build_s = time.perf_counter() - t0
     click.echo(click.style(f"  ✓ agent built in {build_s:.1f}s", fg="green"))
