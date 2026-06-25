@@ -995,6 +995,16 @@ def skills_install(path: Path) -> None:
         sys.exit(1)
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src_dir, target)
+    # Land an audit row so `audit log` shows the install and `audit rollback`
+    # behaves like any other create — honoring the `audit` group's promise that
+    # "every CLI skill mutation appends a row." Best-effort: never fail an
+    # otherwise-successful install on an audit-log hiccup. (gh #31)
+    try:
+        lib = _skill_library()
+        lib.set_mutation_context(source="cli")
+        lib.record_install(install_name, target / "SKILL.md")
+    except Exception:
+        pass  # audit logging is non-critical; never fail the install over it
     click.echo(click.style(f"Installed {install_name} → {target}", fg="green"))
 
 

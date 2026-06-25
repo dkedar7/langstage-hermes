@@ -5,6 +5,19 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] — 2026-06-25
+
+### Fixed
+- **`skills install` was invisible to the audit log.** The `audit` group's help
+  promises "every CLI skill mutation appends a row… to see what changed and to
+  revert," but `skills install` copied the skill with a raw `shutil.copytree`
+  and never recorded a mutation — so `audit log` stayed empty after an install
+  and `audit rollback` reported "mutation not found." It now lands a `create`
+  row via the audit-aware library (new `SkillLibrary.record_install`), so the
+  install shows up in `audit log` and behaves like any other create (rollback
+  points you at `delete`, since a create has no prior state). (Found by the
+  dogfood routine, gh #31.)
+
 ## [0.3.6] — 2026-06-22
 
 ### Fixed
