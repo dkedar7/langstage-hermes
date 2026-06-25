@@ -402,6 +402,24 @@ class SkillLibrary:
         )
         return True
 
+    def record_install(self, name: str, skill_path: Path) -> None:
+        """Log a ``create`` mutation for a skill installed out-of-band.
+
+        The CLI's ``skills install`` copies a whole directory tree (scripts +
+        assets, not just SKILL.md), so it can't go through ``write()`` — but it
+        should still land an audit row so ``audit log`` shows it and the install
+        is consistent with an agent-side ``create`` (rollback then points the
+        user at ``delete``, the same as any other create). Best-effort. (gh #31)
+        """
+        after = skill_path.read_bytes() if skill_path.exists() else None
+        self._record_mutation(
+            skill_name=name,
+            action="create",
+            skill_path=skill_path,
+            before_content=None,
+            after_content=after,
+        )
+
     def validate_all(self) -> dict[str, list[str]]:
         """Validate every SKILL.md under every search dir.
 
