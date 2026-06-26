@@ -5,6 +5,21 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] — 2026-06-26
+
+### Fixed
+- **The documented `OPENROUTER_API_KEY` path didn't work.** The README advertises
+  `OPENROUTER_API_KEY` as a drop-in alternative to `OPENAI_API_KEY`, but the
+  runtime built `openai:*` models with a bare `init_chat_model`, and `ChatOpenAI`
+  only reads `OPENAI_API_KEY` — so following the README verbatim failed at agent
+  build with `OpenAIError: Missing credentials`. Worse, `verify`/`doctor`
+  accepted `OPENROUTER_API_KEY` as a satisfied key, giving a false-positive
+  preflight. When an `openai:*` model is selected with only `OPENROUTER_API_KEY`
+  set, hermes now aliases it to `OPENAI_API_KEY` and defaults `OPENAI_BASE_URL`
+  to the OpenRouter endpoint — so the documented path works and the
+  `verify`/`doctor` acceptance becomes correct. (Found by the dogfood routine,
+  gh #33.)
+
 ## [0.3.7] — 2026-06-25
 
 ### Fixed
