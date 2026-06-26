@@ -76,6 +76,21 @@ def _default_skill_dirs(cfg: HermesConfig) -> list[Path]:
     return dirs
 
 
+def _alias_openrouter_key(model_id: str) -> None:
+    """Wire ``OPENROUTER_API_KEY`` to the OpenAI client for ``openai:*`` models.
+
+    The README advertises ``OPENROUTER_API_KEY`` as a drop-in alternative to
+    ``OPENAI_API_KEY``, but ``ChatOpenAI`` only reads ``OPENAI_API_KEY``. When an
+    ``openai:*`` model is selected with only ``OPENROUTER_API_KEY`` set, alias it
+    (and default the base URL to OpenRouter) so the documented path — which
+    ``verify``/``doctor`` already accept as a satisfied key — actually works
+    instead of failing with "Missing credentials" at build. (gh #33)
+    """
+    if model_id.startswith("openai:") and os.environ.get("OPENROUTER_API_KEY") and not os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = os.environ["OPENROUTER_API_KEY"]
+        os.environ.setdefault("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+
+
 def _init_chat_model(model_id: str | None) -> Any:
     """Wrap ``langchain.chat_models.init_chat_model`` so a ``None`` returns a sentinel default."""
     from langchain.chat_models import init_chat_model
@@ -84,6 +99,8 @@ def _init_chat_model(model_id: str | None) -> Any:
         # Must match HermesConfig.model_default (SPEC §2) — a stale literal here
         # silently disagreed with the configured default (gh #-dogfood).
         model_id = "anthropic:claude-sonnet-4-6"
+
+    _alias_openrouter_key(model_id)
     return init_chat_model(model_id)
 
 
