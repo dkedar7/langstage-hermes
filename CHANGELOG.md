@@ -5,6 +5,19 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] — 2026-06-27
+
+### Fixed
+- **`doctor` was not model-aware.** Unlike `verify`, it unconditionally checked
+  `ANTHROPIC_API_KEY` ("required for the default anthropic:* model") even when an
+  `openai:*` model was configured, and it printed the OpenAI/OpenRouter lines
+  only when those keys were *set* — so on the README's OpenRouter path it cited a
+  key the user doesn't need and stayed silent about the one they do (exiting 0
+  with a clean bill of health). `doctor` now resolves the configured model and
+  checks the key that model actually needs, printing the resolved model and
+  flagging a missing OpenAI/OpenRouter key — matching `verify`. (Found by the
+  dogfood routine, gh #35.)
+
 ## [0.3.8] — 2026-06-26
 
 ### Fixed

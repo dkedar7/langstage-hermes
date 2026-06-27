@@ -1730,14 +1730,32 @@ def doctor() -> None:
     except ImportError as e:
         click.echo(f"  langgraph-stream-parser: MISSING ({e})")
 
-    if os.getenv("ANTHROPIC_API_KEY"):
-        click.echo("  ANTHROPIC_API_KEY: set")
-    else:
-        click.echo("  ANTHROPIC_API_KEY: not set (required for the default anthropic:* model)")
+    # Check the key the CONFIGURED model actually needs — not a hardcoded
+    # ANTHROPIC_API_KEY. Mirrors verify's provider-aware gate so the two
+    # diagnostics agree, and so a missing OpenAI/OpenRouter key on the README's
+    # documented openai:* / OpenRouter path is flagged instead of silent. (gh #35)
+    from langstage_hermes.config import HermesConfig
 
-    for var in ("OPENAI_API_KEY", "OPENROUTER_API_KEY"):
-        if os.getenv(var):
-            click.echo(f"  {var}: set")
+    try:
+        model_for_run = HermesConfig.resolve().model_default
+    except Exception:
+        model_for_run = ""
+    click.echo(f"  model: {model_for_run or '(unresolved)'}")
+    if model_for_run.startswith("openai:"):
+        if os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY"):
+            click.echo("  OPENAI_API_KEY / OPENROUTER_API_KEY: set")
+        else:
+            click.echo("  OPENAI_API_KEY / OPENROUTER_API_KEY: not set (required for the configured openai:* model)")
+    elif model_for_run.startswith("anthropic:"):
+        if os.getenv("ANTHROPIC_API_KEY"):
+            click.echo("  ANTHROPIC_API_KEY: set")
+        else:
+            click.echo("  ANTHROPIC_API_KEY: not set (required for the configured anthropic:* model)")
+    else:
+        # Unknown / custom provider — report present keys without asserting one.
+        for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"):
+            if os.getenv(var):
+                click.echo(f"  {var}: set")
 
     home = hermes_home()
     try:
