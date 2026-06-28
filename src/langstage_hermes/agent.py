@@ -36,7 +36,11 @@ from langstage_hermes.caching import AnthropicCachingS3Middleware
 from langstage_hermes.compression import HermesCompressionMiddleware
 from langstage_hermes.config import HermesConfig
 from langstage_hermes.curator import CuratorMiddleware
-from langstage_hermes.memory.provider import get_provider
+from langstage_hermes.memory.provider import (
+    NoopMemoryProvider,
+    ensure_builtin_providers,
+    get_provider,
+)
 from langstage_hermes.memory.tool import MemoryToolMiddleware
 from langstage_hermes.plugins.event_bus import PluginEventBus
 from langstage_hermes.prompts import PromptAssemblyMiddleware
@@ -190,8 +194,22 @@ def create_hermes_agent(
         aux_model = _init_chat_model(cfg.model_aux) if cfg.model_aux else main_model
 
     # ── memory provider plugin (single-select) ───────────────────────────
+    # Register the bundled providers (e.g. "markdown") on this runtime path — the
+    # agent factory never ran plugin discovery, so the name wasn't registered and
+    # this crashed with KeyError. And degrade an unknown provider to noop with a
+    # warning rather than crashing the build, as get_provider's docstring promises
+    # (a stale config value shouldn't take down chat/verify). (gh #37)
+    ensure_builtin_providers()
     provider_name = cfg.memory_provider or ""
-    provider_cls = get_provider(provider_name)
+    try:
+        provider_cls = get_provider(provider_name)
+    except KeyError as e:
+        log.warning(
+            "memory.provider=%r is not registered; falling back to the no-op provider. (%s)",
+            provider_name,
+            e,
+        )
+        provider_cls = NoopMemoryProvider
     provider = provider_cls() if provider_cls else None
 
     # ── enabled toolsets (after disabled_toolsets filter) ────────────────

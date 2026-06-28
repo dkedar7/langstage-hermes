@@ -4,8 +4,10 @@ A memory provider is a single-select plug-in slot. The agent loads at most one
 provider — selected by ``config.memory.provider`` (default ``""`` → no-op).
 
 Bundled providers register themselves at import time via
-``register_provider("markdown", MarkdownProvider)`` (the zero-dep default —
-keyword search over ``<HERMES_HOME>/memories/notes/*.md``). Third-party plug-ins
+``register_provider("markdown", MarkdownProvider)`` (a zero-dep, opt-in provider —
+keyword search over ``<HERMES_HOME>/memories/notes/*.md``; the registry *default*
+is the no-op under ``""``, select markdown with ``memory.provider="markdown"``).
+Third-party plug-ins
 discovered through the plugin loader (SPEC §15) can register additional
 providers the same way — e.g. an out-of-tree ``honcho`` provider, an embeddings-
 backed one, or a service like ``mem0``.
@@ -122,6 +124,22 @@ def get_provider(name: str) -> type[MemoryProvider]:
 def available_providers() -> list[str]:
     """Return registered provider names, sorted alphabetically."""
     return sorted(_REGISTRY)
+
+
+def ensure_builtin_providers() -> None:
+    """Import bundled provider plugins so their ``register_provider()`` runs.
+
+    The agent factory builds on the runtime path, which never ran plugin
+    discovery (only the ``plugins`` CLI command did), so a bundled name like
+    ``"markdown"`` was never registered and ``get_provider("markdown")`` raised
+    a ``KeyError`` at agent build — crashing ``chat``/``verify``. Importing the
+    builtin here registers it. Idempotent (re-registration is last-write-wins)
+    and lazy, to avoid an import cycle (the plugin imports from this module).
+    """
+    try:
+        import langstage_hermes.plugins.builtin.markdown_provider  # noqa: F401
+    except Exception:  # pragma: no cover - a broken optional plugin must not crash build
+        pass
 
 
 # ── No-op provider (default when memory.provider is unset) ───────────
