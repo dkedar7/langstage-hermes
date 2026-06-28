@@ -174,7 +174,7 @@ See [SPEC.md](./SPEC.md) for the full 21-section requirements doc. Top-level lay
 | `skill_view` / `skill_manage` / `skills_list` tools | ✅ working |
 | Frozen-snapshot memory (MEMORY.md / USER.md) | ✅ working — verified live (702 bytes written autonomously) |
 | SQLite FTS5 store + `session_search` (3 modes) | ✅ working |
-| `MarkdownProvider` (bundled, default) | ✅ keyword search over `<HERMES_HOME>/memories/notes/*.md` — zero deps |
+| `MarkdownProvider` (bundled, opt-in via `memory.provider="markdown"`; the default is no-op) | ✅ keyword search over `<HERMES_HOME>/memories/notes/*.md` — zero deps |
 | Iteration budget middleware | ✅ working |
 | Compression middleware (13-section template) | ✅ working |
 | Anthropic `system_and_3` caching strategy | ✅ working |
