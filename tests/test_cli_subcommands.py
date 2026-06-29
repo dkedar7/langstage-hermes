@@ -319,3 +319,48 @@ def test_subcommand_help_works(group: str):
     result = runner.invoke(cli, [group, "--help"])
     assert result.exit_code == 0
     assert "Usage:" in result.output
+
+
+# ── skills remove / uninstall (gh #39) ──────────────────────────────────
+
+
+def _home(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path))
+
+
+def test_skills_remove_archives_and_records_rollbackable_delete(monkeypatch, tmp_path):
+    """`install` had no inverse; `remove` archives the skill and lands a `delete`
+    audit row (which `audit rollback` can undo), instead of a manual `rm` that
+    desyncs the audit log."""
+    _home(monkeypatch, tmp_path)
+    _write_skill(tmp_path, "throwaway", "a skill to remove later")
+    runner = CliRunner()
+    assert "throwaway" in runner.invoke(cli, ["skills", "list"]).output
+
+    r = runner.invoke(cli, ["skills", "remove", "throwaway"])
+    assert r.exit_code == 0, r.output
+    assert "Removed throwaway" in r.output
+
+    # Archived (not hard-deleted) and removed from active discovery.
+    assert not (tmp_path / "skills" / "throwaway").exists()
+    assert (tmp_path / "skills" / "_archived").exists()
+
+    # A rollback-able delete row landed (vs install's create that rollback refuses).
+    audit = runner.invoke(cli, ["audit", "log"]).output
+    assert "delete" in audit and "throwaway" in audit
+
+
+def test_skills_remove_unknown_fails(monkeypatch, tmp_path):
+    _home(monkeypatch, tmp_path)
+    r = CliRunner().invoke(cli, ["skills", "remove", "no-such-skill"])
+    assert r.exit_code == 1
+    assert "No installed skill" in r.output
+
+
+def test_skills_uninstall_is_an_alias(monkeypatch, tmp_path):
+    _home(monkeypatch, tmp_path)
+    _write_skill(tmp_path, "gone", "to be uninstalled")
+    r = CliRunner().invoke(cli, ["skills", "uninstall", "gone"])
+    assert r.exit_code == 0, r.output
+    assert "Removed gone" in r.output

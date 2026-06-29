@@ -1008,6 +1008,42 @@ def skills_install(path: Path) -> None:
     click.echo(click.style(f"Installed {install_name} → {target}", fg="green"))
 
 
+def _skills_remove(name: str) -> None:
+    """Archive an installed skill and record a rollback-able delete mutation."""
+    lib = _skill_library()
+    if lib.delete(name):
+        click.echo(
+            click.style(
+                f"Removed {name} — archived under skills/_archived/; restore with `audit rollback`.",
+                fg="green",
+            )
+        )
+    else:
+        click.echo(click.style(f"No installed skill named {name!r}.", fg="yellow"))
+        sys.exit(1)
+
+
+@skills.command("remove")
+@click.argument("name")
+def skills_remove(name: str) -> None:
+    """Uninstall a skill: archive it and record a rollback-able delete.
+
+    `install` had no inverse — a manual `rm` left the audit log out of sync, and
+    `audit rollback` refuses on a `create` ("no before-state"). This archives the
+    skill (under skills/_archived/<name>-<ts>/, not a hard delete) and lands a
+    `delete` audit row, so `audit rollback <name> <id>` restores it. Removing a
+    user skill that shadows a bundled one re-exposes the bundled skill. (gh #39)
+    """
+    _skills_remove(name)
+
+
+@skills.command("uninstall")
+@click.argument("name")
+def skills_uninstall(name: str) -> None:
+    """Alias for `skills remove`."""
+    _skills_remove(name)
+
+
 @skills.command("audit")
 def skills_audit() -> None:
     """Validate every skill against agentskills.io rules."""
