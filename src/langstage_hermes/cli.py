@@ -25,6 +25,7 @@ rest of the CLI surface remains usable during partial builds.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import os
 import shutil
 import sys
@@ -1793,6 +1794,26 @@ def doctor() -> None:
             if os.getenv(var):
                 click.echo(f"  {var}: set")
 
+    # Provider PACKAGE importability — the dep most likely to be missing on a
+    # fresh `pip install langstage-hermes` (no extras): the openai:* path needs
+    # langchain-openai, which ships only behind the [openai] extra. doctor
+    # advertises that it checks "deps", and verify already fails (exit 2) here
+    # naming the extra; doctor must agree instead of green-lighting a config that
+    # cannot build. Mirror verify's gold-standard hint. (gh #41)
+    provider_pkg_missing = False
+    _provider_pkgs = {
+        "openai:": ("langchain_openai", 'pip install "langstage-hermes[openai]"'),
+        "anthropic:": ("langchain_anthropic", "pip install langchain-anthropic"),
+    }
+    for _prefix, (_mod, _hint) in _provider_pkgs.items():
+        if model_for_run.startswith(_prefix):
+            if importlib.util.find_spec(_mod) is None:
+                click.echo(f"  ✗ provider package '{_mod}' not importable for {model_for_run} — {_hint}")
+                provider_pkg_missing = True
+            else:
+                click.echo(f"  provider package: {_mod} installed")
+            break
+
     home = hermes_home()
     try:
         home.mkdir(parents=True, exist_ok=True)
@@ -1806,6 +1827,13 @@ def doctor() -> None:
     cron_dir = home / "cron"
     click.echo(f"  cron dir: {'exists' if cron_dir.exists() else 'absent (will be created on first use)'}")
     click.echo(f"  shutil.which('bash'): {shutil.which('bash') or 'not on PATH (no_agent shell scripts will fail)'}")
+
+    # A missing provider package means the configured agent cannot build, so
+    # doctor must NOT return a clean exit. We defer the exit to here (rather than
+    # bailing mid-report) so the full diagnostic still prints — doctor's value
+    # over verify is the complete picture — while the exit code matches verify. (gh #41)
+    if provider_pkg_missing:
+        sys.exit(2)
 
 
 # ── entry point ────────────────────────────────────────────────────

@@ -5,6 +5,39 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.12] — 2026-06-30
+
+### Fixed
+- **`doctor` green-lit an `openai:*` model with the `[openai]` extra missing.**
+  On a plain `pip install langstage-hermes` (no extras), `langchain-openai` is
+  absent, so an `openai:*` model cannot build — yet `doctor` reported an all-green
+  exit-0 bill of health while `verify` correctly failed (exit 2) naming
+  `pip install "langstage-hermes[openai]"`. `doctor` advertises that it checks
+  "deps", and the configured provider package is the dep that most often breaks a
+  fresh install on the documented OpenAI/OpenRouter path. `doctor` now checks the
+  configured model's provider package is importable, prints a `✗` line naming the
+  same extra `verify` does, and exits non-zero — the full diagnostic still prints
+  first. (Found by the dogfood routine, gh #41.)
+
+## [0.3.11] — 2026-06-29
+
+### Added
+- **`skills remove` (alias `uninstall`).** `install` had no inverse, and
+  `audit rollback` refuses on an install's `create` mutation, so the only way to
+  remove a skill was a manual `rm` that desynced the audit log. `remove` archives
+  the skill under `skills/_archived/` and lands a rollback-able `delete` audit row,
+  so `audit rollback <name> <id>` restores it. (gh #39.)
+
+## [0.3.10] — 2026-06-28
+
+### Fixed
+- **`memory.provider="markdown"` crashed instead of working.** The bundled
+  `MarkdownProvider` self-registers at import, but the agent factory never imported
+  it (only the `plugins` CLI did), so selecting it `KeyError`'d at agent build —
+  chat wouldn't start and `verify` exited 2. The factory now registers the builtin
+  providers and degrades an unknown provider name to noop with a warning instead of
+  crashing. (gh #37.)
+
 ## [0.3.9] — 2026-06-27
 
 ### Fixed
