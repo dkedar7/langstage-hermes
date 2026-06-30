@@ -28,6 +28,10 @@ def _isolate(monkeypatch, tmp_path):
 def test_doctor_flags_openai_key_for_openai_model(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("LANGSTAGE_HERMES_MODEL_DEFAULT", "openai:openai/gpt-4o-mini")
+    # This test is about the KEY check; hold the provider-package dimension fixed
+    # (present) so it isolates the key behavior regardless of whether the CI env
+    # installed the [openai] extra. The missing-package path has its own test below.
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
 
     r = CliRunner().invoke(cli, ["doctor"])
     assert r.exit_code == 0, r.output
