@@ -8,7 +8,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/langstage-hermes.svg)](https://pypi.org/project/langstage-hermes/)
 [![License](https://img.shields.io/pypi/l/langstage-hermes.svg)](./LICENSE)
 
-A faithful reproduction of [Nous Research's Hermes Agent](https://github.com/nousresearch/hermes-agent) on top of LangGraph + [`deepagents`](https://github.com/langchain-ai/deepagents) + [`langgraph-stream-parser`](https://github.com/dkedar7/langgraph-stream-parser).
+A faithful reproduction of [Nous Research's Hermes Agent](https://github.com/nousresearch/hermes-agent) on top of LangGraph + [`deepagents`](https://github.com/langchain-ai/deepagents) + [`langstage-core`](https://github.com/dkedar7/langstage-core).
 
 **Status: live on PyPI** (renamed from `deepagent-hermes` — the old name now just installs this one, and the `deepagent-hermes` command still works). Spec at [SPEC.md](./SPEC.md). Release notes in [CHANGELOG.md](./CHANGELOG.md). The runtime is verified end-to-end against a real Anthropic model — both the memory loop and the skill-creation loop close autonomously; see [`examples/dogfood.py`](./examples/dogfood.py) and [`examples/dogfood_procedural.py`](./examples/dogfood_procedural.py) for the traces.
 
@@ -36,14 +36,14 @@ langstage-hermes is the reference agent of the **LangStage family**: write your 
 | Terminal | [langstage-cli](https://github.com/dkedar7/langstage-cli) | `langstage-cli -a langstage_hermes.agent:graph` |
 | VS Code | [langstage-vscode](https://github.com/dkedar7/langstage-vscode) | chat participant + stdio sidecar |
 | Reference agent | langstage-hermes | **you are here** |
-| Shared core | [langgraph-stream-parser](https://github.com/dkedar7/langgraph-stream-parser) | typed events + config resolver behind every stage |
+| Shared core | [langstage-core](https://github.com/dkedar7/langstage-core) | typed events + config resolver behind every stage |
 
 ### Serve over AG-UI
 
-This surface's agent — any LangGraph `CompiledGraph` — can also be served over the [AG-UI protocol](https://github.com/dkedar7/langgraph-stream-parser). Install the extra and point the bundled console script at your agent spec:
+This surface's agent — any LangGraph `CompiledGraph` — can also be served over the [AG-UI protocol](https://github.com/dkedar7/langstage-core) as a standalone HTTP endpoint. Install the extra and point the bundled console script at your agent spec:
 
 ```bash
-pip install "langgraph-stream-parser[agui]"
+pip install "langstage-core[agui]"
 langstage-agui --agent langstage_hermes.agent:graph
 ```
 
