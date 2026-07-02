@@ -1,6 +1,6 @@
 """`HermesConfig` — full TOML/env-resolved configuration for ``langstage-hermes``.
 
-Extends ``langgraph_stream_parser.host.HostConfig`` so we inherit the cross-host
+Extends ``langstage_core.host.HostConfig`` so we inherit the cross-host
 ``DEEPAGENT_AGENT_SPEC`` / workspace / port / debug / title plumbing, and adds
 every Hermes-specific knob enumerated in SPEC §2 (model / agent / memory /
 skills / compression / delegation / curator / cron / plugins).
@@ -29,7 +29,7 @@ from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
 from typing import Any, ClassVar
 
-from langgraph_stream_parser.host.config import (
+from langstage_core.host.config import (
     HostConfig,
     _coerce,
     _deep_merge,

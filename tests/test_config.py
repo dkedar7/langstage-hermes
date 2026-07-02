@@ -176,7 +176,7 @@ def test_canonical_hermes_env_beats_legacy(monkeypatch):
 
 def test_legacy_hermes_env_still_works_and_warns(monkeypatch):
     """Legacy DEEPAGENT_HERMES_* still resolves, now with a DeprecationWarning."""
-    from langgraph_stream_parser.host.config import _warned_legacy_env
+    from langstage_core.host.config import _warned_legacy_env
 
     _strip_env(monkeypatch)
     _warned_legacy_env.clear()  # warn-dedup is process-global; reset for this assertion
@@ -189,7 +189,7 @@ def test_legacy_hermes_env_still_works_and_warns(monkeypatch):
 
 def test_legacy_core_env_resolves_under_hermes(monkeypatch):
     """Inherited core vars' legacy DEEPAGENT_* fallback also works under Hermes."""
-    from langgraph_stream_parser.host.config import _warned_legacy_env
+    from langstage_core.host.config import _warned_legacy_env
 
     _strip_env(monkeypatch)
     _warned_legacy_env.clear()

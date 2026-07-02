@@ -245,7 +245,7 @@ def _resolve_agent(spec: str | None = None) -> tuple[Any | None, str, str | None
     ``LANGSTAGE_AGENT_SPEC`` env var (legacy ``DEEPAGENT_AGENT_SPEC`` still works) is the host-adoption convention
     every deep-agent surface respects (cowork-dash, deepagent-code, …).
     If either is set, honour it here too: load the named callable/graph via
-    :func:`langgraph_stream_parser.load_agent_spec`. If not, fall through
+    :func:`langstage_core.load_agent_spec`. If not, fall through
     to the built-in ``create_hermes_agent`` factory.
 
     Returns:
@@ -270,7 +270,7 @@ def _resolve_agent(spec: str | None = None) -> tuple[Any | None, str, str | None
     spec = spec or os.environ.get("LANGSTAGE_AGENT_SPEC") or os.environ.get("DEEPAGENT_AGENT_SPEC")
     if spec:
         try:
-            from langgraph_stream_parser import load_agent_spec
+            from langstage_core import load_agent_spec
         except ImportError as e:
             return (
                 None,
@@ -718,12 +718,6 @@ _SLASH_HANDLERS: dict[str, Callable[[str, dict[str, Any]], bool]] = {
 # ── agent turn ─────────────────────────────────────────────────────
 
 
-def _agui_enabled() -> bool:
-    """Experimental: render via the in-process AG-UI adapter (ADR 0002/0003)."""
-    val = os.getenv("LANGSTAGE_HERMES_AGUI", os.getenv("DEEPAGENT_HERMES_AGUI", ""))
-    return val.strip().lower() in ("1", "true", "yes", "on")
-
-
 def _render_extraction_frame(frame: dict[str, Any]) -> None:
     """Frame-based twin of ``_pretty_extraction``: hermes' domain callouts, sourced
     from the core's ``extraction`` frames instead of ``ToolExtractedEvent`` objects."""
@@ -797,93 +791,11 @@ def _run_agent_turn_agui(agent: Any, user_text: str, state: dict[str, Any]) -> N
 
 
 def _run_agent_turn(agent: Any, user_text: str, state: dict[str, Any]) -> None:
-    """Send ``user_text`` through ``agent.stream(...)`` and print via the parser.
-
-    Threads the session id from REPL state so the FTS5 recorder + reflection
-    counters cohere across turns. Wraps the parser's ``PrintAdapter`` with a
-    prettifier so skill / memory / compression events surface as callouts
-    instead of raw ``extracted_type: {...}`` JSON.
-    """
-    if _agui_enabled():
-        _run_agent_turn_agui(agent, user_text, state)
-        return
-
-    try:
-        from langgraph_stream_parser import StreamParser
-        from langgraph_stream_parser.adapters import PrintAdapter
-        from langgraph_stream_parser.events import ToolExtractedEvent
-    except ImportError:
-        click.echo("(langgraph-stream-parser missing; printing raw response.)")
-        try:
-            result = agent.invoke({"messages": [{"role": "user", "content": user_text}]})
-            for msg in (result or {}).get("messages", []):
-                content = getattr(msg, "content", None) or msg.get("content", "")
-                if content:
-                    click.echo(content)
-        except Exception as e:
-            click.echo(click.style(f"Agent invoke failed: {e}", fg="red"))
-        return
-
-    parser = StreamParser()
-    adapter = PrintAdapter()
-
-    def _pretty_extraction(event: ToolExtractedEvent) -> bool:
-        """Render hermes-specific extractor events as callouts. Returns True
-        when we consumed the event so the default adapter doesn't double-print.
-        """
-        et = event.extracted_type
-        data = event.data if isinstance(event.data, dict) else {}
-        if et == "skill_event":
-            sub = data.get("extracted_subtype") or et
-            name = data.get("name") or "?"
-            verb = {
-                "skill_created": "created",
-                "skill_updated": "updated",
-                "skill_deleted": "deleted",
-            }.get(sub, sub)
-            click.echo(click.style(f"  ◆ skill {verb}: ", fg="magenta") + click.style(name, fg="bright_magenta", bold=True))
-            return True
-        if et == "skill_loaded":
-            chars = data.get("body_chars", "?")
-            click.echo(click.style(f"  ◆ skill loaded into context  ({chars} chars)", fg="magenta"))
-            return True
-        if et == "memory_updated":
-            sub = data.get("extracted_subtype") or et
-            target = data.get("target") or "?"
-            verb = {
-                "memory_added": "added",
-                "memory_replaced": "replaced",
-                "memory_removed": "removed",
-                "memory_read": "read",
-            }.get(sub, sub)
-            click.echo(click.style(f"  ◆ {target} memory {verb}", fg="cyan"))
-            return True
-        if et == "compression_summary":
-            before = data.get("before_tokens", "?")
-            after = data.get("after_tokens", "?")
-            ratio = data.get("ratio")
-            tail = f"  ({ratio:.1f}x)" if isinstance(ratio, (int, float)) else ""
-            click.echo(click.style(f"  ◆ context compressed: {before} → {after}{tail}", fg="yellow"))
-            return True
-        return False
-
-    try:
-        stream = agent.stream(
-            {
-                "messages": [{"role": "user", "content": user_text}],
-                "session_id": state.get("session_id"),
-                "model_override": state.get("model_override"),
-                "iteration_budget_remaining": state["cfg"].agent_max_iterations,
-            },
-            config={"configurable": {"thread_id": state.get("session_id")}},
-            stream_mode="updates",
-        )
-        for event in parser.parse(stream):
-            if isinstance(event, ToolExtractedEvent) and _pretty_extraction(event):
-                continue
-            adapter.handle(event)
-    except Exception as e:
-        click.echo(click.style(f"Agent stream failed: {e}", fg="red"))
+    """Stream a turn through the in-process AG-UI adapter — the only path since
+    langstage-core 1.0 retired StreamParser. hermes' four extractors ride the
+    core's ``extractors=`` param so skill / memory / compression callouts surface
+    (see :func:`_run_agent_turn_agui` and :func:`_render_extraction_frame`)."""
+    _run_agent_turn_agui(agent, user_text, state)
 
 
 # ── tools ──────────────────────────────────────────────────────────
@@ -1843,7 +1755,7 @@ def doctor() -> None:
     click.echo(f"    {'OK' if py_ok else 'FAIL'}")
 
     try:
-        import langgraph_stream_parser  # noqa: F401
+        import langstage_core  # noqa: F401
 
         click.echo("  langgraph-stream-parser: installed")
     except ImportError as e:

@@ -165,10 +165,10 @@ def test_extractors_return_none_on_unrelated_content():
 def test_deepagent_agent_spec_resolves(integration_env):
     """The DEEPAGENT_AGENT_SPEC convention: 'langstage_hermes.agent:graph' should resolve.
 
-    Hosts in the deepagent-* family use langgraph_stream_parser.host.load_agent_spec
+    Hosts in the deepagent-* family use langstage_core.host.load_agent_spec
     to load an agent. We verify the spec string maps to a usable graph.
     """
-    from langgraph_stream_parser.host import load_agent_spec
+    from langstage_core.host import load_agent_spec
 
     graph = load_agent_spec("langstage_hermes.agent:graph")
     assert hasattr(graph, "invoke")

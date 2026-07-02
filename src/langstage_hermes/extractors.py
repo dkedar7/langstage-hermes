@@ -2,13 +2,13 @@
 
 These three extractors surface langstage-hermes runtime events as typed
 ``ToolExtractedEvent``s in any host UI built on the parser. They follow the
-``langgraph_stream_parser.extractors.base.ToolExtractor`` protocol verbatim
+``langstage_core.extractors.base.ToolExtractor`` protocol verbatim
 so they can be upstreamed to the parser's built-in extractor set (target PR
 to dkedar7/langgraph-stream-parser).
 
 Until upstreamed, hosts can register them manually::
 
-    from langgraph_stream_parser import StreamParser
+    from langstage_core import StreamParser
     from langstage_hermes.extractors import (
         SkillManageExtractor, CompressionExtractor, MemoryExtractor,
     )
