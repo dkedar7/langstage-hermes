@@ -718,6 +718,84 @@ _SLASH_HANDLERS: dict[str, Callable[[str, dict[str, Any]], bool]] = {
 # ── agent turn ─────────────────────────────────────────────────────
 
 
+def _agui_enabled() -> bool:
+    """Experimental: render via the in-process AG-UI adapter (ADR 0002/0003)."""
+    val = os.getenv("LANGSTAGE_HERMES_AGUI", os.getenv("DEEPAGENT_HERMES_AGUI", ""))
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _render_extraction_frame(frame: dict[str, Any]) -> None:
+    """Frame-based twin of ``_pretty_extraction``: hermes' domain callouts, sourced
+    from the core's ``extraction`` frames instead of ``ToolExtractedEvent`` objects."""
+    et = frame.get("extracted_type")
+    data = frame.get("data") if isinstance(frame.get("data"), dict) else {}
+    if et == "skill_event":
+        sub = data.get("extracted_subtype") or et
+        name = data.get("name") or "?"
+        verb = {"skill_created": "created", "skill_updated": "updated", "skill_deleted": "deleted"}.get(sub, sub)
+        click.echo(click.style("  ◆ skill " + verb + ": ", fg="magenta") + click.style(name, fg="bright_magenta", bold=True))
+    elif et == "skill_loaded":
+        click.echo(click.style(f"  ◆ skill loaded into context  ({data.get('body_chars', '?')} chars)", fg="magenta"))
+    elif et == "memory_updated":
+        sub = data.get("extracted_subtype") or et
+        target = data.get("target") or "?"
+        verb = {"memory_added": "added", "memory_replaced": "replaced", "memory_removed": "removed", "memory_read": "read"}.get(
+            sub, sub
+        )
+        click.echo(click.style(f"  ◆ {target} memory {verb}", fg="cyan"))
+    elif et == "compression_summary":
+        before, after, ratio = data.get("before_tokens", "?"), data.get("after_tokens", "?"), data.get("ratio")
+        tail = f"  ({ratio:.1f}x)" if isinstance(ratio, (int, float)) else ""
+        click.echo(click.style(f"  ◆ context compressed: {before} → {after}{tail}", fg="yellow"))
+
+
+def _run_agent_turn_agui(agent: Any, user_text: str, state: dict[str, Any]) -> None:
+    """Experimental AG-UI render path (``LANGSTAGE_HERMES_AGUI=1``).
+
+    Drives the agent through the core's ``iter_event_frames`` with hermes' four
+    extractors wired, so the skill / memory / compression callouts surface (they
+    were dead code on the legacy path). hermes' extra input keys ride ``state=``.
+    """
+    from langstage_hermes.agui_stream import build_session_agent, stream_frames_sync
+
+    try:
+        if "_agui_agent" not in state:
+            state["_agui_agent"] = build_session_agent(agent)
+    except RuntimeError as exc:
+        click.echo(click.style(str(exc), fg="red"))
+        return
+
+    sid = state.get("session_id")
+    agui_state = {
+        "session_id": sid,
+        "model_override": state.get("model_override"),
+        "iteration_budget_remaining": state["cfg"].agent_max_iterations,
+    }
+    text_open = False
+    try:
+        for frame in stream_frames_sync(state["_agui_agent"], user_text, sid or "hermes", state=agui_state):
+            ftype = frame.get("type")
+            if ftype == "content":
+                click.echo(frame.get("content", ""), nl=False)
+                text_open = True
+                continue
+            if text_open:
+                click.echo()
+                text_open = False
+            if ftype == "tool_start":
+                click.echo(click.style(f"  ⚙ {frame.get('name', 'tool')}", fg="green"))
+            elif ftype == "extraction":
+                _render_extraction_frame(frame)
+            elif ftype == "interrupt":
+                click.echo(click.style("  ⚠ agent paused for input (not resumable on --agui yet)", fg="yellow"))
+            elif ftype == "error":
+                click.echo(click.style(f"Agent stream failed: {frame.get('error')}", fg="red"))
+        if text_open:
+            click.echo()
+    except Exception as exc:
+        click.echo(click.style(f"Agent stream failed: {exc}", fg="red"))
+
+
 def _run_agent_turn(agent: Any, user_text: str, state: dict[str, Any]) -> None:
     """Send ``user_text`` through ``agent.stream(...)`` and print via the parser.
 
@@ -726,6 +804,10 @@ def _run_agent_turn(agent: Any, user_text: str, state: dict[str, Any]) -> None:
     prettifier so skill / memory / compression events surface as callouts
     instead of raw ``extracted_type: {...}`` JSON.
     """
+    if _agui_enabled():
+        _run_agent_turn_agui(agent, user_text, state)
+        return
+
     try:
         from langgraph_stream_parser import StreamParser
         from langgraph_stream_parser.adapters import PrintAdapter

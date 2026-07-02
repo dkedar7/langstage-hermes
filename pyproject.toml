@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langstage-hermes"
-version = "0.3.12"
+version = "0.3.13"
 description = "Closed-loop reflection / skill creation agent on LangGraph + deepagents. Faithful reproduction of Nous Research's Hermes Agent."
 readme = "README.md"
 license = { text = "MIT" }
@@ -23,7 +23,7 @@ dependencies = [
     # Modernized off the stale <0.5 pin (which stranded hermes on core 0.4.x and
     # missed every 0.6.x fix: BOM-safe TOML, keyless stub, the visible legacy-env
     # deprecation notice, dict-message rendering, tool_end name). gh #-dogfood.
-    "langgraph-stream-parser>=0.6.10,<0.7",
+    "langgraph-stream-parser>=0.6.19,<0.7",
     "deepagents>=0.6",
     "langchain>=1.0",
     "langchain-anthropic>=0.3",
@@ -38,7 +38,7 @@ dependencies = [
 
 [project.optional-dependencies]
 openai = ["langchain-openai>=0.2"]
-agui = ["langgraph-stream-parser[agui]>=0.6.10,<0.7"]
+agui = ["langgraph-stream-parser[agui]>=0.6.19,<0.7"]
 daytona = ["daytona-sdk>=0.10"]
 modal = ["modal>=0.64"]
 ssh = ["paramiko>=3.0"]
@@ -51,6 +51,8 @@ dev = [
     "pytest-cov>=5.0",
     "ruff==0.15.15",
     "mypy>=1.10",
+    "ag-ui-langgraph>=0.0.41",
+    "fastapi",
 ]
 
 [project.scripts]

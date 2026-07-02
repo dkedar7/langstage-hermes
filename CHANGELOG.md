@@ -5,6 +5,23 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.13] — 2026-07-02
+
+### Added
+- **Experimental AG-UI render path (`LANGSTAGE_HERMES_AGUI=1`).** `chat` can stream
+  through the in-process `ag-ui-langgraph` adapter (via the core's
+  `agui.iter_event_frames`) instead of the built-in `StreamParser`, and hermes' four
+  tool-result extractors (skill/skill-view/compression/memory) ride the core's new
+  `extractors=` param so the domain callouts surface as `extraction` frames. hermes'
+  richer input (`session_id` / `model_override` / `iteration_budget_remaining`) rides
+  `state=`. Requires the `agui` extra. Default path untouched.
+
+### Fixed
+- **Extractor callouts were dead code.** The four extractors were defined but never
+  registered (`chat` used a bare `StreamParser()`), so skill/memory/compression
+  callouts never fired. The AG-UI path wires them via `extractors=` — they now fire
+  for the first time. (The legacy path remains unwired; it retires with the event layer.)
+
 ## [0.3.12] — 2026-06-30
 
 ### Fixed
