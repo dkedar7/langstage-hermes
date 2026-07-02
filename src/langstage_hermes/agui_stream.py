@@ -31,7 +31,7 @@ def ensure_agui_available() -> None:
     """Raise a clean, actionable error if the AG-UI adapter isn't installed."""
     try:
         import ag_ui_langgraph  # noqa: F401
-        from langgraph_stream_parser.agui import iter_event_frames  # noqa: F401
+        from langstage_core.agui import iter_event_frames  # noqa: F401
     except ImportError as e:  # pragma: no cover - only without the extra
         raise RuntimeError(_IMPORT_HINT) from e
 
@@ -39,7 +39,7 @@ def ensure_agui_available() -> None:
 def build_session_agent(graph: Any, *, name: str = "langstage-hermes") -> Any:
     """Wrap the graph once (checkpointer attached by the core bridge)."""
     ensure_agui_available()
-    from langgraph_stream_parser.agui import build_agent
+    from langstage_core.agui import build_agent
 
     return build_agent(graph, name=name)
 
@@ -54,7 +54,7 @@ def stream_frames_sync(agent, message: str, thread_id: str, *, state=None, resum
     """Sync bridge: pump ``iter_event_frames`` (with hermes' extractors wired) one
     frame at a time. hermes' turn loop is a plain sync process, so a fresh event
     loop is safe and keeps rendering lazy."""
-    from langgraph_stream_parser.agui import iter_event_frames
+    from langstage_core.agui import iter_event_frames
 
     loop = asyncio.new_event_loop()
     try:

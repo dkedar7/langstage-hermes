@@ -5,6 +5,17 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-07-02
+
+### Changed
+- **Repointed to `langstage-core` 1.0; AG-UI is now the only render path.** The
+  dependency `langgraph-stream-parser` was renamed to `langstage-core` (imports
+  `langstage_core`), and its event layer was retired. `chat` now always streams
+  through the in-process AG-UI adapter (previously behind `LANGSTAGE_HERMES_AGUI`);
+  the four extractors ride the core's `extractors=` param, so the skill / memory /
+  compression callouts are on by default. The StreamParser fallback + the env toggle
+  are gone.
+
 ## [0.3.13] — 2026-07-02
 
 ### Added
