@@ -5,6 +5,15 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-07-02
+
+### Fixed
+- **Bare `pip install langstage-hermes` couldn't run a turn.** 0.4.0 made AG-UI the
+  only render path but left the AG-UI runtime (`ag-ui-langgraph[fastapi]`) in the
+  optional `[agui]` extra, so a default install hit an ImportError on the first
+  message. The runtime is now a base dependency (via `langstage-core[agui]`); the
+  `[agui]` extra is a redundant no-op alias.
+
 ## [0.4.0] — 2026-07-02
 
 ### Changed
