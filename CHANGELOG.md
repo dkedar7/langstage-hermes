@@ -2,6 +2,20 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.4] - 2026-07-03
+
+### Fixed
+- **`chat` now roots the agent at the resolved workspace, not the launch dir
+  (ADR 0005).** The `chat` path built the factory as `create_hermes_agent(cfg)`
+  without forwarding a workspace, so a resolved `--workspace` / `langstage-hermes.toml`
+  / env `workspace_root` was silently dropped and the agent's filesystem operated in
+  the launch cwd (only `verify` forwarded it). `chat` now calls
+  `core.apply_workspace(cfg.workspace_root)` before building, and the factory
+  defaults its workspace to `core.workspace_root()` instead of `cwd` — so the
+  resolved root reaches the agent's `FilesystemBackend`. A standalone
+  `create_hermes_agent()` is unchanged (`workspace_root()` falls back to cwd). The
+  chat header now shows the actual resolved workspace. Requires `langstage-core>=1.0.7`.
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 

@@ -31,6 +31,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from langstage_core import workspace_root
+
 from langstage_hermes.budget import IterationBudgetMiddleware
 from langstage_hermes.caching import AnthropicCachingS3Middleware
 from langstage_hermes.compression import HermesCompressionMiddleware
@@ -162,7 +164,12 @@ def create_hermes_agent(
 
     cfg = config or HermesConfig.resolve()
     sid = session_id or f"sess-{uuid.uuid4().hex[:12]}"
-    ws = Path(workspace).resolve() if workspace else Path.cwd()
+    # An explicit workspace wins; otherwise fall back to the shared source of truth
+    # (ADR 0005) rather than raw cwd — so a caller that ran apply_workspace() (the
+    # chat path does) gets the resolved --workspace/toml/env root, not the launch
+    # dir. workspace_root() itself falls back to cwd when nothing was applied, so a
+    # standalone create_hermes_agent() is unchanged.
+    ws = Path(workspace).resolve() if workspace else workspace_root()
 
     # ── shared resources ─────────────────────────────────────────────────
     db_path = cfg.hermes_home / "state.db"

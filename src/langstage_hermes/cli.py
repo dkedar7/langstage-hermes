@@ -373,6 +373,16 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
 
         cfg = HermesConfig.resolve(overrides=overrides)
 
+    # Apply the resolved workspace as the shared source of truth (ADR 0005) BEFORE
+    # building the agent. The built-in factory reads workspace_root() when no explicit
+    # workspace is passed, so this roots the agent at --workspace/toml/env instead of
+    # the launch cwd the chat path silently used before (verify already forwarded it).
+    # No chdir — hermes roots via its FilesystemBackend, and a user spec must still
+    # load against the invocation cwd.
+    from langstage_core import apply_workspace, workspace_root
+
+    apply_workspace(cfg.workspace_root)
+
     # Spec target may itself be a graph (use as-is) or a callable
     # (factory we should invoke). The built-in path is always a factory.
     # Distinguish: graphs expose ``.invoke``; callables don't (until
@@ -409,7 +419,7 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
     _print_banner(tagline="chat | type /help for commands, /quit to exit")
     _print_chat_context(
         cfg=cfg,
-        workspace=workspace or os.getcwd(),
+        workspace=str(workspace_root()),  # the resolved root the agent actually uses
         session_id=session_id,
         agent=target,
         agent_source=source,
