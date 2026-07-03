@@ -154,11 +154,11 @@ def create_hermes_agent(
 
     Returns:
         A compiled LangGraph ``CompiledStateGraph`` ready for ``.invoke()`` /
-        ``.stream()``. The graph carries a SQLite checkpointer and FTS5 store
-        rooted at ``<HERMES_HOME>/state.db``.
+        ``.stream()``. The graph carries an in-memory checkpointer and an FTS5
+        store rooted at ``<HERMES_HOME>/state.db``.
     """
     from langchain.agents import create_agent
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    from langgraph.checkpoint.memory import InMemorySaver
 
     cfg = config or HermesConfig.resolve()
     sid = session_id or f"sess-{uuid.uuid4().hex[:12]}"
@@ -333,15 +333,18 @@ def create_hermes_agent(
         middleware.extend(extra_middleware)
 
     # ── checkpointer ─────────────────────────────────────────────────────
-    # Shares the state.db file with the FTS store (disjoint table namespaces).
-    # We hold a long-lived connection ourselves rather than using
-    # ``SqliteSaver.from_conn_string`` (which is a context manager and would
-    # close the connection on GC of the temporary). ``check_same_thread=False``
-    # lets the graph stream from a different thread than the constructor.
-    import sqlite3
-
-    saver_conn = sqlite3.connect(str(db_path), check_same_thread=False)
-    checkpointer = SqliteSaver(saver_conn)
+    # In-memory, NOT the sync SqliteSaver: since langstage-core 1.0 (ADR 0003) the
+    # host renders every turn through the in-process AG-UI adapter, which drives the
+    # graph *asynchronously*. ``SqliteSaver`` has no async methods ("SqliteSaver
+    # does not support async methods"), so it crashed chat on the first message
+    # (gh #43). hermes' turn loop opens a fresh event loop per turn
+    # (``agui_stream.stream_frames_sync``), which also rules out a long-lived
+    # loop-bound ``AsyncSqliteSaver``. ``InMemorySaver`` is async-safe and
+    # loop-agnostic, and persists conversation/interrupt state across turns within a
+    # chat session. (Durable cross-restart checkpointing is a follow-up; hermes'
+    # substantive memory lives in its own FTS5 store + memory snapshots, not the
+    # LangGraph checkpointer.)
+    checkpointer = InMemorySaver()
 
     # ── compile ──────────────────────────────────────────────────────────
     # System prompt is set by PromptAssemblyMiddleware via wrap_model_call,
@@ -361,8 +364,6 @@ def create_hermes_agent(
     compiled.langstage_hermes_store = store  # type: ignore[attr-defined]
     compiled.langstage_hermes_library = library  # type: ignore[attr-defined]
     compiled.langstage_hermes_provider = provider  # type: ignore[attr-defined]
-    # Keep the checkpointer connection alive for the lifetime of the graph.
-    compiled._langstage_hermes_saver_conn = saver_conn  # type: ignore[attr-defined]
 
     return compiled
 

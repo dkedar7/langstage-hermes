@@ -37,11 +37,18 @@ def ensure_agui_available() -> None:
 
 
 def build_session_agent(graph: Any, *, name: str = "langstage-hermes") -> Any:
-    """Wrap the graph once (checkpointer attached by the core bridge)."""
+    """Wrap the graph once (checkpointer attached by the core bridge).
+
+    Forward the graph's baked-in ``RunnableConfig`` to the AG-UI adapter. hermes
+    compiles with ``.with_config(recursion_limit=1000)`` because its multi-middleware
+    graph burns well past the default 25 super-steps per turn; the AG-UI adapter
+    builds its own run config and drops the graph's ``.with_config`` value, so a
+    normal tool-using turn otherwise dies with "Recursion limit of 25 reached"."""
     ensure_agui_available()
     from langstage_core.agui import build_agent
 
-    return build_agent(graph, name=name)
+    config = getattr(graph, "config", None) or None
+    return build_agent(graph, name=name, config=config)
 
 
 def _extractors() -> list:
