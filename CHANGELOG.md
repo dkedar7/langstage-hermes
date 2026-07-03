@@ -5,6 +5,32 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] — 2026-07-02
+
+### Fixed
+- **`chat` crashed on every message (gh #43).** The 0.4.0 AG-UI migration made the
+  host drive the graph *asynchronously* (`astream`), but three parts of hermes were
+  sync-only and had never been exercised through a real turn:
+  1. **Checkpointer** — the graph used the sync `SqliteSaver`, which has no async
+     methods (`"SqliteSaver does not support async methods"`). Switched to
+     `InMemorySaver` (async-safe + loop-agnostic; hermes' turn loop opens a fresh
+     event loop per turn, which rules out a long-lived `AsyncSqliteSaver`).
+     Conversation/interrupt state still persists across turns within a session;
+     hermes' durable memory (FTS5 store + snapshots) is unaffected. Durable
+     cross-restart checkpointing is a follow-up.
+  2. **Middleware** — `SkillLoaderMiddleware` defined only sync `wrap_model_call`,
+     so the async path failed with `"awrap_model_call is not available"`. Added the
+     async pair (the caching / prompt / event-bus middleware already had theirs).
+     A new structural test asserts every model-call middleware has the async pair.
+  3. **Recursion limit** — hermes compiles with `.with_config(recursion_limit=1000)`
+     (its multi-middleware graph burns past the default 25 per turn), but the AG-UI
+     adapter built its own run config and dropped it, so a normal tool-using turn
+     died with `"Recursion limit of 25 reached"`. `build_session_agent` now forwards
+     the graph's config to the adapter.
+
+  Verified end-to-end against a live model: a plain reply and a multi-step
+  tool-using turn (write a file → confirm) both complete cleanly.
+
 ## [0.4.1] — 2026-07-02
 
 ### Fixed

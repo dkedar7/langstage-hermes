@@ -87,6 +87,24 @@ class SkillLoaderMiddleware(AgentMiddleware):
             request = request.override(system_prompt=joined)
         return handler(request)
 
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Any],
+    ) -> Any:
+        """Async mirror of :meth:`wrap_model_call`. The skills block is built
+        synchronously (local library + state), so only the handler is awaited.
+        Required because the AG-UI host drives the graph via ``astream`` since
+        langstage-core 1.0 (ADR 0003) — without it, chat crashed on the first
+        message with "Asynchronous implementation of awrap_model_call is not
+        available"."""
+        addition = self._build_addition(request)
+        if addition:
+            base = request.system_prompt or ""
+            joined = (base + "\n\n" + addition).strip() if base else addition
+            request = request.override(system_prompt=joined)
+        return await handler(request)
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
