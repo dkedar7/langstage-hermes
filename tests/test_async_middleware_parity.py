@@ -9,6 +9,7 @@ implementation of awrap_model_call is not available" (gh #43).
 This structural test catches a new (or edited) middleware that forgets the async
 pair — the exact regression that shipped hermes 0.4.0/0.4.1 with a broken chat.
 """
+
 import inspect
 
 import pytest
@@ -36,6 +37,4 @@ def test_wrap_model_call_has_async_pair(cls):
         f"{cls.__name__} defines wrap_model_call but not awrap_model_call — the AG-UI "
         "host drives the graph via astream and will crash chat on the first message (gh #43)"
     )
-    assert inspect.iscoroutinefunction(cls.awrap_model_call), (
-        f"{cls.__name__}.awrap_model_call must be `async def`"
-    )
+    assert inspect.iscoroutinefunction(cls.awrap_model_call), f"{cls.__name__}.awrap_model_call must be `async def`"
