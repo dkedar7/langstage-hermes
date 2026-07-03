@@ -275,7 +275,7 @@ def _resolve_agent(spec: str | None = None) -> tuple[Any | None, str, str | None
             return (
                 None,
                 "spec",
-                (f"agent spec {spec!r} is set but langgraph-stream-parser is not installed (or load_agent_spec is missing): {e}"),
+                (f"agent spec {spec!r} is set but langstage-core is not installed (or load_agent_spec is missing): {e}"),
             )
         try:
             target = load_agent_spec(spec)
@@ -1757,9 +1757,9 @@ def doctor() -> None:
     try:
         import langstage_core  # noqa: F401
 
-        click.echo("  langgraph-stream-parser: installed")
+        click.echo("  langstage-core: installed")
     except ImportError as e:
-        click.echo(f"  langgraph-stream-parser: MISSING ({e})")
+        click.echo(f"  langstage-core: MISSING ({e})")
 
     # Check the key the CONFIGURED model actually needs — not a hardcoded
     # ANTHROPIC_API_KEY. Mirrors verify's provider-aware gate so the two

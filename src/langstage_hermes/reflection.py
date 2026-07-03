@@ -16,7 +16,7 @@ snapshot plus a review prompt and decides whether anything is worth saving.
 
 This is decision (B) in SPEC §9: subagent-native spawning rather than a
 ``threading.Thread``. The win is observability — events flow through the
-``langgraph-stream-parser`` event stream so hosts can surface
+``langstage-core`` event stream so hosts can surface
 "skill updated: pdf-merging" inline. The cost is that the review runs
 **synchronously** in v1: the user waits for it before the next turn. v2 can
 move to a background thread once we have a sturdier event bus.

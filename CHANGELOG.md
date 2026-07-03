@@ -5,6 +5,14 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] — 2026-07-03
+
+### Fixed
+- **`doctor` reported "langgraph-stream-parser: installed" (gh #49)** — a retired
+  package name. The check imports the renamed `langstage_core`, so the label now
+  reads `langstage-core`. Also scrubbed the remaining `langgraph-stream-parser`
+  mentions from the agent-spec error message and internal docstrings.
+
 ## [0.4.2] — 2026-07-02
 
 ### Fixed
