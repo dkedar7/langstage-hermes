@@ -2,6 +2,16 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.5] - 2026-07-04
+
+### Fixed
+- **`skills list`/`show`/`audit` now search `config.skills.external_dirs` (gh #52).**
+  The CLI's `_skill_library` hardcoded `[bundled, hermes_home/skills, project]` and
+  never added `cfg.skills_external_dirs`, while the runtime agent (`_default_skill_dirs`)
+  does — so `audit`, a validation gate, silently skipped external skills and reported a
+  false green for ones the agent will happily load. `_skill_library` now appends the
+  configured external dirs too, matching the runtime resolution.
+
 ## [0.4.4] - 2026-07-03
 
 ### Fixed

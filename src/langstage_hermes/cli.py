@@ -873,7 +873,7 @@ def _skill_library(*, with_audit: bool = True) -> Any:
     commands (``list``, ``show``) pass ``with_audit=False`` to skip
     SQLite startup.
     """
-    from langstage_hermes.config import hermes_home
+    from langstage_hermes.config import HermesConfig, hermes_home
     from langstage_hermes.skills.library import SkillLibrary
 
     dirs: list[Path] = []
@@ -884,6 +884,12 @@ def _skill_library(*, with_audit: bool = True) -> Any:
     project = Path.cwd() / ".langstage-hermes" / "skills"
     if project.is_dir():
         dirs.append(project)
+    # config.skills.external_dirs — a first-class discovery source (SPEC §10.2) that
+    # the runtime agent loads (agent.py::_default_skill_dirs). list/show/audit must
+    # search them too, or `audit` (a validation gate) reports a false green for
+    # external skills the agent will happily load. Kept in sync with _default_skill_dirs.
+    for extra in HermesConfig.resolve().skills_external_dirs:
+        dirs.append(Path(extra).expanduser())
     audit_log = None
     if with_audit:
         from langstage_hermes.skills.audit import SkillAuditLog

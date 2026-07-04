@@ -258,3 +258,18 @@ def test_empty_dir_returns_no_skills(tmp_hermes_home, lib):
 def test_missing_dir_tolerated(tmp_path):
     lib = SkillLibrary(dirs=[tmp_path / "does-not-exist"])
     assert lib.list() == []
+
+
+def test_cli_skill_library_includes_external_dirs(tmp_hermes_home, tmp_path, monkeypatch):
+    """gh #52: a valid skill in config.skills.external_dirs must be discoverable by
+    the CLI's _skill_library (list/show/audit), not just the runtime agent — else
+    `audit` reports a false green for a skill the agent will happily load."""
+    monkeypatch.delenv("DEEPAGENT_HERMES_SKILLS_EXTERNAL_DIRS", raising=False)
+    ext = tmp_path / "ext"
+    _write_skill(ext, name="cool-external-skill", description="Lives in an external dir.")
+    monkeypatch.setenv("LANGSTAGE_HERMES_SKILLS_EXTERNAL_DIRS", str(ext))
+
+    from langstage_hermes.cli import _skill_library
+
+    lib = _skill_library(with_audit=False)
+    assert "cool-external-skill" in [s.name for s in lib.list()]
