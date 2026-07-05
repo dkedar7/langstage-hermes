@@ -2,6 +2,18 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.6] - 2026-07-05
+
+### Fixed
+- **`--show-config` now attributes each value to the file it actually came from
+  (gh #55).** With a global `~/.langstage-hermes/config.toml` and a project
+  `langstage-hermes.toml` both present, every TOML-resolved field was labeled with the
+  *last file read* (`langstage-hermes.toml`) — so a value living only in the global
+  config was misreported as coming from the project file, defeating the whole point of
+  `--show-config` (telling you where a value came from). It now names the
+  highest-precedence file that actually sets each key. Runtime resolution was already
+  correct; this was a diagnostic-label bug only.
+
 ## [0.4.5] - 2026-07-04
 
 ### Fixed
