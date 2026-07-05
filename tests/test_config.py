@@ -233,16 +233,12 @@ def test_show_config_attributes_value_to_the_file_it_came_from(monkeypatch, tmp_
     global_home.mkdir(parents=True)
     monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(global_home))
     # model.default lives ONLY in the global config.toml:
-    (global_home / "config.toml").write_text(
-        '[model]\ndefault = "openai:FROM_GLOBAL_CONFIG"\n', encoding="utf-8"
-    )
+    (global_home / "config.toml").write_text('[model]\ndefault = "openai:FROM_GLOBAL_CONFIG"\n', encoding="utf-8")
     # the project TOML exists but sets a DIFFERENT key (model.aux_model):
     proj = tmp_path / "proj"
     proj.mkdir()
     monkeypatch.chdir(proj)
-    (proj / "langstage-hermes.toml").write_text(
-        '[model]\naux_model = "openai:FROM_PROJECT"\n', encoding="utf-8"
-    )
+    (proj / "langstage-hermes.toml").write_text('[model]\naux_model = "openai:FROM_PROJECT"\n', encoding="utf-8")
 
     cfg = HermesConfig.resolve(toml_start=proj)
     # runtime resolution is correct either way...
