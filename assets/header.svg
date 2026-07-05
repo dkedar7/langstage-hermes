@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" role="img" aria-label="deepagent-hermes — closed-loop reflection and skill creation on LangGraph + deepagents">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="340" viewBox="0 0 1280 340" role="img" aria-label="langstage-hermes — closed-loop reflection and skill creation on LangGraph + deepagents">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#0B1221"/>
@@ -25,10 +25,10 @@
   <rect x="1" y="1" width="1278" height="338" rx="19" fill="none" stroke="#26284A" stroke-width="1.5"/>
 
   <!-- ===== left: identity ===== -->
-  <text x="70" y="148" font-family="'SF Mono','JetBrains Mono','Consolas',monospace" font-size="56" font-weight="700" fill="#F2F6FC" letter-spacing="-1.5">deepagent-<tspan fill="url(#accent)">hermes</tspan></text>
+  <text x="70" y="148" font-family="'SF Mono','JetBrains Mono','Consolas',monospace" font-size="56" font-weight="700" fill="#F2F6FC" letter-spacing="-1.5">langstage-<tspan fill="url(#accent)">hermes</tspan></text>
 
   <text x="72" y="194" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="22" fill="#A6AECB">Reflection &amp; skill creation that compound across sessions.</text>
-  <text x="72" y="224" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="22" fill="#A6AECB">Built on LangGraph, deepagents, langgraph-stream-parser.</text>
+  <text x="72" y="224" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="22" fill="#A6AECB">Built on LangGraph, deepagents, langstage-core.</text>
 
   <g font-family="'SF Mono','JetBrains Mono','Consolas',monospace" font-size="13" fill="#7C7FA6">
     <text x="72" y="278">reflection</text>
