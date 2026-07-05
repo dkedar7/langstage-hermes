@@ -115,6 +115,37 @@ def load_hermes_toml_config(start: Path | None = None) -> tuple[dict, list[Path]
     return merged, sources
 
 
+def _parse_toml_files(paths: list[Path]) -> list[tuple[Path, dict]]:
+    """Parse each TOML path once, keeping per-file dicts (ascending precedence).
+
+    ``load_*_toml_config`` deep-merge the stack into one dict, which loses which
+    file supplied which key — so a value that lives only in the global
+    ``config.toml`` can't be told apart from a project override. Keeping the
+    per-file dicts lets ``--show-config`` attribute a value to its real origin. (gh #55)
+    """
+    parsed: list[tuple[Path, dict]] = []
+    for p in paths:
+        try:
+            parsed.append((p, _read_toml(p)))
+        except Exception:  # pragma: no cover - loader already skipped malformed files
+            continue
+    return parsed
+
+
+def _toml_source_label(parsed: list[tuple[Path, dict]], tkey: str) -> str:
+    """Name the HIGHEST-precedence parsed file that actually sets ``tkey``.
+
+    ``parsed`` is in ascending precedence, so the last file containing the key is
+    the one whose value wins the merge — that's the file to attribute it to,
+    instead of unconditionally the last file *read* (the gh #55 mislabel).
+    """
+    winner: Path | None = None
+    for p, data in parsed:
+        if _get_dotted(data, tkey) is not None:
+            winner = p
+    return f"toml ({winner.name})" if winner is not None else "toml"
+
+
 # ── Field casters ────────────────────────────────────────────────────
 
 
@@ -387,6 +418,10 @@ class HermesConfig(HostConfig):
         base_toml_data, base_toml_paths = load_toml_config(toml_start) if use_toml else ({}, [])
         # Layer 3: hermes-specific TOML.
         hermes_toml_data, hermes_toml_paths = load_hermes_toml_config(toml_start) if use_toml else ({}, [])
+        # Per-file parses so a field's source names the file it actually came from,
+        # not just the last file read across a layered global+project stack (gh #55).
+        base_toml_parsed = _parse_toml_files(base_toml_paths)
+        hermes_toml_parsed = _parse_toml_files(hermes_toml_paths)
 
         env_map = cls._env_map()
         toml_map = cls._toml_map()
@@ -411,11 +446,11 @@ class HermesConfig(HostConfig):
                 tv = _get_dotted(base_toml_data, tkey)
                 if tv is not None:
                     val = _coerce(f, tv)
-                    src = f"toml ({base_toml_paths[-1].name})" if base_toml_paths else "toml"
+                    src = _toml_source_label(base_toml_parsed, tkey)
                 tv2 = _get_dotted(hermes_toml_data, tkey)
                 if tv2 is not None:
                     val = _coerce(f, tv2)
-                    src = f"toml ({hermes_toml_paths[-1].name})" if hermes_toml_paths else "toml"
+                    src = _toml_source_label(hermes_toml_parsed, tkey)
 
             if name in env_map:
                 var, caster = env_map[name]

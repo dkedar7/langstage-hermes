@@ -222,6 +222,34 @@ def test_project_toml_overrides_defaults(monkeypatch, tmp_path):
     assert "langstage-hermes.toml" in cfg.sources["skills_creation_nudge_interval"]
 
 
+def test_show_config_attributes_value_to_the_file_it_came_from(monkeypatch, tmp_path):
+    """gh #55: with a global config.toml AND a project langstage-hermes.toml layered,
+    each field's source must name the file the value actually came from — not just the
+    last file read. A value living only in the global config was mislabeled as the
+    project file, misleading anyone debugging "where is this set?".
+    """
+    _strip_env(monkeypatch)
+    global_home = tmp_path / "home" / ".langstage-hermes"
+    global_home.mkdir(parents=True)
+    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(global_home))
+    # model.default lives ONLY in the global config.toml:
+    (global_home / "config.toml").write_text('[model]\ndefault = "openai:FROM_GLOBAL_CONFIG"\n', encoding="utf-8")
+    # the project TOML exists but sets a DIFFERENT key (model.aux_model):
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    monkeypatch.chdir(proj)
+    (proj / "langstage-hermes.toml").write_text('[model]\naux_model = "openai:FROM_PROJECT"\n', encoding="utf-8")
+
+    cfg = HermesConfig.resolve(toml_start=proj)
+    # runtime resolution is correct either way...
+    assert cfg.model_default == "openai:FROM_GLOBAL_CONFIG"
+    assert cfg.model_aux == "openai:FROM_PROJECT"
+    # ...and now the source label points at the real origin file, not paths[-1].
+    assert "config.toml" in cfg.sources["model_default"]
+    assert "langstage-hermes.toml" not in cfg.sources["model_default"]
+    assert "langstage-hermes.toml" in cfg.sources["model_aux"]
+
+
 def test_env_beats_toml(monkeypatch, tmp_path):
     monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "no_global"))
     monkeypatch.setenv("DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL", "99")
