@@ -250,6 +250,42 @@ def test_show_config_attributes_value_to_the_file_it_came_from(monkeypatch, tmp_
     assert "langstage-hermes.toml" in cfg.sources["model_aux"]
 
 
+def test_show_config_names_the_resolved_global_path_under_custom_hermes_home(monkeypatch, tmp_path):
+    """gh #57: the global config lives at $HERMES_HOME/config.toml and moves with a
+    custom HERMES_HOME — but the --show-config diagnostic hardcoded
+    ~/.langstage-hermes/config.toml, misdirecting anyone who set a custom home. The
+    diagnostic must name the RESOLVED path.
+    """
+    _strip_env(monkeypatch)
+    hermes_home = tmp_path / "custom_home"
+    hermes_home.mkdir()
+    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(hermes_home))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    monkeypatch.chdir(proj)  # no project or global config -> "no config found" line
+
+    desc = HermesConfig.resolve(toml_start=proj).describe()
+    line = next(ln for ln in desc.splitlines() if "no config found" in ln)
+    assert str(hermes_home / "config.toml") in line  # the real path
+    assert "~/.langstage-hermes/config.toml" not in line  # not the hardcoded default
+
+
+def test_global_config_at_hermes_home_is_honored(monkeypatch, tmp_path):
+    """gh #57 control: a global config placed at $HERMES_HOME/config.toml loads."""
+    _strip_env(monkeypatch)
+    hermes_home = tmp_path / "custom_home"
+    hermes_home.mkdir()
+    (hermes_home / "config.toml").write_text('[model]\ndefault = "openai:FROM-CUSTOM-HOME"\n', encoding="utf-8")
+    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(hermes_home))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    monkeypatch.chdir(proj)
+
+    cfg = HermesConfig.resolve(toml_start=proj)
+    assert cfg.model_default == "openai:FROM-CUSTOM-HOME"
+    assert "config.toml" in cfg.sources["model_default"]
+
+
 def test_env_beats_toml(monkeypatch, tmp_path):
     monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "no_global"))
     monkeypatch.setenv("DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL", "99")

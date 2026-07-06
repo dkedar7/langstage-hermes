@@ -7,8 +7,12 @@ skills / compression / delegation / curator / cron / plugins).
 
 Resolution chain (lowest to highest precedence):
 
-    defaults  <  ~/.langstage-hermes/config.toml  <  ./langstage-hermes.toml
-              <  LANGSTAGE_HERMES_* env vars      <  explicit overrides
+    defaults  <  $HERMES_HOME/config.toml  <  ./langstage-hermes.toml
+              <  LANGSTAGE_HERMES_* env vars  <  explicit overrides
+
+(The global config lives under ``HERMES_HOME`` — ``$HERMES_HOME/config.toml``,
+default ``~/.langstage-hermes/config.toml`` — so it moves with a custom
+``HERMES_HOME`` rather than staying at the default path.)
 
 (The legacy ``DEEPAGENT_HERMES_*`` spelling still resolves as a fallback and
 emits a ``DeprecationWarning``; the canonical ``LANGSTAGE_HERMES_*`` wins.)
@@ -43,6 +47,9 @@ from langstage_core.host.config import (
 
 # ── Hermes TOML locations ────────────────────────────────────────────
 
+# The global config's DEFAULT location. The *effective* path honors HERMES_HOME —
+# it is `hermes_home() / "config.toml"` (see `_hermes_global_toml_path`), so it moves
+# with a custom HERMES_HOME; this constant only names where it lives by default.
 HERMES_GLOBAL_TOML = Path.home() / ".langstage-hermes" / "config.toml"
 HERMES_PROJECT_TOML = "langstage-hermes.toml"
 # Pre-rename locations, still honoured. The legacy home dir keeps winning for
@@ -403,7 +410,8 @@ class HermesConfig(HostConfig):
         Layers (lowest precedence first):
           1. Dataclass defaults (SPEC §2 verbatim)
           2. ``deepagents.toml`` (cross-host shared keys only — base behavior)
-          3. ``~/.langstage-hermes/config.toml`` then ``./langstage-hermes.toml``
+          3. ``$HERMES_HOME/config.toml`` (default ``~/.langstage-hermes/config.toml``;
+             moves with a custom ``HERMES_HOME``) then ``./langstage-hermes.toml``
           4. ``LANGSTAGE_*`` (core) and ``LANGSTAGE_HERMES_*`` (this class) env
              vars — the legacy ``DEEPAGENT_*`` spellings still resolve as a
              fallback (canonical wins) and warn.
@@ -489,12 +497,18 @@ class HermesConfig(HostConfig):
         order Hermes actually uses — leading with the documented
         ``langstage-hermes.toml`` (the base message only named the cross-host
         ``langstage.toml``/``deepagents.toml``). (gh #-dogfood)
+
+        The global path is shown as the *resolved* ``$HERMES_HOME/config.toml`` —
+        NOT a hardcoded ``~/.langstage-hermes/config.toml`` — because the global
+        config lives under ``HERMES_HOME`` and moves with it. Printing the fixed
+        default misdirected anyone who set a custom ``HERMES_HOME`` to the wrong
+        path (gh #57).
         """
         text = super().describe()
+        global_toml = _hermes_global_toml_path()
         return text.replace(
             "TOML: no langstage.toml (or legacy deepagents.toml) found",
-            "TOML: no config found (looked for ./langstage-hermes.toml, "
-            "~/.langstage-hermes/config.toml, ./langstage.toml, ./deepagents.toml)",
+            f"TOML: no config found (looked for ./langstage-hermes.toml, {global_toml}, ./langstage.toml, ./deepagents.toml)",
         )
 
 
