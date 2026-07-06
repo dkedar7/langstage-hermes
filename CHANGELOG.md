@@ -2,6 +2,19 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.7] - 2026-07-06
+
+### Fixed
+- **`--show-config` now names the *resolved* global config path, so it doesn't
+  misdirect under a custom `HERMES_HOME` (gh #57).** The global config lives at
+  `$HERMES_HOME/config.toml` and moves with `HERMES_HOME` — but the "no config found"
+  diagnostic (and the docs) hardcoded `~/.langstage-hermes/config.toml`. A user who set a
+  custom `HERMES_HOME` and placed their global config at the *documented* path found it
+  silently ignored, while `--show-config` claimed it looked at `~/.langstage-hermes` — which
+  it did not. The diagnostic now prints the real `$HERMES_HOME/config.toml`; the README and
+  docstrings state that the global config moves with `HERMES_HOME`. (Resolution itself was
+  already correct — config placed at `$HERMES_HOME/config.toml` always loaded.)
+
 ## [0.4.6] - 2026-07-05
 
 ### Fixed
