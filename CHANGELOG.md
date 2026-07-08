@@ -2,7 +2,17 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
-## [0.4.8] - 2026-07-07
+## [0.4.9] - 2026-07-08
+
+### Fixed
+- **`--show-config` no longer reports a malformed `langstage-hermes.toml` as "TOML read
+  from: <it>", and its warning prints once (gh #61).** A `langstage-hermes.toml` with a
+  syntax error is correctly ignored (config falls back to env + defaults), but `--show-config`
+  still listed the file as read — contradicting its own "ignoring malformed config" note —
+  and the note printed twice (the loader plus the source-labeling re-read each warned). The
+  underlying `_read_toml` fix landed in **langstage-core 1.0.13** (now the minimum pin, which
+  records malformed paths + dedupes the warning); `load_hermes_toml_config` now skips listing
+  a malformed file too.
 
 ### Fixed
 - **The `/compress` REPL command actually compresses now, instead of a stub (gh #59).**

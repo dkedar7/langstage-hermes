@@ -286,6 +286,29 @@ def test_global_config_at_hermes_home_is_honored(monkeypatch, tmp_path):
     assert "config.toml" in cfg.sources["model_default"]
 
 
+def test_malformed_hermes_toml_not_listed_as_read_and_warns_once(monkeypatch, tmp_path, capsys):
+    # gh #61: a malformed langstage-hermes.toml was appended to the describe() footer
+    # ("TOML read from: <it>") despite being ignored, and the warning printed twice.
+    import langstage_core.host.config as core_config
+
+    _strip_env(monkeypatch)
+    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "no_home"))
+    p = tmp_path / "langstage-hermes.toml"
+    p.write_text('[model]\ndefault = "openai:x"\n[oops\n', encoding="utf-8")  # malformed line 3
+    core_config._malformed_toml.discard(str(p))
+    core_config._warned_malformed_toml.discard(str(p))
+    monkeypatch.chdir(tmp_path)
+
+    desc = HermesConfig.resolve(toml_start=tmp_path).describe()
+
+    # the ignored file must not be reported as read...
+    assert "TOML read from" not in desc or str(p) not in desc
+    # ...and its value must not have applied (proof it was rejected)...
+    assert HermesConfig.resolve(toml_start=tmp_path).model_default == "anthropic:claude-sonnet-4-6"
+    # ...and the malformed note printed exactly once.
+    assert capsys.readouterr().err.count("ignoring malformed config") == 1
+
+
 def test_env_beats_toml(monkeypatch, tmp_path):
     monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "no_global"))
     monkeypatch.setenv("DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL", "99")
