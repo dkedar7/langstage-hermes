@@ -491,7 +491,7 @@ class HermesConfig(HostConfig):
         obj._toml_paths = base_toml_paths + hermes_toml_paths  # type: ignore[attr-defined]
         return obj
 
-    def describe(self) -> str:
+    def describe(self, omit_keys: list[str] | None = None, configurable: dict | None = None) -> str:
         """Like the base dump, but the 'no TOML found' line lists the search
         order Hermes actually uses — leading with the documented
         ``langstage-hermes.toml`` (the base message only named the cross-host
@@ -502,8 +502,12 @@ class HermesConfig(HostConfig):
         config lives under ``HERMES_HOME`` and moves with it. Printing the fixed
         default misdirected anyone who set a custom ``HERMES_HOME`` to the wrong
         path (gh #57).
+
+        ``omit_keys`` / ``configurable`` are forwarded to the base renderer so this
+        override doesn't silently drop them — the whole diagnostic still comes from the
+        single ``HostConfig.describe`` (config-diagnostic consolidation).
         """
-        text = super().describe()
+        text = super().describe(omit_keys=omit_keys, configurable=configurable)
         global_toml = _hermes_global_toml_path()
         return text.replace(
             "TOML: no langstage.toml (or legacy deepagents.toml) found",

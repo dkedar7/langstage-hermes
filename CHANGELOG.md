@@ -2,7 +2,16 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
-## [0.4.9] - 2026-07-08
+## [0.4.10] - 2026-07-08
+
+### Changed
+- **`--show-config` and the REPL `/config` are locked to the single config renderer
+  (config-diagnostic consolidation).** Both already called `cfg.describe()`, but the
+  `HermesConfig.describe()` override silently dropped the new `omit_keys` / `configurable`
+  arguments; it now forwards them to the base renderer (**langstage-core 1.0.14**, now the
+  minimum pin), and a parity test asserts the REPL `/config` renders byte-for-byte what
+  `--show-config` prints — so the two config views can't drift, closing the seam behind the
+  recurring `--show-config` bugs (#55/#57/#61).
 
 ### Fixed
 - **`--show-config` no longer reports a malformed `langstage-hermes.toml` as "TOML read
