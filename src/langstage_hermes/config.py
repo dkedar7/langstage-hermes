@@ -40,6 +40,7 @@ from langstage_core.host.config import (
     _env_bool,
     _env_pair,
     _get_dotted,
+    _malformed_toml,
     _read_toml,
     _warn_legacy_env,
     load_toml_config,
@@ -107,18 +108,16 @@ def load_hermes_toml_config(start: Path | None = None) -> tuple[dict, list[Path]
     merged: dict = {}
     gpath = _hermes_global_toml_path()
     if gpath.is_file():
-        try:
-            merged = _deep_merge(merged, _read_toml(gpath))
+        merged = _deep_merge(merged, _read_toml(gpath))
+        # _read_toml catches a TOMLDecodeError, returns {}, and records the path as
+        # malformed — so don't list an ignored file as read (the gh #61 mislabel).
+        if str(gpath) not in _malformed_toml:
             sources.append(gpath)
-        except Exception:  # pragma: no cover - malformed TOML
-            pass
     ppath = _find_hermes_project_toml(start)
     if ppath is not None:
-        try:
-            merged = _deep_merge(merged, _read_toml(ppath))
+        merged = _deep_merge(merged, _read_toml(ppath))
+        if str(ppath) not in _malformed_toml:
             sources.append(ppath)
-        except Exception:  # pragma: no cover
-            pass
     return merged, sources
 
 
