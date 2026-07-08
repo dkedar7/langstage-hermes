@@ -687,8 +687,64 @@ def _slash_memory(args: str, state: dict[str, Any]) -> bool:
 
 
 def _slash_compress(args: str, state: dict[str, Any]) -> bool:
-    """Note: compression is automatic at 50% context — manual trigger is a v0.2 item."""
-    click.echo(click.style("Manual compression isn't yet wired (auto-fires at 50% context). v0.2 task.", fg="yellow"))
+    """Force-run context compression on the current session now.
+
+    Compression normally auto-fires once the context crosses the configured
+    threshold; `/compress` runs the same pipeline on demand (gh #59). It builds a
+    HermesCompressionMiddleware from the resolved config — mirroring how the agent
+    wires it — and compresses the in-REPL message history in place. Falls back to a
+    non-model summary if the summariser can't run (so it works even keyless, unless
+    `abort_on_summary_failure` is set).
+    """
+    messages = list(state.get("messages") or [])  # a copy — state["messages"] is mutated below
+    if not messages:
+        click.echo(click.style("(nothing to compress — no messages yet)", fg="bright_black"))
+        return False
+    n_before = len(messages)
+
+    cfg = state["cfg"]
+    from langstage_hermes.agent import _init_chat_model
+    from langstage_hermes.compression import HermesCompressionMiddleware
+
+    try:
+        main_model = _init_chat_model(cfg.model_default)
+        aux_model = _init_chat_model(cfg.model_aux) if cfg.model_aux else main_model
+        mw = HermesCompressionMiddleware(
+            model=main_model,
+            aux_model=aux_model,
+            threshold_percent=cfg.compression_threshold,
+            protect_first_n=cfg.compression_protect_first_n,
+            protect_last_n=cfg.compression_protect_last_n,
+            summary_target_ratio=cfg.compression_target_ratio,
+            abort_on_summary_failure=cfg.compression_abort_on_summary_failure,
+        )
+        before = mw.estimate_tokens(messages)
+        # Force the pipeline regardless of the auto threshold — the point of a manual
+        # trigger is to compress NOW. Zero the tail token budget too, so the tail is the
+        # protect_last_n floor rather than the (large) budget derived from the auto
+        # threshold — otherwise a below-threshold session keeps every message and nothing
+        # gets summarised. Head (protect_first_n) + tail (protect_last_n) stay protected.
+        mw.threshold_tokens = 0
+        mw.tail_token_budget = 0
+        compressed = mw.compress(list(messages))
+    except Exception as e:  # broad on purpose — surfaced to the user, not a crash
+        click.echo(click.style(f"Compression failed: {e}", fg="red"))
+        return False
+
+    after = mw.estimate_tokens(compressed)
+    # No token benefit (a small/already-tight session where summarising doesn't shrink
+    # the estimate) → leave the history untouched and say so, rather than churn it.
+    if after >= before:
+        click.echo(click.style("(already minimal — nothing to gain from compressing)", fg="bright_black"))
+        return False
+
+    state["messages"][:] = compressed
+    click.echo(
+        click.style(
+            f"Compressed context: ~{before} -> ~{after} tokens ({n_before} -> {len(compressed)} messages)",
+            fg="green",
+        )
+    )
     return False
 
 
