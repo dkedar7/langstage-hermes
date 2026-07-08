@@ -2,7 +2,17 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
-## [0.4.7] - 2026-07-06
+## [0.4.8] - 2026-07-07
+
+### Fixed
+- **The `/compress` REPL command actually compresses now, instead of a stub (gh #59).**
+  The README Quick start advertises `/compress` ("force context compression"), but the
+  handler was an unwired stub that printed "not yet wired… v0.2 task" and did nothing. It
+  now builds a `HermesCompressionMiddleware` from the resolved config — the same way the
+  agent wires it — and force-runs the compression pipeline on the current session's history
+  in place (head/tail protection kept, the middle summarised), reporting the before→after
+  token estimate and message count. Falls back to a non-model summary when the summariser
+  can't run, so it works even keyless (unless `compression.abort_on_summary_failure` is set).
 
 ### Fixed
 - **`--show-config` now names the *resolved* global config path, so it doesn't
