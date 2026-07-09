@@ -26,6 +26,17 @@ def test_show_config_exits_zero_and_prints_sections():
     assert "[default]" in result.stdout or "[toml" in result.stdout or "[env:" in result.stdout
 
 
+def test_both_config_views_use_the_single_describe_renderer(capsys):
+    # Consolidation guard: `--show-config` (cli.py: `click.echo(cfg.describe())`) and the
+    # REPL `/config` (`_slash_config`) both render `cfg.describe()` — the ONE diagnostic —
+    # so they can't drift into disagreement (the recurring config-diagnostic class).
+    from langstage_hermes.cli import _load_config, _slash_config
+
+    cfg = _load_config()
+    _slash_config("", {"cfg": cfg})
+    assert capsys.readouterr().out.strip() == cfg.describe().strip()
+
+
 def test_root_without_subcommand_shows_help():
     """Bare ``python -m langstage_hermes.cli`` should not crash; prints help."""
     result = subprocess.run(

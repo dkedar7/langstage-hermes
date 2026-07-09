@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langstage-hermes"
-version = "0.4.9"
+version = "0.4.10"
 description = "Closed-loop reflection / skill creation agent on LangGraph + deepagents. Faithful reproduction of Nous Research's Hermes Agent."
 readme = "README.md"
 license = { text = "MIT" }
@@ -26,7 +26,8 @@ dependencies = [
     # is a HARD dep. A bare `pip install langstage-hermes` must be able to run a turn.
     # >=1.0.7 for the shared workspace source of truth (apply_workspace/workspace_root).
     # >=1.0.13 for the _malformed_toml set + warning dedupe (gh #61).
-    "langstage-core[agui]>=1.0.13",
+    # >=1.0.14 for describe(omit_keys=, configurable=) — the single complete diagnostic.
+    "langstage-core[agui]>=1.0.14",
     "deepagents>=0.6",
     "langchain>=1.0",
     "langchain-anthropic>=0.3",
