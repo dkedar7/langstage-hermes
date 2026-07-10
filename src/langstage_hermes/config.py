@@ -509,9 +509,24 @@ class HermesConfig(HostConfig):
         """
         text = super().describe(omit_keys=omit_keys, configurable=configurable)
         global_toml = _hermes_global_toml_path()
+        # Build the "looked for" list from the SAME constants the resolver iterates
+        # (_find_hermes_project_toml searches HERMES_PROJECT_TOML then the legacy
+        # LEGACY_HERMES_PROJECT_TOML per directory), so the diagnostic can never claim
+        # a narrower search than what actually runs. The legacy `deepagent-hermes.toml`
+        # IS still read and honored (per the CHANGELOG), so it must be listed — omitting
+        # it sent a migrating user chasing a non-problem (gh #64, follow-up to #57).
+        looked_for = ", ".join(
+            [
+                f"./{HERMES_PROJECT_TOML}",
+                f"./{LEGACY_HERMES_PROJECT_TOML}",
+                str(global_toml),
+                "./langstage.toml",
+                "./deepagents.toml",
+            ]
+        )
         return text.replace(
             "TOML: no langstage.toml (or legacy deepagents.toml) found",
-            f"TOML: no config found (looked for ./langstage-hermes.toml, {global_toml}, ./langstage.toml, ./deepagents.toml)",
+            f"TOML: no config found (looked for {looked_for})",
         )
 
 
