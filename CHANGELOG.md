@@ -2,6 +2,19 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.11] - 2026-07-09
+
+### Fixed
+- **The `--show-config` "no config found" list omitted `deepagent-hermes.toml`, though that
+  file IS searched and honored (gh #64).** The diagnostic's "looked for" string was
+  hardcoded and had drifted from the resolver, which reads the legacy
+  `deepagent-hermes.toml` (new `langstage-hermes.toml` wins per directory) exactly as the
+  CHANGELOG promises. A migrating user with a legacy project TOML was told by the built-in
+  debugger that their working file wasn't in the search path. The list is now built from the
+  same `HERMES_PROJECT_TOML` / `LEGACY_HERMES_PROJECT_TOML` constants the resolver iterates,
+  so it can't claim a narrower search than what runs. A test asserts every honored filename
+  appears in the line. Follow-up to #57.
+
 ## [0.4.10] - 2026-07-08
 
 ### Changed

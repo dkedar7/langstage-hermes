@@ -270,6 +270,26 @@ def test_show_config_names_the_resolved_global_path_under_custom_hermes_home(mon
     assert "~/.langstage-hermes/config.toml" not in line  # not the hardcoded default
 
 
+def test_no_config_line_lists_every_honored_project_toml(monkeypatch, tmp_path):
+    """gh #64: the 'no config found' candidate list must name every filename the resolver
+    actually searches — including the legacy ``deepagent-hermes.toml``, which IS still
+    read/honored (per the CHANGELOG) but was omitted from the diagnostic, sending a
+    migrating user chasing a non-problem. Follow-up to #57."""
+    _strip_env(monkeypatch)
+    hermes_home = tmp_path / "custom_home"
+    hermes_home.mkdir()
+    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(hermes_home))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    monkeypatch.chdir(proj)
+
+    desc = HermesConfig.resolve(toml_start=proj).describe()
+    line = next(ln for ln in desc.splitlines() if "no config found" in ln)
+    # Every honored project-TOML filename from the resolver's search set must appear.
+    for fname in ("langstage-hermes.toml", "deepagent-hermes.toml", "langstage.toml", "deepagents.toml"):
+        assert fname in line, f"{fname!r} is searched/honored but missing from the 'looked for' list"
+
+
 def test_global_config_at_hermes_home_is_honored(monkeypatch, tmp_path):
     """gh #57 control: a global config placed at $HERMES_HOME/config.toml loads."""
     _strip_env(monkeypatch)
