@@ -2,6 +2,19 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.12] - 2026-07-10
+
+### Fixed
+- **README "Load into an existing host" snippet wrote a bare `spec =` with no `[agent]`
+  table, so the agent was silently not loaded (gh #66).** The block told the reader to set
+  the spec "under `[agent]`", but the command it gave — `echo 'spec = "…"' >> langstage.toml`
+  — appended a **top-level** `spec` key. The resolver reads `agent.spec` (i.e. `spec` under
+  `[agent]`), so a top-level `spec` is ignored and `agent_spec` stays `None` — a user
+  copy-pasting the block got the default agent with no error to tell them why. The snippet
+  now writes the table header: `printf '[agent]\nspec = "langstage_hermes.agent:graph"\n' >>
+  langstage.toml`. A new test runs exactly the documented command and asserts it configures
+  the agent, so a revert to the bare form fails CI.
+
 ## [0.4.11] - 2026-07-09
 
 ### Fixed
