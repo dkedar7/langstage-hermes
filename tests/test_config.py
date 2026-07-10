@@ -401,3 +401,26 @@ def test_hermes_home_exposed_via_config(monkeypatch, tmp_path):
     monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "deephome"))
     cfg = HermesConfig.resolve(use_toml=False)
     assert cfg.hermes_home == tmp_path / "deephome"
+
+
+def test_readme_host_snippet_actually_configures_the_agent(monkeypatch, tmp_path):
+    """gh #66: the README 'Load into an existing host' snippet must write an `[agent]`
+    table, not a bare top-level `spec =` (which the resolver reads as `agent.spec` and so
+    silently ignores). We recover exactly the TOML the README tells the user to write into
+    `langstage.toml` and assert it configures the agent — so reverting to the bare
+    `echo 'spec = ...'` form (agent_spec stays None) fails here."""
+    import re
+
+    _strip_env(monkeypatch)
+    readme = (Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
+
+    m = re.search(r"printf '([^']*)'\s*>>\s*langstage\.toml", readme)
+    assert m, "README no longer documents a `printf '...' >> langstage.toml` host snippet"
+    toml_body = m.group(1).replace("\\n", "\n")  # the README shows \n escapes literally
+
+    (tmp_path / "langstage.toml").write_text(toml_body, encoding="utf-8")
+    cfg = HermesConfig.resolve(toml_start=tmp_path)
+    assert cfg.agent_spec == "langstage_hermes.agent:graph", (
+        f"the documented langstage.toml snippet did not configure the agent "
+        f"(agent_spec={cfg.agent_spec!r}) — it likely lacks the [agent] table header"
+    )

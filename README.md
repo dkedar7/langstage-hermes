@@ -134,7 +134,7 @@ Any LangStage host can run this agent:
 LANGSTAGE_AGENT_SPEC="langstage_hermes.agent:graph" langstage-cli
 
 # langstage-jupyter — set the same in langstage.toml under [agent]
-echo 'spec = "langstage_hermes.agent:graph"' >> langstage.toml
+printf '[agent]\nspec = "langstage_hermes.agent:graph"\n' >> langstage.toml
 langstage-jupyter
 ```
 
