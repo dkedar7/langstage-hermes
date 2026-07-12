@@ -1629,7 +1629,12 @@ def plugins_disable(name: str) -> None:
 
 @cli.command()
 @click.option("--model", "model_id", default=None, help="Override model for this verify run.")
-def verify(model_id: str | None) -> None:
+@click.option(
+    "--keep-workspace",
+    is_flag=True,
+    help="Keep the isolated /tmp workspace for post-mortem inspection instead of removing it.",
+)
+def verify(model_id: str | None, keep_workspace: bool) -> None:
     """End-to-end smoke: one live model round-trip + write the side effects.
 
     Catches the kinds of fresh-install problems ``doctor`` misses — packaging
@@ -1732,88 +1737,201 @@ def verify(model_id: str | None) -> None:
         sys.exit(2)
 
     # ── (4) build the agent in an isolated workspace ─────────────────────
+    # The workspace is a throwaway temp dir; wrap everything that follows in a
+    # try/finally so it's removed on EVERY exit path — build failure, invoke
+    # failure, and the VERIFY: PASS success path alike (gh #68). `--keep-workspace`
+    # is the opt-out for anyone who wants to poke at it post-mortem.
     workspace = Path(tempfile.mkdtemp(prefix="dah-verify-"))
     click.echo(click.style(f"  · isolated workspace: {workspace}", fg="bright_black"))
 
-    overrides: dict[str, Any] = {}
-    if model_id:
-        overrides["model_default"] = model_id
-
-    t0 = time.perf_counter()
     try:
-        cfg_for_run = HermesConfig.resolve(overrides=overrides) if overrides else cfg
-        from langstage_hermes import create_hermes_agent
+        overrides: dict[str, Any] = {}
+        if model_id:
+            overrides["model_default"] = model_id
 
-        agent = create_hermes_agent(cfg_for_run, workspace=workspace, session_id="verify-001")
-    except Exception as e:
-        click.echo(click.style(f"  ✗ agent build failed: {type(e).__name__}: {e}", fg="red"))
-        # A missing provider package surfaces langchain's raw "install
-        # langchain-openai" message; point at the hermes extra that bundles it.
-        if isinstance(e, ImportError) and "langchain-openai" in str(e):
+        t0 = time.perf_counter()
+        try:
+            cfg_for_run = HermesConfig.resolve(overrides=overrides) if overrides else cfg
+            from langstage_hermes import create_hermes_agent
+
+            agent = create_hermes_agent(cfg_for_run, workspace=workspace, session_id="verify-001")
+        except Exception as e:
+            click.echo(click.style(f"  ✗ agent build failed: {type(e).__name__}: {e}", fg="red"))
+            # A missing provider package surfaces langchain's raw "install
+            # langchain-openai" message; point at the hermes extra that bundles it.
+            if isinstance(e, ImportError) and "langchain-openai" in str(e):
+                click.echo(
+                    click.style(
+                        '    for OpenAI-compatible models install: pip install "langstage-hermes[openai]"',
+                        fg="yellow",
+                    )
+                )
+            sys.exit(2)
+        build_s = time.perf_counter() - t0
+        click.echo(click.style(f"  ✓ agent built in {build_s:.1f}s", fg="green"))
+
+        # ── (5) one real round-trip ──────────────────────────────────────────
+        click.echo(click.style("  · invoking model with 'reply yes/no: are you working?' ...", fg="bright_black"))
+        t0 = time.perf_counter()
+        try:
+            result = agent.invoke(
+                {
+                    "messages": [{"role": "user", "content": "Reply with one word, either YES or NO: are you working?"}],
+                    "session_id": "verify-001",
+                    "iteration_budget_remaining": 5,
+                },
+                config={"configurable": {"thread_id": "verify-001"}},
+            )
+        except Exception as e:
+            click.echo(click.style(f"  ✗ model invoke failed: {type(e).__name__}: {e}", fg="red"))
+            click.echo(click.style("    (auth error? rate limit? check the API key + model id)", fg="bright_black"))
+            sys.exit(2)
+        invoke_s = time.perf_counter() - t0
+
+        msgs = result.get("messages", [])
+        last_ai = next((m for m in reversed(msgs) if getattr(m, "type", None) == "ai"), None)
+        content = getattr(last_ai, "content", "")
+        if isinstance(content, list):
+            content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
+        if not content:
+            click.echo(click.style("  ✗ model returned an empty response", fg="red"))
+            sys.exit(2)
+        click.echo(click.style(f"  ✓ model round-trip in {invoke_s:.1f}s: {content.strip()[:80]!r}", fg="green"))
+
+        # ── (6) FTS5 store wrote the turn ────────────────────────────────────
+        import sqlite3
+
+        db = home / "state.db"
+        if not db.exists():
+            click.echo(click.style("  ✗ FTS5 store wasn't created", fg="red"))
+            sys.exit(2)
+        conn = sqlite3.connect(str(db))
+        try:
+            n_sess = conn.execute("SELECT COUNT(*) FROM sessions WHERE id = ?", ("verify-001",)).fetchone()[0]
+            n_msgs = conn.execute("SELECT COUNT(*) FROM messages WHERE session_id = ?", ("verify-001",)).fetchone()[0]
+        finally:
+            conn.close()
+        if n_sess == 0:
+            click.echo(click.style("  ⚠ session row not recorded in FTS5 store", fg="yellow"))
+        else:
+            click.echo(click.style(f"  ✓ FTS5 store: {n_sess} session(s), {n_msgs} message(s) recorded", fg="green"))
+
+        click.echo()
+        click.echo(click.style("VERIFY: PASS — runtime is wired end-to-end.", fg="green", bold=True))
+        click.echo(
+            click.style(
+                "  next: `langstage-hermes chat`  (or set LANGSTAGE_AGENT_SPEC=langstage_hermes.agent:graph in a host)",
+                fg="bright_black",
+            )
+        )
+    finally:
+        if keep_workspace:
+            click.echo(click.style(f"  · workspace kept at {workspace} for inspection", fg="bright_black"))
+        else:
+            shutil.rmtree(workspace, ignore_errors=True)
+
+
+@cli.command()
+@click.option(
+    "--nudge-interval",
+    type=int,
+    default=3,
+    show_default=True,
+    help="Tool-using iterations before the reflection review fires (drives the demo pace).",
+)
+@click.option(
+    "--keep-workspace",
+    is_flag=True,
+    help="Keep the throwaway HERMES_HOME so you can inspect the generated SKILL.md / MEMORY.md yourself.",
+)
+def demo(nudge_interval: int, keep_workspace: bool) -> None:
+    """Watch the reflection→skill-creation loop close — keyless, offline, deterministic.
+
+    The whole point of this runtime is the closed loop: the agent works for a
+    while, a review subagent reflects, and a reusable ``SKILL.md`` is written to
+    the skill library. Normally you can only see that with a paid API key and a
+    live multi-turn session (see ``examples/dogfood_procedural.py``).
+
+    This runs the SAME machinery — ``create_hermes_agent`` with the genuine
+    ``ReflectionMiddleware``, the real ``task`` review dispatch, ``skill_manage``
+    / ``memory`` tools, ``SkillLibrary.write()``, the audit log and FTS5 store —
+    against a scripted fake model instead of a live provider. No network, no key.
+    It writes real side effects under a throwaway ``HERMES_HOME`` and prints the
+    generated skill so you can see exactly what the loop produces (gh #69).
+    """
+    import tempfile
+
+    from langstage_hermes.demo import run_demo
+
+    click.echo(click.style("langstage-hermes demo — reflection→skill loop (offline, no API key)", fg="cyan", bold=True))
+    click.echo()
+
+    home = Path(tempfile.mkdtemp(prefix="dah-demo-"))
+    try:
+        click.echo(click.style(f"  · throwaway HERMES_HOME: {home}", fg="bright_black"))
+        click.echo(
+            click.style(
+                f"  · running the agent with a scripted model (nudge_interval={nudge_interval}) ...",
+                fg="bright_black",
+            )
+        )
+        try:
+            res = run_demo(home=home, nudge_interval=nudge_interval)
+        except Exception as e:  # pragma: no cover - defensive; surfaces a real regression
+            click.echo(click.style(f"  ✗ demo run failed: {type(e).__name__}: {e}", fg="red"))
+            sys.exit(2)
+
+        click.echo(
+            click.style(
+                f"  ✓ agent ran {res.tool_iterations} tool-using iteration(s), crossing the skills nudge interval",
+                fg="green",
+            )
+        )
+
+        if not res.skill_created:
+            click.echo(click.style("  ✗ the review subagent did not write a skill — the loop did not close", fg="red"))
+            sys.exit(2)
+
+        click.echo(click.style("  ✓ the review subagent reflected and called skill_manage(create)", fg="green"))
+        click.echo(
+            click.style(
+                f"  ✓ SKILL.md written: {res.skill_path}",
+                fg="green",
+            )
+        )
+        if res.memory_path is not None:
             click.echo(
                 click.style(
-                    '    for OpenAI-compatible models install: pip install "langstage-hermes[openai]"',
-                    fg="yellow",
+                    f"  ✓ memory note written to {res.memory_target}: {res.memory_path}",
+                    fg="green",
                 )
             )
-        sys.exit(2)
-    build_s = time.perf_counter() - t0
-    click.echo(click.style(f"  ✓ agent built in {build_s:.1f}s", fg="green"))
+        if res.audit_actions:
+            click.echo(click.style(f"  ✓ audit log recorded: {', '.join(res.audit_actions)}", fg="green"))
+        if res.sessions_recorded:
+            click.echo(click.style(f"  ✓ FTS5 store recorded {res.sessions_recorded} session(s)", fg="green"))
 
-    # ── (5) one real round-trip ──────────────────────────────────────────
-    click.echo(click.style("  · invoking model with 'reply yes/no: are you working?' ...", fg="bright_black"))
-    t0 = time.perf_counter()
-    try:
-        result = agent.invoke(
-            {
-                "messages": [{"role": "user", "content": "Reply with one word, either YES or NO: are you working?"}],
-                "session_id": "verify-001",
-                "iteration_budget_remaining": 5,
-            },
-            config={"configurable": {"thread_id": "verify-001"}},
-        )
-    except Exception as e:
-        click.echo(click.style(f"  ✗ model invoke failed: {type(e).__name__}: {e}", fg="red"))
-        click.echo(click.style("    (auth error? rate limit? check the API key + model id)", fg="bright_black"))
-        sys.exit(2)
-    invoke_s = time.perf_counter() - t0
+        # ── show what the loop actually produced ─────────────────────────────
+        click.echo()
+        click.echo(click.style(f"── generated skill: {res.skill_name} " + "─" * 20, fg="cyan"))
+        for key, val in res.skill_frontmatter.items():
+            click.echo(click.style(f"  {key}: {val}", fg="bright_black"))
+        click.echo()
+        click.echo(res.skill_body.rstrip())
+        if res.memory_entries:
+            click.echo()
+            click.echo(click.style(f"── {res.memory_target} memory " + "─" * 24, fg="cyan"))
+            for entry in res.memory_entries:
+                click.echo(f"  • {entry}")
 
-    msgs = result.get("messages", [])
-    last_ai = next((m for m in reversed(msgs) if getattr(m, "type", None) == "ai"), None)
-    content = getattr(last_ai, "content", "")
-    if isinstance(content, list):
-        content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
-    if not content:
-        click.echo(click.style("  ✗ model returned an empty response", fg="red"))
-        sys.exit(2)
-    click.echo(click.style(f"  ✓ model round-trip in {invoke_s:.1f}s: {content.strip()[:80]!r}", fg="green"))
-
-    # ── (6) FTS5 store wrote the turn ────────────────────────────────────
-    import sqlite3
-
-    db = home / "state.db"
-    if not db.exists():
-        click.echo(click.style("  ✗ FTS5 store wasn't created", fg="red"))
-        sys.exit(2)
-    conn = sqlite3.connect(str(db))
-    try:
-        n_sess = conn.execute("SELECT COUNT(*) FROM sessions WHERE id = ?", ("verify-001",)).fetchone()[0]
-        n_msgs = conn.execute("SELECT COUNT(*) FROM messages WHERE session_id = ?", ("verify-001",)).fetchone()[0]
+        click.echo()
+        click.echo(click.style("DEMO: PASS — the reflection→skill-creation loop closed with no API key.", fg="green", bold=True))
     finally:
-        conn.close()
-    if n_sess == 0:
-        click.echo(click.style("  ⚠ session row not recorded in FTS5 store", fg="yellow"))
-    else:
-        click.echo(click.style(f"  ✓ FTS5 store: {n_sess} session(s), {n_msgs} message(s) recorded", fg="green"))
-
-    click.echo()
-    click.echo(click.style("VERIFY: PASS — runtime is wired end-to-end.", fg="green", bold=True))
-    click.echo(
-        click.style(
-            "  next: `langstage-hermes chat`  (or set LANGSTAGE_AGENT_SPEC=langstage_hermes.agent:graph in a host)",
-            fg="bright_black",
-        )
-    )
+        if keep_workspace:
+            click.echo()
+            click.echo(click.style(f"  · workspace kept for inspection: {home}", fg="bright_black"))
+        else:
+            shutil.rmtree(home, ignore_errors=True)
 
 
 @cli.command()
