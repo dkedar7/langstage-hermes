@@ -2,6 +2,21 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.13] - 2026-07-12
+
+### Fixed
+- **`verify` leaked its `/tmp/dah-verify-*` isolated workspace on every run (gh #68).** The command
+  created the workspace with `tempfile.mkdtemp(prefix="dah-verify-")` but never removed it — there was
+  no `try/finally`, no `shutil.rmtree`, and no `TemporaryDirectory` — so **every** invocation that got
+  past the model-key gate leaked one dir: on the agent-build-failure path, the model-invoke-failure
+  path, and the `VERIFY: PASS` success path alike. Because the README tells users to "run this first on
+  any fresh install" (exactly the command re-run while debugging a key/model setup), the leaked dirs
+  accumulated one-per-run precisely when the command is used as intended. The workspace is now wrapped
+  in a `try/finally` that removes it on **every** exit path — success and failure. A new
+  `--keep-workspace` flag is the opt-out for anyone who wants to inspect the workspace post-mortem (it
+  prints where the dir was kept). Regression tests drive the real `verify` command (build-failure and
+  success paths) and assert nothing is left behind; run against the pre-fix code they fail.
+
 ## [0.4.12] - 2026-07-10
 
 ### Fixed
