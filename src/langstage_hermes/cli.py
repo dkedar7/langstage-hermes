@@ -1832,6 +1832,109 @@ def verify(model_id: str | None, keep_workspace: bool) -> None:
 
 
 @cli.command()
+@click.option(
+    "--nudge-interval",
+    type=int,
+    default=3,
+    show_default=True,
+    help="Tool-using iterations before the reflection review fires (drives the demo pace).",
+)
+@click.option(
+    "--keep-workspace",
+    is_flag=True,
+    help="Keep the throwaway HERMES_HOME so you can inspect the generated SKILL.md / MEMORY.md yourself.",
+)
+def demo(nudge_interval: int, keep_workspace: bool) -> None:
+    """Watch the reflection→skill-creation loop close — keyless, offline, deterministic.
+
+    The whole point of this runtime is the closed loop: the agent works for a
+    while, a review subagent reflects, and a reusable ``SKILL.md`` is written to
+    the skill library. Normally you can only see that with a paid API key and a
+    live multi-turn session (see ``examples/dogfood_procedural.py``).
+
+    This runs the SAME machinery — ``create_hermes_agent`` with the genuine
+    ``ReflectionMiddleware``, the real ``task`` review dispatch, ``skill_manage``
+    / ``memory`` tools, ``SkillLibrary.write()``, the audit log and FTS5 store —
+    against a scripted fake model instead of a live provider. No network, no key.
+    It writes real side effects under a throwaway ``HERMES_HOME`` and prints the
+    generated skill so you can see exactly what the loop produces (gh #69).
+    """
+    import tempfile
+
+    from langstage_hermes.demo import run_demo
+
+    click.echo(click.style("langstage-hermes demo — reflection→skill loop (offline, no API key)", fg="cyan", bold=True))
+    click.echo()
+
+    home = Path(tempfile.mkdtemp(prefix="dah-demo-"))
+    try:
+        click.echo(click.style(f"  · throwaway HERMES_HOME: {home}", fg="bright_black"))
+        click.echo(
+            click.style(
+                f"  · running the agent with a scripted model (nudge_interval={nudge_interval}) ...",
+                fg="bright_black",
+            )
+        )
+        try:
+            res = run_demo(home=home, nudge_interval=nudge_interval)
+        except Exception as e:  # pragma: no cover - defensive; surfaces a real regression
+            click.echo(click.style(f"  ✗ demo run failed: {type(e).__name__}: {e}", fg="red"))
+            sys.exit(2)
+
+        click.echo(
+            click.style(
+                f"  ✓ agent ran {res.tool_iterations} tool-using iteration(s), crossing the skills nudge interval",
+                fg="green",
+            )
+        )
+
+        if not res.skill_created:
+            click.echo(click.style("  ✗ the review subagent did not write a skill — the loop did not close", fg="red"))
+            sys.exit(2)
+
+        click.echo(click.style("  ✓ the review subagent reflected and called skill_manage(create)", fg="green"))
+        click.echo(
+            click.style(
+                f"  ✓ SKILL.md written: {res.skill_path}",
+                fg="green",
+            )
+        )
+        if res.memory_path is not None:
+            click.echo(
+                click.style(
+                    f"  ✓ memory note written to {res.memory_target}: {res.memory_path}",
+                    fg="green",
+                )
+            )
+        if res.audit_actions:
+            click.echo(click.style(f"  ✓ audit log recorded: {', '.join(res.audit_actions)}", fg="green"))
+        if res.sessions_recorded:
+            click.echo(click.style(f"  ✓ FTS5 store recorded {res.sessions_recorded} session(s)", fg="green"))
+
+        # ── show what the loop actually produced ─────────────────────────────
+        click.echo()
+        click.echo(click.style(f"── generated skill: {res.skill_name} " + "─" * 20, fg="cyan"))
+        for key, val in res.skill_frontmatter.items():
+            click.echo(click.style(f"  {key}: {val}", fg="bright_black"))
+        click.echo()
+        click.echo(res.skill_body.rstrip())
+        if res.memory_entries:
+            click.echo()
+            click.echo(click.style(f"── {res.memory_target} memory " + "─" * 24, fg="cyan"))
+            for entry in res.memory_entries:
+                click.echo(f"  • {entry}")
+
+        click.echo()
+        click.echo(click.style("DEMO: PASS — the reflection→skill-creation loop closed with no API key.", fg="green", bold=True))
+    finally:
+        if keep_workspace:
+            click.echo()
+            click.echo(click.style(f"  · workspace kept for inspection: {home}", fg="bright_black"))
+        else:
+            shutil.rmtree(home, ignore_errors=True)
+
+
+@cli.command()
 def doctor() -> None:
     """Sanity check: Python version, deps, env vars, HERMES_HOME writability."""
     from langstage_hermes.config import hermes_home

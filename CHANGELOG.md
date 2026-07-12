@@ -2,6 +2,26 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.14] - 2026-07-12
+
+### Added
+- **`langstage-hermes demo` — a keyless / offline way to watch the reflection→skill-creation loop
+  close (gh #69).** The headline feature is the closed reflection→skill-creation loop, but every
+  documented way to see it close needed a paid API key and a live multi-turn session (`verify` does a
+  single ≤20-token round-trip and deliberately never runs enough iterations to trigger the loop;
+  `examples/dogfood*.py` and `chat` all require a live model). So the one thing a new adopter most wants
+  to confirm — *does the skill loop really work, and what does a generated `SKILL.md` look like?* — was
+  exactly the thing they couldn't try before committing a key. The new `demo` subcommand drives the
+  **real** shipped machinery — `create_hermes_agent` with the genuine `ReflectionMiddleware`, the
+  `task` review-subagent dispatch, the real `skill_manage` / `memory` tools, `SkillLibrary.write()`,
+  the audit log and the FTS5 store — against a **scripted fake model** (threaded in via the
+  bring-your-own-model `model=` / `aux_model=` kwargs `create_hermes_agent` already accepts). No
+  network, no API key, fully deterministic. It writes a real `SKILL.md` + memory note under a throwaway
+  `HERMES_HOME`, prints the generated skill's frontmatter and body, then cleans up (`--keep-workspace`
+  keeps it for inspection). Reusable programmatically via `langstage_hermes.demo.run_demo(...)`, so CI
+  (and downstream adopters) can smoke-test the genuine loop with no secrets — exercising the real
+  `SkillLibrary` loader + reflection middleware, not a file-glob stand-in.
+
 ## [0.4.13] - 2026-07-12
 
 ### Fixed
