@@ -15,6 +15,19 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
   re-firing on schedule; `"once at <ts>"` / an ISO timestamp remain the way to request a genuine
   one-shot. Regression tests assert the interval kind, alias-equivalence with `"every …"`, and that a
   bare-duration job reschedules (stays `scheduled`, is not retired) after it runs.
+- **A failed scheduled agent invoke was recorded as `last_status: ok` and its error text delivered as
+  the job result (gh #72).** When a cron job's agent invoke raised (expired/rotated key, rate-limit,
+  provider outage, bad model name, …), `_build_cron_response` swallowed the exception and *returned it
+  as a normal string* (`[agent invoke failed: …]`). `run_job`'s agent branch — unlike the `no_agent`
+  script branch — never revisited `success`, so `mark_job_run(success=True, error=None)` fired: the
+  tick summary printed `<id>: ok`, `jobs.json` recorded `last_status: "ok"` / `last_error: None`, and
+  the configured deliverer (`local` / `stdout` / `agentmail`) sent the literal error string in place of
+  the brief/digest. Failures were invisible to the operator and any success-keyed retry/alerting never
+  fired. `_build_cron_response` now returns `(ok, body)` exactly like `_run_script`, so the agent path
+  mirrors the script path: a raised invoke sets `success=False` / `last_status="error"` /
+  `last_error=<msg>`, delivery is suppressed on failure (gated on `ok`), and the error is still saved
+  to the output doc as an audit trail. Regression tests drive `run_job` with a raising agent seam and
+  assert the failure surfaces and nothing is delivered.
 
 ## [0.4.14] - 2026-07-12
 
