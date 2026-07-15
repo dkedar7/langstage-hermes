@@ -36,8 +36,17 @@ __all__ = ["make_skill_tools", "skill_manage", "skill_view", "skills_list"]
 
 
 def _default_library() -> SkillLibrary:
-    """Lazily build a default library so importing this module is cheap."""
-    return SkillLibrary()
+    """Lazily build a default library so importing this module is cheap.
+
+    Threads the resolved disabled-skill config so the module-level
+    ``skills_list`` / ``skill_view`` tools honor skills.disabled /
+    skills.platform_disabled rather than treating them as no-ops (gh #74).
+    The agent runtime uses ``make_skill_tools`` with an already-configured
+    library; this keeps the standalone tools consistent with it.
+    """
+    from langstage_hermes.config import HermesConfig
+
+    return SkillLibrary(config=HermesConfig.resolve().skills_filter_config())
 
 
 @tool
