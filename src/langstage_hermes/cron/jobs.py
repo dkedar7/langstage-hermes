@@ -184,18 +184,22 @@ def parse_schedule(expr: str) -> dict[str, Any]:
         except ValueError:
             pass
 
-    # Bare duration → one-shot from now
+    # Bare duration → recurring interval (identical to "every <duration>").
+    # The module docstring, the `cronjob` tool example (tool.py), and the
+    # invalid-schedule hint below all present a bare "30m" as a recurring
+    # interval alongside "every 2h" — so "30m" must mean the same thing as
+    # "every 30m", not a silent one-shot that fires once and stops (gh #71).
+    # Use "once at <ts>" / an ISO timestamp to request a genuine one-shot.
     try:
         seconds = parse_duration(original)
     except ValueError:
         pass
     else:
-        run_at = _now() + timedelta(seconds=seconds)
         return {
-            "kind": "once",
-            "run_at": run_at.isoformat(),
+            "kind": "interval",
+            "seconds": seconds,
             "expr": original,
-            "display": f"once in {original}",
+            "display": f"every {seconds // 60}m" if seconds >= 60 else f"every {seconds}s",
         }
 
     raise ValueError(f"Invalid schedule {expr!r}. Try '30m' / 'every 2h' / '0 9 * * *' / 'once at 2026-06-15T09:00'.")

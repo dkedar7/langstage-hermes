@@ -136,8 +136,15 @@ def _run_script(script_path: str, *, timeout: int = 300) -> tuple[bool, str]:
     return True, proc.stdout or ""
 
 
-def _build_cron_response(job: dict[str, Any], *, prompt: str) -> str:
-    """Spawn a Hermes agent for one cron job and return the final assistant text.
+def _build_cron_response(job: dict[str, Any], *, prompt: str) -> tuple[bool, str]:
+    """Spawn a Hermes agent for one cron job and return ``(ok, text)``.
+
+    Mirrors ``_run_script``'s ``(ok, body)`` contract: ``ok`` is ``False`` only
+    when the agent invoke *raises* (expired key, rate-limit, provider outage,
+    …). A normal completion — including an empty one — is ``ok=True``. This lets
+    ``run_job`` record a failed invoke as an actual failure and suppress
+    delivery, instead of the error string masquerading as a successful result
+    (gh #72).
 
     Pulled into its own function so ``run_job`` stays readable and tests can
     monkeypatch this seam without standing up a real LLM.
@@ -150,7 +157,7 @@ def _build_cron_response(job: dict[str, Any], *, prompt: str) -> str:
             job.get("id"),
             e,
         )
-        return f"[langstage-hermes.agent unavailable; prompt was] {prompt}"
+        return True, f"[langstage-hermes.agent unavailable; prompt was] {prompt}"
 
     from langstage_hermes.config import HermesConfig
 
@@ -185,22 +192,22 @@ def _build_cron_response(job: dict[str, Any], *, prompt: str) -> str:
                 "active_skills": list(job.get("skills") or []),
             }
         )
-    except Exception as e:  # pragma: no cover - defensive
+    except Exception as e:
         logger.exception("Cron job %s: agent invoke failed", job.get("id"))
-        return f"[agent invoke failed: {e}]"
+        return False, f"[agent invoke failed: {e}]"
 
     messages = (result or {}).get("messages") or []
     # Return content of the last AIMessage (or any non-empty message tail).
     for msg in reversed(messages):
         content = getattr(msg, "content", None)
         if isinstance(content, str) and content.strip():
-            return content
+            return True, content
         if isinstance(content, list):
             # Anthropic-style content blocks → concat text parts.
             text = "".join(part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text")
             if text.strip():
-                return text
-    return ""
+                return True, text
+    return True, ""
 
 
 def _build_output_doc(
@@ -287,11 +294,16 @@ def run_job(job: dict[str, Any]) -> dict[str, Any]:
                     delivery_error = f"{type(e).__name__}: {e}"
         else:
             prompt = job.get("prompt") or ""
-            response = _build_cron_response(job, prompt=prompt)
+            ok, response = _build_cron_response(job, prompt=prompt)
+            success = ok
+            if not ok:
+                error = response
             doc = _build_output_doc(job, started_at=started, body=response, mode="agent")
             output_path = cron_jobs.save_job_output(job_id, doc)
             silent = response.strip().startswith(SILENT_MARKER)
-            if not silent:
+            # Mirror the script path: only deliver a genuine success. A failed
+            # invoke's error string must never be delivered as the result (gh #72).
+            if not silent and ok:
                 try:
                     _deliver_output(job, response, output_path)
                 except Exception as e:  # pragma: no cover - defensive

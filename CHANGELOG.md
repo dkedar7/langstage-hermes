@@ -2,6 +2,33 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.15] - 2026-07-14
+
+### Fixed
+- **A bare-duration schedule (`"30m"`, `"2h"`, `"1d"`) parsed as a one-shot instead of a recurring
+  interval (gh #71).** The module docstring, the `cronjob` tool example, and the invalid-schedule hint
+  all document a bare duration as a recurring interval identical to `"every 30m"`, but `parse_schedule`
+  fell through to the one-shot fallback (`kind: "once"`, `display: "once in 30m"`). A "run my morning
+  brief" job created as `30m`/`1d` therefore fired exactly once and retired itself to `completed` — the
+  opposite of the documented contract — with no warning. A bare duration now parses to
+  `kind: "interval"`, so `"30m"` means exactly the same thing as `"every 30m"` and the job keeps
+  re-firing on schedule; `"once at <ts>"` / an ISO timestamp remain the way to request a genuine
+  one-shot. Regression tests assert the interval kind, alias-equivalence with `"every …"`, and that a
+  bare-duration job reschedules (stays `scheduled`, is not retired) after it runs.
+- **A failed scheduled agent invoke was recorded as `last_status: ok` and its error text delivered as
+  the job result (gh #72).** When a cron job's agent invoke raised (expired/rotated key, rate-limit,
+  provider outage, bad model name, …), `_build_cron_response` swallowed the exception and *returned it
+  as a normal string* (`[agent invoke failed: …]`). `run_job`'s agent branch — unlike the `no_agent`
+  script branch — never revisited `success`, so `mark_job_run(success=True, error=None)` fired: the
+  tick summary printed `<id>: ok`, `jobs.json` recorded `last_status: "ok"` / `last_error: None`, and
+  the configured deliverer (`local` / `stdout` / `agentmail`) sent the literal error string in place of
+  the brief/digest. Failures were invisible to the operator and any success-keyed retry/alerting never
+  fired. `_build_cron_response` now returns `(ok, body)` exactly like `_run_script`, so the agent path
+  mirrors the script path: a raised invoke sets `success=False` / `last_status="error"` /
+  `last_error=<msg>`, delivery is suppressed on failure (gated on `ok`), and the error is still saved
+  to the output doc as an audit trail. Regression tests drive `run_job` with a raising agent seam and
+  assert the failure surfaces and nothing is delivered.
+
 ## [0.4.14] - 2026-07-12
 
 ### Added

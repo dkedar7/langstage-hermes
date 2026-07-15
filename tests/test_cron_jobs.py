@@ -17,11 +17,28 @@ def test_parse_schedule_interval():
     assert s["seconds"] == 30 * 60
 
 
-def test_parse_schedule_bare_duration_is_once():
-    """Bare '30m' is one-shot from now."""
-    s = cron_jobs.parse_schedule("30m")
-    assert s["kind"] == "once"
-    assert "run_at" in s
+def test_parse_schedule_bare_duration_is_recurring_interval():
+    """Bare '30m' is a recurring interval — identical to 'every 30m' (gh #71).
+
+    The docstring / tool example / error-hint all present a bare duration as a
+    recurring interval; it must not silently parse to a fire-once one-shot.
+    """
+    bare = cron_jobs.parse_schedule("30m")
+    every = cron_jobs.parse_schedule("every 30m")
+    assert bare["kind"] == "interval"
+    assert bare["seconds"] == 30 * 60
+    # A bare duration and its "every" alias must mean exactly the same thing.
+    assert bare["kind"] == every["kind"]
+    assert bare["seconds"] == every["seconds"]
+    assert bare["display"] == every["display"]
+
+
+def test_parse_schedule_bare_durations_all_recurring():
+    """Every documented bare-duration form parses to a recurring interval (gh #71)."""
+    for expr, secs in [("30s", 30), ("5m", 300), ("2h", 7200), ("1d", 86400)]:
+        s = cron_jobs.parse_schedule(expr)
+        assert s["kind"] == "interval", f"{expr!r} should be a recurring interval"
+        assert s["seconds"] == secs
 
 
 def test_parse_schedule_cron():
@@ -56,9 +73,30 @@ def test_create_and_list_job(tmp_hermes_home: Path):
     job = cron_jobs.create_job("ping", "1m", name="smoke")
     assert job["name"] == "smoke"
     assert job["prompt"] == "ping"
-    assert job["schedule"]["kind"] == "once"
+    # A bare '1m' schedule is a recurring interval (gh #71).
+    assert job["schedule"]["kind"] == "interval"
     listed = cron_jobs.list_jobs()
     assert any(j["id"] == job["id"] for j in listed)
+
+
+def test_bare_duration_job_refires_and_does_not_retire(tmp_hermes_home: Path):
+    """A bare-duration job keeps rescheduling after it fires (gh #71).
+
+    Pre-fix, '1m' parsed to a one-shot: after the first run ``next_run_at``
+    went ``None`` and the job flipped to ``completed`` (retired). As a recurring
+    interval it must stay ``scheduled`` with a fresh ``next_run_at``.
+    """
+    job = cron_jobs.create_job("say hi", "1m", name="recurring")
+    assert job["schedule"]["kind"] == "interval"
+    # One-shots auto-set repeat=1; a recurring interval must not.
+    assert job["repeat"]["times"] is None
+
+    cron_jobs.mark_job_run(job["id"], success=True)
+
+    after = cron_jobs.get_job(job["id"])
+    assert after is not None, "recurring job must not be auto-deleted after one run"
+    assert after["state"] == "scheduled"
+    assert after["next_run_at"] is not None, "interval job must reschedule its next run"
 
 
 def test_compute_next_run_about_one_minute_out(tmp_hermes_home: Path):
@@ -67,8 +105,8 @@ def test_compute_next_run_about_one_minute_out(tmp_hermes_home: Path):
     next_run = cron_jobs.compute_next_run(job)
     assert isinstance(next_run, datetime)
     delta = next_run - datetime.now().astimezone()
-    # one-shot was scheduled at create-time; this is a recompute so it
-    # should still be in the future and within ~120s of "now".
+    # '1m' is a recurring interval (gh #71); with no last_run_at yet the next
+    # run is ~1 minute out — in the future and within ~120s of "now".
     assert -timedelta(seconds=5) <= delta <= timedelta(seconds=120)
 
 
