@@ -2,6 +2,20 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.15] - 2026-07-14
+
+### Fixed
+- **A bare-duration schedule (`"30m"`, `"2h"`, `"1d"`) parsed as a one-shot instead of a recurring
+  interval (gh #71).** The module docstring, the `cronjob` tool example, and the invalid-schedule hint
+  all document a bare duration as a recurring interval identical to `"every 30m"`, but `parse_schedule`
+  fell through to the one-shot fallback (`kind: "once"`, `display: "once in 30m"`). A "run my morning
+  brief" job created as `30m`/`1d` therefore fired exactly once and retired itself to `completed` — the
+  opposite of the documented contract — with no warning. A bare duration now parses to
+  `kind: "interval"`, so `"30m"` means exactly the same thing as `"every 30m"` and the job keeps
+  re-firing on schedule; `"once at <ts>"` / an ISO timestamp remain the way to request a genuine
+  one-shot. Regression tests assert the interval kind, alias-equivalence with `"every …"`, and that a
+  bare-duration job reschedules (stays `scheduled`, is not retired) after it runs.
+
 ## [0.4.14] - 2026-07-12
 
 ### Added
