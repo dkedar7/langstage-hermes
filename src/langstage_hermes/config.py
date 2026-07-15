@@ -393,6 +393,21 @@ class HermesConfig(HostConfig):
         """Resolved HERMES_HOME path — same precedence as the module helper."""
         return hermes_home()
 
+    def skills_filter_config(self) -> dict[str, Any]:
+        """Shape the disabled-skill knobs for ``SkillLibrary(config=...)``.
+
+        ``SkillLibrary.list()`` filters ``config["disabled"]`` /
+        ``config["platform_disabled"]`` (SPEC §10), but the filter is dead code
+        unless a caller threads this dict in. Every production construction site
+        (agent runtime, ``skills list``, the ``skills_list`` tool) must pass it
+        or ``skills.disabled`` / ``skills.platform_disabled`` are silent no-ops
+        (gh #74).
+        """
+        return {
+            "disabled": self.skills_disabled,
+            "platform_disabled": self.skills_platform_disabled,
+        }
+
     # ── resolution ──
 
     @classmethod

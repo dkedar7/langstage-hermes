@@ -932,6 +932,7 @@ def _skill_library(*, with_audit: bool = True) -> Any:
     from langstage_hermes.config import HermesConfig, hermes_home
     from langstage_hermes.skills.library import SkillLibrary
 
+    cfg = HermesConfig.resolve()
     dirs: list[Path] = []
     bundled = Path(__file__).resolve().parent / "_bundled_skills"
     if bundled.is_dir():
@@ -944,7 +945,7 @@ def _skill_library(*, with_audit: bool = True) -> Any:
     # the runtime agent loads (agent.py::_default_skill_dirs). list/show/audit must
     # search them too, or `audit` (a validation gate) reports a false green for
     # external skills the agent will happily load. Kept in sync with _default_skill_dirs.
-    for extra in HermesConfig.resolve().skills_external_dirs:
+    for extra in cfg.skills_external_dirs:
         dirs.append(Path(extra).expanduser())
     audit_log = None
     if with_audit:
@@ -953,7 +954,9 @@ def _skill_library(*, with_audit: bool = True) -> Any:
         db_path = hermes_home() / "state.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         audit_log = SkillAuditLog(db_path=str(db_path))
-    lib = SkillLibrary(dirs=dirs, audit_log=audit_log)
+    # Thread the disabled-skill config so `skills list`/`show` honor
+    # skills.disabled / skills.platform_disabled instead of ignoring them (gh #74).
+    lib = SkillLibrary(dirs=dirs, config=cfg.skills_filter_config(), audit_log=audit_log)
     if audit_log is not None:
         lib.set_mutation_context(source="cli")
     return lib

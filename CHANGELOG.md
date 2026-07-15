@@ -2,6 +2,26 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.16] - 2026-07-15
+
+### Fixed
+- **`skills.disabled` / `skills.platform_disabled` was a silent no-op — a disabled skill still loaded
+  into the agent and still showed in `skills list` (gh #74).** The value resolved correctly through
+  env / TOML and `--show-config` advertised it as active, but `SkillLibrary.list()`'s
+  `config["disabled"]` / `config["platform_disabled"]` filter was dead code: **no production caller
+  ever passed `config=`**, so `SkillLibrary.config` was always `{}`. A user who disabled a skill to
+  keep it out of the agent's context found it silently still injected into the toolset and the
+  `skills_list` tool. Every runtime construction site now threads the resolved config in via a new
+  `HermesConfig.skills_filter_config()` helper (`{"disabled": …, "platform_disabled": …}`): the agent
+  runtime (`agent.py`), the CLI's `_skill_library` backing `skills list`/`show` (`cli.py`), and the
+  module-level `skills_list`/`skill_view` tool library (`skills/tools.py`). A skill named in
+  `skills.disabled` (or `skills.platform_disabled[<session_platform>]`) is now excluded from both the
+  loaded set and `skills list`; a non-disabled skill is unaffected. The bundled-count health check in
+  `check`/`doctor` deliberately keeps counting the full bundled set (it must catch a packaging bug
+  regardless of a user's disabled list). Regression tests assert the exclusion through each production
+  caller (agent, CLI, default tool library) and cover both the `disabled` and `platform_disabled`
+  knobs; they fail before the wiring and pass after.
+
 ## [0.4.15] - 2026-07-14
 
 ### Fixed

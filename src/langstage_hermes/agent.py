@@ -182,7 +182,10 @@ def create_hermes_agent(
     from langstage_hermes.skills.audit import SkillAuditLog
 
     audit_log = SkillAuditLog(db_path=str(db_path))
-    library = SkillLibrary(_default_skill_dirs(cfg), audit_log=audit_log)
+    # Thread the disabled-skill config so skills.disabled / skills.platform_disabled
+    # actually exclude a skill from the loaded toolset — without config= the filter
+    # in SkillLibrary.list() is dead code and the knob is a silent no-op (gh #74).
+    library = SkillLibrary(_default_skill_dirs(cfg), config=cfg.skills_filter_config(), audit_log=audit_log)
     library.set_mutation_context(session_id=sid, source="agent")
 
     # Bring-your-own-model: caller-supplied instances bypass init_chat_model
