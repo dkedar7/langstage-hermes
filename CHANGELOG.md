@@ -2,6 +2,26 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.17] - 2026-07-16
+
+### Fixed
+- **`chat` — the headline Quick Start command — had NO provider-aware API-key preflight, so a missing or
+  invalid provider key leaked a raw provider exception instead of the clean guidance `verify`/`doctor`
+  already give (gh #76).** `verify` and `doctor` both gate on the *configured model's* key (the
+  #33 / #35 / #41 preflight-consistency work), but `chat` was never given the gate: on the default
+  `anthropic:*` path the REPL opened, accepted the user's first message, and only *then* surfaced a bare
+  `TypeError: Could not resolve authentication method …` mid-session; on the `openai:*` path it leaked a
+  bare `Missing credentials …` at build. `chat` now runs the **same** preflight **before** building the
+  agent / entering the REPL and exits 2 with the same clean, colored message (e.g.
+  `✗ model is anthropic:* but ANTHROPIC_API_KEY not set`) plus a pointer to run `verify`/`doctor`. The
+  gate `verify` already implemented was factored into a shared `_preflight_model_key(model_for_run)`
+  helper now used by both `verify` and `chat`, so the two can't drift again. The gate runs only for the
+  built-in factory (which builds the model from `model.default`); a BYO agent spec owns its own model, so
+  `chat -a <spec>` is left untouched (no #33-style false positive). Regression tests assert `chat` with a
+  missing anthropic/openai key exits 2 with the clean guidance and no raw traceback, that a valid key (or
+  `OPENROUTER_API_KEY` for `openai:*`, or a spec graph) still proceeds to the REPL, and pin the shared
+  helper's contract.
+
 ## [0.4.16] - 2026-07-15
 
 ### Fixed

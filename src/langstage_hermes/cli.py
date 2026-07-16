@@ -223,6 +223,29 @@ def _load_config() -> Any:
     return HermesConfig.resolve()
 
 
+def _preflight_model_key(model_for_run: str, *, suggest_verify: bool = False) -> None:
+    """Provider-aware API-key preflight shared by ``verify`` and ``chat``.
+
+    If the configured model's provider key is missing, print the same clean,
+    colored guidance ``verify``/``doctor`` give and exit 2 — instead of leaking a
+    raw provider exception mid-REPL on the ``anthropic:*`` path or a bare
+    ``Missing credentials`` at build on the ``openai:*`` path the way ``chat``
+    used to (gh #76). Factored out of ``verify``'s "(3) model API key sanity"
+    gate so the two commands can't drift. ``suggest_verify`` appends a pointer to
+    the full preflight, used at ``chat`` startup.
+    """
+    if model_for_run.startswith("anthropic:") and not os.getenv("ANTHROPIC_API_KEY"):
+        msg = "model is anthropic:* but ANTHROPIC_API_KEY not set"
+    elif model_for_run.startswith("openai:") and not (os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")):
+        msg = "model is openai:* but neither OPENAI_API_KEY nor OPENROUTER_API_KEY set"
+    else:
+        return
+    click.echo(click.style(f"  ✗ {msg}", fg="red"))
+    if suggest_verify:
+        click.echo(click.style("    run `langstage-hermes verify` or `doctor` for a full preflight", fg="yellow"))
+    sys.exit(2)
+
+
 def _try_import_agent() -> tuple[Any | None, str | None]:
     """Lazy-import the built-in agent module; return (factory, error_message)."""
     try:
@@ -372,6 +395,17 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
         from langstage_hermes.config import HermesConfig
 
         cfg = HermesConfig.resolve(overrides=overrides)
+
+    # Provider-aware API-key preflight BEFORE building the agent / entering the
+    # REPL — the same gate verify/doctor run. Without the configured model's key
+    # the built-in anthropic:* path leaked a raw TypeError only AFTER the user's
+    # first message, and openai:* a bare "Missing credentials" at build; gate
+    # here so chat gives the same clean guidance instead (gh #76). Only the
+    # built-in factory builds a model from cfg.model_default — a spec graph owns
+    # its own model, so cfg.model_default doesn't describe it; don't second-guess
+    # a BYO spec (that would re-introduce the #33 false-positive class).
+    if source == "builtin":
+        _preflight_model_key(model_id or cfg.model_default, suggest_verify=True)
 
     # Apply the resolved workspace as the shared source of truth (ADR 0005) BEFORE
     # building the agent. The built-in factory reads workspace_root() when no explicit
@@ -1732,12 +1766,7 @@ def verify(model_id: str | None, keep_workspace: bool) -> None:
     cfg = HermesConfig.resolve()
     model_for_run = model_id or cfg.model_default
     click.echo(click.style(f"  · model:  {model_for_run}", fg="bright_black"))
-    if model_for_run.startswith("anthropic:") and not os.getenv("ANTHROPIC_API_KEY"):
-        click.echo(click.style("  ✗ model is anthropic:* but ANTHROPIC_API_KEY not set", fg="red"))
-        sys.exit(2)
-    if model_for_run.startswith("openai:") and not (os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")):
-        click.echo(click.style("  ✗ model is openai:* but neither OPENAI_API_KEY nor OPENROUTER_API_KEY set", fg="red"))
-        sys.exit(2)
+    _preflight_model_key(model_for_run)
 
     # ── (4) build the agent in an isolated workspace ─────────────────────
     # The workspace is a throwaway temp dir; wrap everything that follows in a
