@@ -2,6 +2,42 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.18] - 2026-07-18
+
+### Fixed
+- **`chat`'s build failure for a missing provider package named the WRONG package — `pip install
+  langchain-openai` instead of the documented `[openai]` extra (gh #78).** On a plain
+  `pip install langstage-hermes` (no extras), a user following the README's OpenAI/OpenRouter Quick
+  start (`langstage-hermes chat --model openai:openai/gpt-4o-mini`) hit
+  `Failed to build agent: Initializing ChatOpenAI requires the langchain-openai package. Please install
+  it with 'pip install langchain-openai'` — because `chat`'s agent-build `except` handler printed
+  `Failed to build agent: {e}` verbatim, leaking langchain's raw `ImportError`. That message points
+  **away** from `pip install "langstage-hermes[openai]"`, which the README documents as *the* supported
+  way to add OpenAI support, and it diverged from `verify`/`doctor` — the exact commands the README's
+  Verify section says to run first — which had already been taught to name the hermes extra (#33, #41).
+  This was the last un-fixed member of that preflight-consistency family: #76 added `chat`'s missing-*key*
+  gate, but the missing-*provider-package* hint on the same build path was never given the same
+  treatment. `chat` now appends the same guidance `verify` gives
+  (`for OpenAI-compatible models install: pip install "langstage-hermes[openai]"`), keeping the existing
+  failure shape (exit 2 with a message, no crash) — only the content changed.
+- **Root cause of the drift: the provider→package mapping existed in three places.** `verify` string-matched
+  `"langchain-openai" in str(e)`, `doctor` carried its own `{"openai:": ("langchain_openai", …)}` table, and
+  `chat` had nothing — which is precisely how #78 survived the #41 and #76 fixes. All three now read from a
+  single module-level `_PROVIDER_PACKAGES` table (model-id prefix → importable module, install command,
+  provider label) via shared `_provider_package()` / `_missing_provider_install_line()` helpers, so a fourth
+  divergent copy can't appear. The table covers the same provider set `doctor` already knew — `openai:*`
+  (behind the `[openai]` extra, the only model-provider extra `pyproject.toml` declares) and `anthropic:*`
+  (a base dependency, so its hint stays the plain package; there is no hermes extra to name) — and the
+  guidance is no longer OpenAI-shaped: any prefix in the table gets its own line. Detection also stopped
+  being a bare substring match on one hard-coded distribution name: an `ImportError` qualifies when it names
+  the provider's module (either spelling) **or** when that module is genuinely not importable, so a reworded
+  langchain message still gets the hint while an unrelated build failure (or an unknown/custom provider like
+  `ollama:*`) gets none. Regression tests assert `chat` names the extra for `openai:*` and the plain package
+  for `anthropic:*`, that an unrelated `RuntimeError` gets no misleading install hint, that `verify`/`doctor`
+  still emit their unchanged gold-standard lines from the shared table, and pin the helper's contract. The
+  `ImportError` is simulated rather than depending on `langchain_openai` being absent, so the tests hold on a
+  machine that has the extra installed; they fail before the fix and pass after.
+
 ## [0.4.17] - 2026-07-16
 
 ### Fixed
