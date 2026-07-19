@@ -2,6 +2,49 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.19] - 2026-07-19
+
+### Fixed
+- **A `SKILL.md` with unparseable YAML frontmatter was dropped from the library in total silence — gone
+  from `skills list` *and* from the live agent, with no warning, no error, exit 0 (gh #81).** One missing
+  quote, one bad indent, one unterminated `[` and the skill simply ceased to exist: `skills list` printed
+  an unchanged count with empty stderr, and — because the agent factory routes through the *same*
+  `SkillLibrary.list()` loader — `chat` started up without it and never said why. The only trace was a
+  `logger.debug("skipping unparseable skill at %s: %s", ...)` in `SkillLibrary._scan_directory`, which sits
+  below the CLI's default log level and so reached nobody. The intent there was right (warn and keep going
+  — one bad file must not take down the other 26 skills); the *level* was wrong. This was the mirror image
+  of every other skill error surface: `skills install` rejects invalid frontmatter loudly (exit 2),
+  `skills audit` reports it as `__error__/<dir>: parse failure: ...`, and only the two surfaces a user
+  actually reaches — "did my skill load?" and the running agent — stayed quiet, leaving a
+  *why-won't-my-skill-load* trap that could only be escaped by already knowing to run `skills audit`.
+  Both surfaces now name the offending directory, the file and the parse error on **stderr**, and point at
+  `skills audit` for the full report. Behaviour is otherwise unchanged: still a warning, never a failure —
+  `skills list` still exits 0 and still lists every skill that *does* parse, and one broken skill still
+  cannot stop the agent from starting.
+- **Root cause of the silence, and why the fix did not add a second copy.** `_scan_directory` (the loader)
+  and `validate_all` (behind `skills audit`) each carried their own `try: frontmatter.load(...) / except`
+  with their own wording — the same detect-and-phrase logic in two places, which is exactly the shape #78
+  had to unwind for the provider→package table. Rather than grow a third, both are now built from shared
+  primitives in `library.py`: `_error_key()` (the `__error__/<dir>` key), `_parse_failure()` (the canonical
+  `parse failure: <exc>` wording, byte-identical between a warning and its audit row), a `SkillLoadError`
+  record, and `format_load_error()` for presentation. Every scan collects the drops onto
+  `SkillLibrary.load_errors`, and the two production callers surface that list on their own channel — the
+  CLI via `click.echo(..., err=True)`, the agent via `logging` — so the diagnostic stays off `skills list`'s
+  stdout, which is a listing that gets piped and grepped (the command has no `--json` mode to keep clean).
+  `format_load_error()` collapses whitespace, because a `yaml.scanner.ScannerError` stringifies to four
+  lines, and stays ASCII-only for Windows cp1252 consoles.
+- **The agent got the warning at *build* time, not once per model call.** `SkillLoaderMiddleware` re-scans
+  the library on every model call, so warning from inside the scan would have repeated the same line for a
+  whole REPL session. The scan therefore stays quiet (it only records), and `create_hermes_agent` scans once
+  and warns once while the graph is being built — before the `chat` banner, so a user who never runs
+  `skills list` still learns their skill vanished. Regression tests are built on the issue's clean-room
+  repro (a valid skill plus one neighbor with a deliberate YAML typo) and pin all of it: the warning's
+  content, that it lands on stderr and never on stdout, that it fires even when `--query`/`--category`
+  filters hide everything, that `skills list` still exits 0 and the valid neighbor still lists, that the
+  agent still builds and warns exactly once, that the per-model-call scan never logs at WARNING, that a
+  healthy library raises no false alarm, and that the warning and the `skills audit` row are generated from
+  the same detection. They fail before the fix and pass after.
+
 ## [0.4.18] - 2026-07-18
 
 ### Fixed

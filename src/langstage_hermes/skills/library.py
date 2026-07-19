@@ -35,7 +35,7 @@ from langstage_hermes.skills.validator import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Skill", "SkillLibrary"]
+__all__ = ["Skill", "SkillLibrary", "SkillLoadError", "format_load_error"]
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +118,77 @@ def _default_search_dirs() -> list[Path]:
     if project_dir.exists():
         dirs.append(project_dir)
     return dirs
+
+
+# ---------------------------------------------------------------------------
+# Parse failures — one vocabulary, shared by every surface
+# ---------------------------------------------------------------------------
+#
+# A SKILL.md whose YAML frontmatter won't parse is *dropped* from ``list()``:
+# it disappears from ``skills list`` and from the live agent. That is the right
+# behaviour (one bad file must not take down the other 26 skills) but it has to
+# be **said out loud** — silence is the defect (gh #81).
+#
+# ``validate_all()`` (behind ``skills audit``) already detected and worded this
+# exact failure. Rather than grow a second copy of "how do we spot and phrase a
+# parse failure" for the warning path — the triplication #78 had to unwind —
+# both surfaces are built from the three primitives below.
+
+
+def _error_key(parent_dir_name: str) -> str:
+    """The ``validate_all()`` / ``skills audit`` key for a skill with no usable
+    ``name``: ``__error__/<parent dir>``. Shared so a warning and an audit row
+    name the same thing and a user can connect the two."""
+    return f"__error__/{parent_dir_name}"
+
+
+def _parse_failure(exc: BaseException) -> str:
+    """The canonical wording for an unparseable SKILL.md."""
+    return f"parse failure: {exc}"
+
+
+@dataclass(frozen=True)
+class SkillLoadError:
+    """A SKILL.md that could not be parsed, and is therefore absent from ``list()``.
+
+    Collected on :attr:`SkillLibrary.load_errors` by every scan so callers can
+    surface the omission on their own channel (``click.echo(err=True)`` for the
+    CLI, ``logging`` for the agent runtime) instead of each re-deriving it.
+
+    Attributes:
+        path: Absolute path to the offending SKILL.md.
+        parent_name: Name of the directory containing it.
+        message: ``"parse failure: <exception>"`` — identical to the string
+            ``validate_all()`` records, so ``skills audit`` and the warning
+            agree verbatim.
+    """
+
+    path: Path
+    parent_name: str
+    message: str
+
+    @property
+    def key(self) -> str:
+        """The ``__error__/<dir>`` key ``skills audit`` reports this under."""
+        return _error_key(self.parent_name)
+
+
+def format_load_error(err: SkillLoadError) -> str:
+    """Render a one-line, ASCII-only diagnostic for a dropped skill.
+
+    Names the directory, the file and the parse error so the message is
+    actionable, and points at ``skills audit`` for the full report. Whitespace
+    is collapsed because a ``yaml.scanner.ScannerError`` stringifies to four
+    lines — fine in ``audit``'s indented block, unusable as a warning. ASCII
+    only: this CLI runs on Windows cp1252 consoles where a stray non-ASCII
+    glyph raises ``UnicodeEncodeError``.
+    """
+    detail = " ".join(err.message.split())
+    return (
+        f"skipping unparseable skill '{err.parent_name}' at {err.path}: {detail} "
+        f"-- it is absent from `skills list` and from the agent; "
+        f"run `langstage-hermes skills audit` for the full report ({err.key})"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +283,10 @@ class SkillLibrary:
         self._mutation_source: str | None = None
         self._mutation_session_id: str | None = None
         self._mutation_tool_call_id: str | None = None
+        # SKILL.md files the last scan had to drop. Refreshed by every
+        # ``list()``; read by the CLI and the agent factory to warn about the
+        # omission (gh #81). Empty until the first scan.
+        self.load_errors: list[SkillLoadError] = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -228,7 +303,12 @@ class SkillLibrary:
 
         On name collisions across directories, the *later* search dir wins
         (matches SPEC §10.2 ordering when caller passes [bundled, user, project]).
+
+        Unparseable SKILL.md files are skipped rather than raised — one bad file
+        must not hide the rest of the library — but each is recorded on
+        :attr:`load_errors` so the caller can say so (gh #81).
         """
+        self.load_errors = []
         disabled = set(self.config.get("disabled", []) or [])
         platform_disabled_map = self.config.get("platform_disabled", {}) or {}
         session_platform = _current_session_platform()
@@ -437,10 +517,10 @@ class SkillLibrary:
                     post = frontmatter.load(skill_md)
                     meta = dict(post.metadata)
                 except Exception as exc:
-                    results[f"__error__/{parent_name}"] = [f"parse failure: {exc}"]
+                    results[_error_key(parent_name)] = [_parse_failure(exc)]
                     continue
                 errors = validate_frontmatter(meta, parent_dir_name=parent_name)
-                key = meta.get("name") or f"__error__/{parent_name}"
+                key = meta.get("name") or _error_key(parent_name)
                 results[key] = errors
         return results
 
@@ -478,6 +558,19 @@ class SkillLibrary:
             try:
                 skill = self._load_skill(skill_md, base_dir=directory)
             except Exception as exc:
+                # Record, don't raise, and don't emit here: ``list()`` is called
+                # on *every* model call by SkillLoaderMiddleware, so warning from
+                # inside the scan would repeat the same line for the whole
+                # session. The two production callers (the CLI's `skills list`,
+                # agent.py's one-shot build-time scan) each surface
+                # ``load_errors`` once, on their own channel. (gh #81)
+                self.load_errors.append(
+                    SkillLoadError(
+                        path=skill_md,
+                        parent_name=skill_md.parent.name,
+                        message=_parse_failure(exc),
+                    )
+                )
                 logger.debug("skipping unparseable skill at %s: %s", skill_md, exc)
                 continue
             if skill is not None:
