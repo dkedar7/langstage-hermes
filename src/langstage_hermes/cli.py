@@ -31,7 +31,7 @@ import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import click
 
@@ -246,6 +246,77 @@ def _preflight_model_key(model_for_run: str, *, suggest_verify: bool = False) ->
     sys.exit(2)
 
 
+class _ProviderPkg(NamedTuple):
+    """How a model-id prefix maps to the package that makes it work.
+
+    ``module`` is the importable module name (what ``find_spec`` takes);
+    ``install`` is the command WE document for getting it — the hermes extra
+    where one exists, so we never point a user at a raw langchain distribution
+    the README doesn't mention; ``label`` names the provider family for the
+    human-readable install line.
+    """
+
+    module: str
+    install: str
+    label: str
+
+
+# Single source of truth for provider → package/extra, shared by ``chat``,
+# ``verify`` and ``doctor``. Three divergent copies of this mapping is exactly
+# how gh #78 survived the #41/#76 fixes — every command that talks about a
+# missing provider package must read it from here. Keyed by model-id prefix and
+# scoped to the providers hermes actually ships a build path for: ``openai:*``
+# lives behind the ``[openai]`` extra, ``anthropic:*`` is a base dependency (so
+# its hint is the plain package — there is no hermes extra to name).
+_PROVIDER_PACKAGES: dict[str, _ProviderPkg] = {
+    "openai:": _ProviderPkg("langchain_openai", 'pip install "langstage-hermes[openai]"', "OpenAI-compatible"),
+    "anthropic:": _ProviderPkg("langchain_anthropic", "pip install langchain-anthropic", "Anthropic"),
+}
+
+
+def _provider_package(model_for_run: str) -> _ProviderPkg | None:
+    """The provider package entry for a model id, or ``None`` if unknown.
+
+    An unknown/custom prefix (``ollama:``, a bare model name, ...) returns
+    ``None`` — we assert nothing about providers we don't ship a path for.
+    """
+    for prefix, entry in _PROVIDER_PACKAGES.items():
+        if model_for_run.startswith(prefix):
+            return entry
+    return None
+
+
+def _missing_provider_install_line(model_for_run: str, exc: BaseException) -> str | None:
+    """Install guidance when ``exc`` is the model's provider package being absent.
+
+    langchain raises its own ``ImportError`` naming the *distribution* it wants
+    (``pip install langchain-openai``), which contradicts the README's documented
+    ``pip install "langstage-hermes[openai]"`` (gh #78). Callers append the line
+    this returns so the user is pointed at the supported install path instead.
+
+    Returns ``None`` when the failure isn't a missing provider package, so an
+    unrelated build error never gets a misleading "install the extra" hint. The
+    exception text is checked first (it names the distribution even on a machine
+    where the package IS importable — e.g. a simulated failure), with a real
+    importability check as the fallback for when langchain rewords its message.
+    """
+    if not isinstance(exc, ImportError):
+        return None
+    entry = _provider_package(model_for_run)
+    if entry is None:
+        return None
+    text = str(exc)
+    hit = entry.module in text or entry.module.replace("_", "-") in text
+    if not hit:
+        try:
+            hit = importlib.util.find_spec(entry.module) is None
+        except (ImportError, ValueError):
+            hit = True
+    if not hit:
+        return None
+    return f"for {entry.label} models install: {entry.install}"
+
+
 def _try_import_agent() -> tuple[Any | None, str | None]:
     """Lazy-import the built-in agent module; return (factory, error_message)."""
     try:
@@ -431,6 +502,16 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
             agent = _instantiate_factory(target, cfg)
     except Exception as e:
         click.echo(click.style(f"Failed to build agent: {e}", fg="red"), err=True)
+        # A missing provider package surfaces langchain's raw "pip install
+        # langchain-openai" message, which contradicts the README's documented
+        # `pip install "langstage-hermes[openai]"`. Append the same hermes-extra
+        # guidance verify/doctor already give, from the one shared table (gh #78).
+        # Only meaningful on the built-in path — a BYO spec owns its own model,
+        # so cfg.model_default doesn't describe what failed to import.
+        if source == "builtin":
+            install_line = _missing_provider_install_line(model_id or cfg.model_default, e)
+            if install_line:
+                click.echo(click.style(f"  {install_line}", fg="yellow"), err=True)
         sys.exit(2)
 
     import uuid
@@ -1790,14 +1871,11 @@ def verify(model_id: str | None, keep_workspace: bool) -> None:
         except Exception as e:
             click.echo(click.style(f"  ✗ agent build failed: {type(e).__name__}: {e}", fg="red"))
             # A missing provider package surfaces langchain's raw "install
-            # langchain-openai" message; point at the hermes extra that bundles it.
-            if isinstance(e, ImportError) and "langchain-openai" in str(e):
-                click.echo(
-                    click.style(
-                        '    for OpenAI-compatible models install: pip install "langstage-hermes[openai]"',
-                        fg="yellow",
-                    )
-                )
+            # langchain-openai" message; point at the hermes extra that bundles
+            # it, from the table chat/doctor share (gh #78).
+            install_line = _missing_provider_install_line(model_for_run, e)
+            if install_line:
+                click.echo(click.style(f"    {install_line}", fg="yellow"))
             sys.exit(2)
         build_s = time.perf_counter() - t0
         click.echo(click.style(f"  ✓ agent built in {build_s:.1f}s", fg="green"))
@@ -2016,19 +2094,16 @@ def doctor() -> None:
     # advertises that it checks "deps", and verify already fails (exit 2) here
     # naming the extra; doctor must agree instead of green-lighting a config that
     # cannot build. Mirror verify's gold-standard hint. (gh #41)
+    # The prefix→package/extra table lives in _PROVIDER_PACKAGES so chat/verify
+    # can't drift from it (gh #78).
     provider_pkg_missing = False
-    _provider_pkgs = {
-        "openai:": ("langchain_openai", 'pip install "langstage-hermes[openai]"'),
-        "anthropic:": ("langchain_anthropic", "pip install langchain-anthropic"),
-    }
-    for _prefix, (_mod, _hint) in _provider_pkgs.items():
-        if model_for_run.startswith(_prefix):
-            if importlib.util.find_spec(_mod) is None:
-                click.echo(f"  ✗ provider package '{_mod}' not importable for {model_for_run} — {_hint}")
-                provider_pkg_missing = True
-            else:
-                click.echo(f"  provider package: {_mod} installed")
-            break
+    _entry = _provider_package(model_for_run)
+    if _entry is not None:
+        if importlib.util.find_spec(_entry.module) is None:
+            click.echo(f"  ✗ provider package '{_entry.module}' not importable for {model_for_run} — {_entry.install}")
+            provider_pkg_missing = True
+        else:
+            click.echo(f"  provider package: {_entry.module} installed")
 
     home = hermes_home()
     try:
