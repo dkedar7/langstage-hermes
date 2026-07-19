@@ -48,7 +48,7 @@ from langstage_hermes.plugins.event_bus import PluginEventBus
 from langstage_hermes.prompts import PromptAssemblyMiddleware
 from langstage_hermes.reflection import ReflectionMiddleware, build_review_subagent
 from langstage_hermes.search.session_search import make_session_search_tool
-from langstage_hermes.skills.library import SkillLibrary
+from langstage_hermes.skills.library import SkillLibrary, format_load_error
 from langstage_hermes.skills.loader import SkillLoaderMiddleware
 from langstage_hermes.skills.tools import make_skill_tools
 from langstage_hermes.store.recorder import HermesStateRecorderMiddleware
@@ -187,6 +187,16 @@ def create_hermes_agent(
     # in SkillLibrary.list() is dead code and the knob is a silent no-op (gh #74).
     library = SkillLibrary(_default_skill_dirs(cfg), config=cfg.skills_filter_config(), audit_log=audit_log)
     library.set_mutation_context(session_id=sid, source="agent")
+    # Scan once, here, so a SKILL.md with broken frontmatter is reported while the
+    # agent is being built — before the REPL banner — rather than never. This is the
+    # worse half of gh #81: the skill vanishes from the *live agent* with no signal
+    # at all, and a user who never runs `skills list` has nothing to go on.
+    # SkillLoaderMiddleware re-scans on every model call, so warning from inside the
+    # scan would repeat the line for the whole session; warning once from the
+    # build path is the one place that is both early and non-repeating.
+    library.list()
+    for err in library.load_errors:
+        log.warning("%s", format_load_error(err))
 
     # Bring-your-own-model: caller-supplied instances bypass init_chat_model
     # entirely so Azure / Bedrock / OpenAI-compatible proxies / anything

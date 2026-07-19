@@ -1077,6 +1077,20 @@ def _skill_library(*, with_audit: bool = True) -> Any:
     return lib
 
 
+def _warn_skill_load_errors(lib: Any) -> None:
+    """Print one stderr warning per SKILL.md the last scan had to drop.
+
+    Uses the library's own ``format_load_error`` so this line and the
+    ``__error__/<dir>: parse failure: ...`` row ``skills audit`` prints are
+    generated from the same detection and the same wording (gh #81). Never
+    changes the caller's exit code: a broken skill is a warning, not a failure.
+    """
+    from langstage_hermes.skills.library import format_load_error
+
+    for err in getattr(lib, "load_errors", []):
+        click.echo(click.style(f"warning: {format_load_error(err)}", fg="yellow"), err=True)
+
+
 def _audit_log() -> Any:
     """Open the per-home skill-mutation log."""
     from langstage_hermes.config import hermes_home
@@ -1094,6 +1108,15 @@ def skills_list(category: str | None, query: str) -> None:
     """List discovered skills (bundled + user)."""
     lib = _skill_library()
     items = lib.list()
+    # A SKILL.md with broken frontmatter is dropped from the library, so it just
+    # isn't in `items` — and `skills list` is exactly where a user checks "did my
+    # skill load?". Say so instead of leaving them to guess (gh #81). On **stderr**:
+    # stdout here is a listing that gets piped/grepped, and this is a diagnostic,
+    # not a row. Warning only — the exit code stays 0 and the other skills still
+    # list, matching how the loader itself tolerates one bad file. Emitted before
+    # any --category/--query filtering, since the drop is independent of the filter
+    # (and the `No skills match.` path returns early).
+    _warn_skill_load_errors(lib)
     if category:
         items = [s for s in items if (s.category or "") == category]
     if query:
