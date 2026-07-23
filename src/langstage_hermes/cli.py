@@ -231,6 +231,22 @@ def _load_config() -> Any:
     return HermesConfig.resolve()
 
 
+def _configured_hermes_home() -> Path | None:
+    """The ``HERMES_HOME`` the user *explicitly* set via env, or ``None``.
+
+    Mirrors the override arm of :func:`config.hermes_home` — the canonical
+    ``LANGSTAGE_HERMES_HOME``, then legacy ``DEEPAGENT_HERMES_HOME``, then plain
+    ``HERMES_HOME``. Returns ``None`` when none is set, i.e. when
+    ``hermes_home()`` would fall back to the implicit default
+    (``~/.langstage-hermes``). ``demo`` uses this to decide whether to record
+    into the user's real store (they signalled a persistent home) or a throwaway
+    (a bare ``demo`` must not litter the default home) — the gh #88 fix that makes
+    the documented ``demo`` -> ``search`` loop actually close.
+    """
+    override = os.getenv("LANGSTAGE_HERMES_HOME") or os.getenv("DEEPAGENT_HERMES_HOME") or os.getenv("HERMES_HOME")
+    return Path(override) if override else None
+
+
 def _preflight_model_key(model_for_run: str, *, suggest_verify: bool = False) -> None:
     """Provider-aware API-key preflight shared by ``verify`` and ``chat``.
 
@@ -1123,12 +1139,26 @@ def search(
             click.echo(_json.dumps({"mode": "empty", "db_path": str(db_path), "results": [], "sessions": [], "messages": []}))
         else:
             click.echo(click.style(f"No session store yet at {db_path}.", fg="yellow"))
-            click.echo(
-                click.style(
-                    "  Populate one with `langstage-hermes demo` or a `chat` session, then search it.",
-                    fg="bright_black",
+            # The hint has to be true for the path the user is actually on (gh #88).
+            # `demo` records into the HERMES_HOME the user SET; with none set it uses
+            # a throwaway and can't populate this default home — so don't tell an
+            # unset user to just `demo` (that was the loop). Name the requirement.
+            if _configured_hermes_home() is not None:
+                click.echo(
+                    click.style(
+                        "  Populate it with `langstage-hermes demo` (records into this HERMES_HOME) "
+                        "or a `chat` session, then search it.",
+                        fg="bright_black",
+                    )
                 )
-            )
+            else:
+                click.echo(
+                    click.style(
+                        f"  Populate it: set HERMES_HOME to {db_path.parent} and run `langstage-hermes demo` "
+                        "(or a `chat` session), then search it.",
+                        fg="bright_black",
+                    )
+                )
         return
 
     store = SqliteFtsStore(db_path=str(db_path))
@@ -2147,7 +2177,8 @@ def verify(model_id: str | None, keep_workspace: bool) -> None:
 @click.option(
     "--keep-workspace",
     is_flag=True,
-    help="Keep the throwaway HERMES_HOME so you can inspect the generated SKILL.md / MEMORY.md yourself.",
+    help="Keep the throwaway HERMES_HOME so you can inspect the generated SKILL.md / MEMORY.md yourself "
+    "(no-op when HERMES_HOME is set — a real home is never removed).",
 )
 def demo(nudge_interval: int, keep_workspace: bool) -> None:
     """Watch the reflection→skill-creation loop close — keyless, offline, deterministic.
@@ -2161,8 +2192,17 @@ def demo(nudge_interval: int, keep_workspace: bool) -> None:
     ``ReflectionMiddleware``, the real ``task`` review dispatch, ``skill_manage``
     / ``memory`` tools, ``SkillLibrary.write()``, the audit log and FTS5 store —
     against a scripted fake model instead of a live provider. No network, no key.
-    It writes real side effects under a throwaway ``HERMES_HOME`` and prints the
-    generated skill so you can see exactly what the loop produces (gh #69).
+    It prints the generated skill so you can see exactly what the loop produces.
+
+    Where the side effects land depends on ``HERMES_HOME`` (gh #88):
+
+    \b
+      - ``HERMES_HOME`` set   → records into that real ``<HERMES_HOME>/state.db``,
+        so ``langstage-hermes search`` reads the demo session straight back —
+        exactly what the README and the empty-store hint promise.
+      - ``HERMES_HOME`` unset → a throwaway ``mkdtemp`` home, removed on exit
+        (``--keep-workspace`` keeps it), so a bare ``demo`` never litters the
+        default ``~/.langstage-hermes`` (gh #69).
     """
     import tempfile
 
@@ -2171,9 +2211,34 @@ def demo(nudge_interval: int, keep_workspace: bool) -> None:
     click.echo(click.style("langstage-hermes demo — reflection→skill loop (offline, no API key)", fg="cyan", bold=True))
     click.echo()
 
-    home = Path(tempfile.mkdtemp(prefix="dah-demo-"))
+    # gh #88: honour an explicitly-set HERMES_HOME so `demo` populates the very
+    # store `search` reads (the documented populate->search loop). Only fall back
+    # to a throwaway when HERMES_HOME is unset — a bare `demo` stays side-effect
+    # free and never pollutes the default ~/.langstage-hermes.
+    configured_home = _configured_hermes_home()
+    persistent = configured_home is not None
+    if persistent:
+        home = configured_home  # type: ignore[assignment]  # not None when persistent
+        home.mkdir(parents=True, exist_ok=True)
+    else:
+        home = Path(tempfile.mkdtemp(prefix="dah-demo-"))
     try:
-        click.echo(click.style(f"  · throwaway HERMES_HOME: {home}", fg="bright_black"))
+        if persistent:
+            click.echo(click.style(f"  · HERMES_HOME: {home}", fg="bright_black"))
+            click.echo(
+                click.style(
+                    "    (recording into this store so `langstage-hermes search` reads it back)",
+                    fg="bright_black",
+                )
+            )
+        else:
+            click.echo(click.style(f"  · throwaway HERMES_HOME: {home}", fg="bright_black"))
+            click.echo(
+                click.style(
+                    "    (set HERMES_HOME to persist the demo session for `langstage-hermes search`)",
+                    fg="bright_black",
+                )
+            )
         click.echo(
             click.style(
                 f"  · running the agent with a scripted model (nudge_interval={nudge_interval}) ...",
@@ -2231,8 +2296,21 @@ def demo(nudge_interval: int, keep_workspace: bool) -> None:
 
         click.echo()
         click.echo(click.style("DEMO: PASS — the reflection→skill-creation loop closed with no API key.", fg="green", bold=True))
+        if persistent:
+            # The store is real and staying put — point the user at the exact next
+            # command the README promises works (gh #88).
+            click.echo(
+                click.style(
+                    '  next: `langstage-hermes search "python"` — read the session the demo just recorded',
+                    fg="bright_black",
+                )
+            )
     finally:
-        if keep_workspace:
+        if persistent:
+            # Never remove the user's real HERMES_HOME — the whole point is that
+            # the demo session persists there for `search` (gh #88).
+            pass
+        elif keep_workspace:
             click.echo()
             click.echo(click.style(f"  · workspace kept for inspection: {home}", fg="bright_black"))
         else:
