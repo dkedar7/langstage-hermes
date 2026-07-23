@@ -27,7 +27,9 @@ its source and the env var / TOML key that sets it.
 
 from __future__ import annotations
 
+import difflib
 import os
+import sys
 from collections.abc import Callable
 from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
@@ -150,6 +152,143 @@ def _toml_source_label(parsed: list[tuple[Path, dict]], tkey: str) -> str:
         if _get_dotted(data, tkey) is not None:
             winner = p
     return f"toml ({winner.name})" if winner is not None else "toml"
+
+
+# ── Unknown-key detection (gh #84) ───────────────────────────────────
+#
+# A syntactically valid but unrecognized key in a hermes TOML is silently
+# dropped — the CLI already warns on the two *other* ways config input can be
+# wrong (a malformed file, a deprecated env var) but a mistyped key had no
+# signal at all. The accepted key names are internally inconsistent
+# (``memory.memory_enabled`` next to ``memory.nudge_interval``,
+# ``model.aux_model`` for ``model_aux``), so a near-miss is the natural first
+# guess. We diff each file's leaf keys against the resolver's OWN key map — so
+# the recognized set can never drift from what actually resolves — and warn
+# (never error, never change the exit code). ASCII-only for cp1252 consoles.
+
+# Dedupe the note per (file, key) per process — resolve() runs many times per
+# invocation and would otherwise repeat the same line.
+_warned_unknown_toml_keys: set[str] = set()
+
+
+def _field_is_dict(f: Any) -> bool:
+    """True for a dataclass field whose value is a free-form dict.
+
+    Such a field (e.g. ``skills_platform_disabled`` → ``skills.platform_disabled``)
+    holds arbitrary user-chosen sub-keys (platform names), so its children are
+    DATA, not config keys — we must never warn on them.
+    """
+    if f.default_factory is not MISSING:  # type: ignore[misc]
+        try:
+            return isinstance(f.default_factory(), dict)  # type: ignore[misc]
+        except Exception:  # pragma: no cover - defensive
+            return False
+    return isinstance(getattr(f, "default", None), dict)
+
+
+def _iter_unknown_leaf_keys(
+    data: dict,
+    recognized: set[str],
+    containers: set[str],
+    prefix: str = "",
+) -> Any:
+    """Yield the dotted path of every leaf key in ``data`` not in ``recognized``.
+
+    Descends into nested tables (so a ``[section]`` header is never itself
+    flagged — only its leaves are), but stops at a recognized key or a
+    free-form container table (whose children are data, not keys).
+    """
+    for k, v in data.items():
+        dotted = f"{prefix}.{k}" if prefix else k
+        if dotted in recognized:
+            continue  # a recognized field (incl. dict-valued ones) — don't descend
+        if dotted in containers:
+            continue  # free-form table (configurable, platform_disabled) — data below
+        if isinstance(v, dict):
+            yield from _iter_unknown_leaf_keys(v, recognized, containers, dotted)
+        else:
+            yield dotted
+
+
+def _suggest_recognized_key(unknown_dotted: str, recognized: set[str]) -> str | None:
+    """Nearest accepted key name for ``unknown_dotted`` (the "did you mean").
+
+    Prefers a match within the same TOML section, and returns the accepted
+    *leaf* name (``memory_enabled``, ``aux_model``) — what the user would write
+    under the ``[section]`` header.
+    """
+    section = unknown_dotted.rsplit(".", 1)[0] if "." in unknown_dotted else ""
+    leaf = unknown_dotted.rsplit(".", 1)[-1]
+    same_section = [k for k in recognized if (k.rsplit(".", 1)[0] if "." in k else "") == section]
+    pool = same_section or list(recognized)
+
+    leaf_to_key: dict[str, str] = {}
+    for k in pool:
+        leaf_to_key.setdefault(k.rsplit(".", 1)[-1], k)
+    matches = difflib.get_close_matches(leaf, list(leaf_to_key), n=1, cutoff=0.6)
+    if matches:
+        return matches[0]
+    dotted_matches = difflib.get_close_matches(unknown_dotted, list(pool), n=1, cutoff=0.6)
+    if dotted_matches:
+        return dotted_matches[0].rsplit(".", 1)[-1]
+    return None
+
+
+def _format_unknown_key_note(path: Path, dotted: str, suggestion: str | None) -> str:
+    """One ASCII-only ``note:`` line naming the dropped key (+ optional hint)."""
+    if "." in dotted:
+        section, leaf = dotted.rsplit(".", 1)
+        shown = f"[{section}] {leaf}"
+    else:
+        shown = dotted
+    note = f"note: unknown config key '{shown}' in {path.name} (ignored)."
+    if suggestion:
+        note += f" Did you mean '{suggestion}'?"
+    return note
+
+
+def hermes_unknown_toml_keys(
+    parsed: list[tuple[Path, dict]],
+    recognized: set[str] | None = None,
+    containers: set[str] | None = None,
+) -> list[tuple[Path, str, str | None]]:
+    """``(path, dotted_key, suggestion)`` for every unrecognized key.
+
+    Pure (no I/O) so it is directly testable. ``recognized`` / ``containers``
+    default to :class:`HermesConfig`'s own maps, built from the same
+    ``field -> toml-key`` mapping ``--show-config`` prints (gh #84).
+    """
+    if recognized is None:
+        recognized = HermesConfig._recognized_toml_keys()
+    if containers is None:
+        containers = HermesConfig._toml_container_keys()
+    out: list[tuple[Path, str, str | None]] = []
+    for path, data in parsed:
+        if not isinstance(data, dict):  # pragma: no cover - defensive
+            continue
+        for dotted in _iter_unknown_leaf_keys(data, recognized, containers):
+            out.append((path, dotted, _suggest_recognized_key(dotted, recognized)))
+    return out
+
+
+def _warn_unknown_hermes_keys(parsed: list[tuple[Path, dict]]) -> None:
+    """Emit one deduped stderr ``note:`` per unrecognized hermes-TOML key.
+
+    Warning only — never raises, never changes the exit code (a config file
+    that suddenly fails to load would be a far worse regression than a dropped
+    key). Suppressed under pytest (keeps suites clean, like the base config's
+    legacy/malformed notices) and via ``LANGSTAGE_SUPPRESS_UNKNOWN_KEY_NOTICE``.
+    """
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return
+    if _env_bool(os.getenv("LANGSTAGE_SUPPRESS_UNKNOWN_KEY_NOTICE")):
+        return
+    for path, dotted, suggestion in hermes_unknown_toml_keys(parsed):
+        dedupe_key = f"{path}::{dotted}"
+        if dedupe_key in _warned_unknown_toml_keys:
+            continue
+        _warned_unknown_toml_keys.add(dedupe_key)
+        print(_format_unknown_key_note(path, dotted, suggestion), file=sys.stderr)
 
 
 # ── Field casters ────────────────────────────────────────────────────
@@ -408,6 +547,35 @@ class HermesConfig(HostConfig):
             "platform_disabled": self.skills_platform_disabled,
         }
 
+    # ── recognized-key introspection (gh #84) ──
+
+    @classmethod
+    def _recognized_toml_keys(cls) -> set[str]:
+        """Every dotted TOML key the resolver accepts.
+
+        Built from the live ``field -> toml-key`` map (base ``HostConfig`` keys
+        like ``agent.spec`` + every Hermes key), so the unknown-key check can
+        never drift from what ``--show-config`` prints / what actually resolves.
+        """
+        return set(cls._toml_map().values())
+
+    @classmethod
+    def _toml_container_keys(cls) -> set[str]:
+        """Dotted keys whose value is a free-form table (children are data).
+
+        Covers dict-valued fields (e.g. ``skills.platform_disabled``, keyed by
+        arbitrary platform names) plus the ``configurable`` passthrough table
+        forwarded to the graph — none of whose sub-keys are config keys, so we
+        must not warn on them.
+        """
+        tmap = cls._toml_map()
+        containers = {"configurable"}
+        for f in fields(cls):
+            tkey = tmap.get(f.name)
+            if tkey is not None and _field_is_dict(f):
+                containers.add(tkey)
+        return containers
+
     # ── resolution ──
 
     @classmethod
@@ -504,6 +672,12 @@ class HermesConfig(HostConfig):
         obj = cls(**values)
         obj._sources = sources  # type: ignore[attr-defined]
         obj._toml_paths = base_toml_paths + hermes_toml_paths  # type: ignore[attr-defined]
+        # Warn (never fail) on unrecognized keys in the hermes TOML files — the
+        # last silent config-failure path. Uses the already-parsed per-file dicts,
+        # so it costs a dict walk, not a re-read, and covers BOTH the global
+        # $HERMES_HOME/config.toml and the project langstage-hermes.toml (gh #84).
+        if use_toml:
+            _warn_unknown_hermes_keys(hermes_toml_parsed)
         return obj
 
     def describe(self, omit_keys: list[str] | None = None, configurable: dict | None = None) -> str:
@@ -550,5 +724,6 @@ __all__ = [
     "HERMES_PROJECT_TOML",
     "HermesConfig",
     "hermes_home",
+    "hermes_unknown_toml_keys",
     "load_hermes_toml_config",
 ]

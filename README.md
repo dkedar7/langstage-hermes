@@ -125,6 +125,24 @@ langstage-hermes chat -a my_agent.py:graph
 #   /quit
 ```
 
+## Search your session history
+
+Every conversation is indexed in a local SQLite FTS5 store at `<HERMES_HOME>/state.db`. Query it from the terminal — **keyless and offline, no model call** — in the three documented modes:
+
+```bash
+# DISCOVERY — BM25 top-N with a highlighted snippet (prints session_id + message_id)
+langstage-hermes search "profile slow python"
+langstage-hermes search "profile slow python" --limit 10 --json
+
+# SCROLL — a ±window view centred on a message (window clamped 1–20)
+langstage-hermes search --session sess-1a2b3c --around 8 --window 5
+
+# BROWSE — recent sessions, newest first (also the default with no query)
+langstage-hermes search --browse --limit 20
+```
+
+`--json` emits structured output for scripting/CI, mirroring `audit`/`skills`. FTS5 syntax works: multi-word queries default to AND, and `OR`, quoted `"phrases"`, and prefix `wildcards*` are all honored. Populate a store to try it against with the keyless `langstage-hermes demo`.
+
 ## Load into an existing host
 
 Any LangStage host can run this agent:
@@ -173,7 +191,7 @@ See [SPEC.md](./SPEC.md) for the full 21-section requirements doc. Top-level lay
 | Skill loader (system-prompt injection + progressive disclosure) | ✅ working |
 | `skill_view` / `skill_manage` / `skills_list` tools | ✅ working |
 | Frozen-snapshot memory (MEMORY.md / USER.md) | ✅ working — verified live (702 bytes written autonomously) |
-| SQLite FTS5 store + `session_search` (3 modes) | ✅ working |
+| SQLite FTS5 store + `session_search` (3 modes) | ✅ working — also a keyless `langstage-hermes search` CLI (DISCOVERY / SCROLL / BROWSE, `--json`) |
 | `MarkdownProvider` (bundled, opt-in via `memory.provider="markdown"`; the default is no-op) | ✅ keyword search over `<HERMES_HOME>/memories/notes/*.md` — zero deps |
 | Iteration budget middleware | ✅ working |
 | Compression middleware (13-section template) | ✅ working |

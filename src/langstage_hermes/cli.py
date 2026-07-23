@@ -146,6 +146,7 @@ def _print_chat_context(
     session_id: str,
     agent: Any,
     agent_source: str = "builtin",
+    spec: str | None = None,
 ) -> None:
     """Print the per-session config block below the banner.
 
@@ -157,12 +158,18 @@ def _print_chat_context(
     state.db would land.
 
     Args:
-        agent_source: ``"spec"`` if the agent was loaded via
-            ``LANGSTAGE_AGENT_SPEC`` (or legacy ``DEEPAGENT_AGENT_SPEC``), ``"builtin"`` otherwise. Drives
-            the framing of the ``spec`` row — when spec is *consumed*
-            we drop the "advisory" annotation; when spec is *set but
-            ignored* (e.g., on the bare invocation help path) the
-            annotation reminds the user it's only advisory there.
+        agent_source: ``"spec"`` if the agent was loaded from a spec
+            (``-a`` flag, ``LANGSTAGE_AGENT_SPEC`` / legacy
+            ``DEEPAGENT_AGENT_SPEC`` env, or the ``[agent] spec`` TOML
+            field), ``"builtin"`` otherwise. Drives the framing of the
+            ``spec`` row — when spec is *consumed* we drop the "advisory"
+            annotation; when spec is *set but ignored* (e.g., on the bare
+            invocation help path) the annotation reminds the user it's
+            only advisory there.
+        spec: The effective spec string to display (from any layer,
+            incl. TOML). When ``None`` we fall back to the env vars, so
+            a TOML-sourced spec is still surfaced (gh #85) without the
+            row vanishing when the spec came from a file rather than env.
     """
     try:
         is_tty = sys.stdout.isatty()
@@ -195,12 +202,13 @@ def _print_chat_context(
         ("home", _shorten_path(str(getattr(cfg, "hermes_home", "(unset)")))),
         ("session", session_id),
     ]
-    spec = os.environ.get("LANGSTAGE_AGENT_SPEC") or os.environ.get("DEEPAGENT_AGENT_SPEC")
+    if spec is None:
+        spec = os.environ.get("LANGSTAGE_AGENT_SPEC") or os.environ.get("DEEPAGENT_AGENT_SPEC")
     if spec:
-        # Spec consumed → no advisory annotation; the env var is doing
-        # work. Spec set but not consumed (e.g., bare invocation that
+        # Spec consumed → no advisory annotation; the spec (env or TOML) is
+        # doing work. Spec set but not consumed (e.g., bare invocation that
         # bypassed _resolve_agent) → keep the advisory annotation so
-        # the user knows the var isn't shaping this output.
+        # the user knows the value isn't shaping this output.
         if agent_source == "spec":
             rows.append(("spec", f"{spec}  (active)"))
         else:
@@ -332,15 +340,35 @@ def _try_import_agent() -> tuple[Any | None, str | None]:
     return factory, None
 
 
-def _resolve_agent(spec: str | None = None) -> tuple[Any | None, str, str | None]:
-    """Resolve the chat agent source — flag/spec env var or built-in factory.
+def _effective_agent_spec(cli_spec: str | None, config_spec: str | None = None) -> str | None:
+    """The agent spec to load, in documented precedence order.
+
+    ``-a/--agent`` flag  >  ``LANGSTAGE_AGENT_SPEC`` env (legacy
+    ``DEEPAGENT_AGENT_SPEC``)  >  ``config_spec`` (the resolved
+    ``[agent] spec`` TOML field, i.e. ``cfg.agent_spec``)  >  ``None``
+    (built-in default). This is the single place the ``chat`` precedence
+    is expressed, so ``_resolve_agent`` and the context block can't drift
+    (gh #85).
+    """
+    return cli_spec or os.environ.get("LANGSTAGE_AGENT_SPEC") or os.environ.get("DEEPAGENT_AGENT_SPEC") or config_spec
+
+
+def _resolve_agent(spec: str | None = None, config_spec: str | None = None) -> tuple[Any | None, str, str | None]:
+    """Resolve the chat agent source — flag / env var / TOML or built-in factory.
 
     ``spec`` (the ``-a/--agent`` CLI flag) wins; otherwise the
     ``LANGSTAGE_AGENT_SPEC`` env var (legacy ``DEEPAGENT_AGENT_SPEC`` still works) is the host-adoption convention
-    every deep-agent surface respects (cowork-dash, deepagent-code, …).
-    If either is set, honour it here too: load the named callable/graph via
-    :func:`langstage_core.load_agent_spec`. If not, fall through
-    to the built-in ``create_hermes_agent`` factory.
+    every deep-agent surface respects (cowork-dash, deepagent-code, …);
+    below that, ``config_spec`` — the resolved ``[agent] spec`` TOML field
+    (``cfg.agent_spec``, the very value ``--show-config`` prints and
+    ``langstage-agui`` already honours). If any is set, honour it here too:
+    load the named callable/graph via :func:`langstage_core.load_agent_spec`.
+    If not, fall through to the built-in ``create_hermes_agent`` factory.
+
+    Passing ``config_spec`` closes the gap where a documented ``[agent] spec``
+    resolved by ``--show-config`` was silently dropped by ``chat`` (gh #85);
+    the env var and ``-a`` flag still win over it, matching every other layered
+    field and how ``langstage-agui`` resolves the same key.
 
     Returns:
         ``(agent_or_factory, source, error_message)``:
@@ -349,8 +377,8 @@ def _resolve_agent(spec: str | None = None) -> tuple[Any | None, str, str | None
           "spec"`` it is the spec target itself (already a graph, or a
           callable that returns one); when ``source == "builtin"`` it
           is the ``create_hermes_agent`` factory.
-        - ``source`` is ``"spec"`` when the env var was honoured,
-          ``"builtin"`` otherwise.
+        - ``source`` is ``"spec"`` when a spec (flag, env, or TOML) was
+          honoured, ``"builtin"`` otherwise.
         - ``error_message`` is non-None when loading failed.
 
     Contract check on spec-loaded agents is intentionally light — we
@@ -361,7 +389,7 @@ def _resolve_agent(spec: str | None = None) -> tuple[Any | None, str, str | None
     check below catches the common typo ("pointed the spec at a
     module, not a graph") without that cost.
     """
-    spec = spec or os.environ.get("LANGSTAGE_AGENT_SPEC") or os.environ.get("DEEPAGENT_AGENT_SPEC")
+    spec = _effective_agent_spec(spec, config_spec)
     if spec:
         try:
             from langstage_core import load_agent_spec
@@ -446,16 +474,12 @@ def cli(ctx: click.Context, show_config: bool, version: bool) -> None:
 )
 def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) -> None:
     """Interactive chat REPL with slash-command dispatch."""
-    target, source, err = _resolve_agent(agent_spec)
-    if err:
-        click.echo(click.style(err, fg="red" if source == "spec" else "yellow"), err=True)
-        if source == "builtin":
-            click.echo(
-                "(The rest of the CLI — cron, plugins, doctor, --show-config — still works.)",
-                err=True,
-            )
-        sys.exit(1)
-
+    # Resolve config FIRST so the ``[agent] spec`` TOML field participates in
+    # agent selection. It was loaded a few lines below and never consulted, so a
+    # documented spec that ``--show-config`` resolves and attributes to the file
+    # was silently dropped while only ``-a`` and ``LANGSTAGE_AGENT_SPEC`` worked —
+    # and the sibling ``langstage-agui`` honoured the same key (gh #85). Model /
+    # workspace overrides fold in here too so cfg is final before resolution.
     cfg = _load_config()
     overrides: dict[str, Any] = {}
     if model_id:
@@ -466,6 +490,19 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
         from langstage_hermes.config import HermesConfig
 
         cfg = HermesConfig.resolve(overrides=overrides)
+
+    # Precedence: -a flag > LANGSTAGE_AGENT_SPEC env > [agent] spec TOML
+    # (cfg.agent_spec) > built-in. Mirrors langstage-agui, which passes --agent as
+    # an override and then loads cfg.agent_spec.
+    target, source, err = _resolve_agent(agent_spec, config_spec=cfg.agent_spec)
+    if err:
+        click.echo(click.style(err, fg="red" if source == "spec" else "yellow"), err=True)
+        if source == "builtin":
+            click.echo(
+                "(The rest of the CLI — cron, plugins, doctor, --show-config — still works.)",
+                err=True,
+            )
+        sys.exit(1)
 
     # Provider-aware API-key preflight BEFORE building the agent / entering the
     # REPL — the same gate verify/doctor run. Without the configured model's key
@@ -538,6 +575,7 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
         session_id=session_id,
         agent=target,
         agent_source=source,
+        spec=_effective_agent_spec(agent_spec, cfg.agent_spec),
     )
     while True:
         try:
@@ -977,6 +1015,140 @@ def _run_agent_turn(agent: Any, user_text: str, state: dict[str, Any]) -> None:
     core's ``extractors=`` param so skill / memory / compression callouts surface
     (see :func:`_run_agent_turn_agui` and :func:`_render_extraction_frame`)."""
     _run_agent_turn_agui(agent, user_text, state)
+
+
+# ── search ─────────────────────────────────────────────────────────
+
+
+def _render_search_human(result: dict[str, Any]) -> None:
+    """Compact, colored render of a structured search result — matches the
+    audit/skills/cron CLI style (one line per hit, ids first). ASCII markers."""
+    mode = result.get("mode")
+    if mode == "discovery":
+        results = result.get("results", [])
+        if not results:
+            click.echo(f'No sessions match "{result.get("query", "")}".')
+            return
+        click.echo(click.style(f'Search "{result["query"]}" — {result["count"]} session(s), by BM25 relevance:', fg="cyan"))
+        for r in results:
+            title = r["title"] or "(no title)"
+            click.echo(f"  {r['session_id']}  #{r['message_id']}  {r['role']:<9}  {title}")
+            if r["snippet"]:
+                click.echo(click.style(f"      {r['snippet']}", fg="bright_black"))
+        click.echo(
+            click.style(
+                "\n  Scroll a hit: `langstage-hermes search --session <id> --around <msg_id> --window 10`",
+                fg="bright_black",
+            )
+        )
+    elif mode == "browse":
+        sessions = result.get("sessions", [])
+        if not sessions:
+            click.echo("No sessions in the store yet.")
+            return
+        click.echo(click.style(f"Recent sessions ({result['count']}):", fg="cyan"))
+        for s in sessions:
+            title = (s["title"] or "(no title)")[:28]
+            click.echo(
+                f"  {s['session_id']}  {title:<28}  [{s['source'] or '?'}]  "
+                f"msgs={s['message_count']}  last={_fmt_ts(s.get('last_active'))}"
+            )
+            if s["preview"]:
+                click.echo(click.style(f"      {s['preview']}", fg="bright_black"))
+    elif mode == "scroll":
+        if result.get("error"):
+            click.echo(click.style(f"scroll: {result['error']}", fg="yellow"))
+            return
+        title = result.get("title") or "(no title)"
+        click.echo(click.style(f"Session {result['session_id']} — {title}", fg="cyan"))
+        click.echo(
+            click.style(
+                f"  anchor #{result['anchor_message_id']}  (+/-{result['window']}; "
+                f"{result['messages_before']} before, {result['messages_after']} after)",
+                fg="bright_black",
+            )
+        )
+        for m in result.get("messages", []):
+            marker = "  <- anchor" if m["anchor"] else ""
+            tool = f" [{m['tool_name']}]" if m.get("tool_name") else ""
+            click.echo(f"  #{m['message_id']} {m['role']}{tool}: {m['content']}{marker}")
+        if result.get("at_start"):
+            click.echo(click.style("  (at session start)", fg="bright_black"))
+        if result.get("at_end"):
+            click.echo(click.style("  (at session end)", fg="bright_black"))
+
+
+@cli.command()
+@click.argument("query", nargs=-1)
+@click.option("--session", "session_id", default=None, help="SCROLL: session id to scroll within.")
+@click.option("--around", "around_message_id", type=int, default=None, help="SCROLL: anchor message id.")
+@click.option("--window", type=int, default=5, show_default=True, help="SCROLL: +/- messages around the anchor (1-20).")
+@click.option("--browse", is_flag=True, help="BROWSE: list recent sessions chronologically (ignores QUERY).")
+@click.option("--limit", type=int, default=10, show_default=True, help="Max results (DISCOVERY / BROWSE).")
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def search(
+    query: tuple[str, ...],
+    session_id: str | None,
+    around_message_id: int | None,
+    window: int,
+    browse: bool,
+    limit: int,
+    as_json: bool,
+) -> None:
+    """Search the local FTS5 session store — keyless, offline, no model.
+
+    The FTS5 session index is a headline feature, but its only reader was the
+    in-chat ``session_search`` tool (needs a live model + key). This exposes the
+    SAME store to a human, in the three documented modes (SPEC §13.3):
+
+    \b
+      DISCOVERY  langstage-hermes search "profile slow python" [--limit N] [--json]
+      SCROLL     langstage-hermes search --session <sid> --around <msg_id> [--window N]
+      BROWSE     langstage-hermes search --browse [--limit N]
+
+    Reads only ``<HERMES_HOME>/state.db`` (the path ``doctor`` / ``--show-config``
+    report). Prints session_id + message_id so hits are actionable. (gh #79)
+    """
+    import json as _json
+
+    from langstage_hermes.config import hermes_home
+    from langstage_hermes.search.session_search import search_sessions_structured
+    from langstage_hermes.store.sqlite_fts import SqliteFtsStore
+
+    db_path = hermes_home() / "state.db"
+    if not db_path.exists():
+        # No store yet — a clear message, never a traceback, and never create an
+        # empty DB as a side effect of a read command.
+        if as_json:
+            click.echo(_json.dumps({"mode": "empty", "db_path": str(db_path), "results": [], "sessions": [], "messages": []}))
+        else:
+            click.echo(click.style(f"No session store yet at {db_path}.", fg="yellow"))
+            click.echo(
+                click.style(
+                    "  Populate one with `langstage-hermes demo` or a `chat` session, then search it.",
+                    fg="bright_black",
+                )
+            )
+        return
+
+    store = SqliteFtsStore(db_path=str(db_path))
+    try:
+        result = search_sessions_structured(
+            store,
+            query=" ".join(query),
+            session_id=session_id or "",
+            around_message_id=around_message_id,
+            window=window,
+            browse=browse,
+            limit=max(1, limit),
+        )
+    finally:
+        store.close()
+
+    if as_json:
+        click.echo(_json.dumps(result, default=str))
+        return
+    _render_search_human(result)
 
 
 # ── tools ──────────────────────────────────────────────────────────
