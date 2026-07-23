@@ -146,6 +146,7 @@ def _print_chat_context(
     session_id: str,
     agent: Any,
     agent_source: str = "builtin",
+    spec: str | None = None,
 ) -> None:
     """Print the per-session config block below the banner.
 
@@ -157,12 +158,18 @@ def _print_chat_context(
     state.db would land.
 
     Args:
-        agent_source: ``"spec"`` if the agent was loaded via
-            ``LANGSTAGE_AGENT_SPEC`` (or legacy ``DEEPAGENT_AGENT_SPEC``), ``"builtin"`` otherwise. Drives
-            the framing of the ``spec`` row — when spec is *consumed*
-            we drop the "advisory" annotation; when spec is *set but
-            ignored* (e.g., on the bare invocation help path) the
-            annotation reminds the user it's only advisory there.
+        agent_source: ``"spec"`` if the agent was loaded from a spec
+            (``-a`` flag, ``LANGSTAGE_AGENT_SPEC`` / legacy
+            ``DEEPAGENT_AGENT_SPEC`` env, or the ``[agent] spec`` TOML
+            field), ``"builtin"`` otherwise. Drives the framing of the
+            ``spec`` row — when spec is *consumed* we drop the "advisory"
+            annotation; when spec is *set but ignored* (e.g., on the bare
+            invocation help path) the annotation reminds the user it's
+            only advisory there.
+        spec: The effective spec string to display (from any layer,
+            incl. TOML). When ``None`` we fall back to the env vars, so
+            a TOML-sourced spec is still surfaced (gh #85) without the
+            row vanishing when the spec came from a file rather than env.
     """
     try:
         is_tty = sys.stdout.isatty()
@@ -195,12 +202,13 @@ def _print_chat_context(
         ("home", _shorten_path(str(getattr(cfg, "hermes_home", "(unset)")))),
         ("session", session_id),
     ]
-    spec = os.environ.get("LANGSTAGE_AGENT_SPEC") or os.environ.get("DEEPAGENT_AGENT_SPEC")
+    if spec is None:
+        spec = os.environ.get("LANGSTAGE_AGENT_SPEC") or os.environ.get("DEEPAGENT_AGENT_SPEC")
     if spec:
-        # Spec consumed → no advisory annotation; the env var is doing
-        # work. Spec set but not consumed (e.g., bare invocation that
+        # Spec consumed → no advisory annotation; the spec (env or TOML) is
+        # doing work. Spec set but not consumed (e.g., bare invocation that
         # bypassed _resolve_agent) → keep the advisory annotation so
-        # the user knows the var isn't shaping this output.
+        # the user knows the value isn't shaping this output.
         if agent_source == "spec":
             rows.append(("spec", f"{spec}  (active)"))
         else:
@@ -332,15 +340,35 @@ def _try_import_agent() -> tuple[Any | None, str | None]:
     return factory, None
 
 
-def _resolve_agent(spec: str | None = None) -> tuple[Any | None, str, str | None]:
-    """Resolve the chat agent source — flag/spec env var or built-in factory.
+def _effective_agent_spec(cli_spec: str | None, config_spec: str | None = None) -> str | None:
+    """The agent spec to load, in documented precedence order.
+
+    ``-a/--agent`` flag  >  ``LANGSTAGE_AGENT_SPEC`` env (legacy
+    ``DEEPAGENT_AGENT_SPEC``)  >  ``config_spec`` (the resolved
+    ``[agent] spec`` TOML field, i.e. ``cfg.agent_spec``)  >  ``None``
+    (built-in default). This is the single place the ``chat`` precedence
+    is expressed, so ``_resolve_agent`` and the context block can't drift
+    (gh #85).
+    """
+    return cli_spec or os.environ.get("LANGSTAGE_AGENT_SPEC") or os.environ.get("DEEPAGENT_AGENT_SPEC") or config_spec
+
+
+def _resolve_agent(spec: str | None = None, config_spec: str | None = None) -> tuple[Any | None, str, str | None]:
+    """Resolve the chat agent source — flag / env var / TOML or built-in factory.
 
     ``spec`` (the ``-a/--agent`` CLI flag) wins; otherwise the
     ``LANGSTAGE_AGENT_SPEC`` env var (legacy ``DEEPAGENT_AGENT_SPEC`` still works) is the host-adoption convention
-    every deep-agent surface respects (cowork-dash, deepagent-code, …).
-    If either is set, honour it here too: load the named callable/graph via
-    :func:`langstage_core.load_agent_spec`. If not, fall through
-    to the built-in ``create_hermes_agent`` factory.
+    every deep-agent surface respects (cowork-dash, deepagent-code, …);
+    below that, ``config_spec`` — the resolved ``[agent] spec`` TOML field
+    (``cfg.agent_spec``, the very value ``--show-config`` prints and
+    ``langstage-agui`` already honours). If any is set, honour it here too:
+    load the named callable/graph via :func:`langstage_core.load_agent_spec`.
+    If not, fall through to the built-in ``create_hermes_agent`` factory.
+
+    Passing ``config_spec`` closes the gap where a documented ``[agent] spec``
+    resolved by ``--show-config`` was silently dropped by ``chat`` (gh #85);
+    the env var and ``-a`` flag still win over it, matching every other layered
+    field and how ``langstage-agui`` resolves the same key.
 
     Returns:
         ``(agent_or_factory, source, error_message)``:
@@ -349,8 +377,8 @@ def _resolve_agent(spec: str | None = None) -> tuple[Any | None, str, str | None
           "spec"`` it is the spec target itself (already a graph, or a
           callable that returns one); when ``source == "builtin"`` it
           is the ``create_hermes_agent`` factory.
-        - ``source`` is ``"spec"`` when the env var was honoured,
-          ``"builtin"`` otherwise.
+        - ``source`` is ``"spec"`` when a spec (flag, env, or TOML) was
+          honoured, ``"builtin"`` otherwise.
         - ``error_message`` is non-None when loading failed.
 
     Contract check on spec-loaded agents is intentionally light — we
@@ -361,7 +389,7 @@ def _resolve_agent(spec: str | None = None) -> tuple[Any | None, str, str | None
     check below catches the common typo ("pointed the spec at a
     module, not a graph") without that cost.
     """
-    spec = spec or os.environ.get("LANGSTAGE_AGENT_SPEC") or os.environ.get("DEEPAGENT_AGENT_SPEC")
+    spec = _effective_agent_spec(spec, config_spec)
     if spec:
         try:
             from langstage_core import load_agent_spec
@@ -446,16 +474,12 @@ def cli(ctx: click.Context, show_config: bool, version: bool) -> None:
 )
 def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) -> None:
     """Interactive chat REPL with slash-command dispatch."""
-    target, source, err = _resolve_agent(agent_spec)
-    if err:
-        click.echo(click.style(err, fg="red" if source == "spec" else "yellow"), err=True)
-        if source == "builtin":
-            click.echo(
-                "(The rest of the CLI — cron, plugins, doctor, --show-config — still works.)",
-                err=True,
-            )
-        sys.exit(1)
-
+    # Resolve config FIRST so the ``[agent] spec`` TOML field participates in
+    # agent selection. It was loaded a few lines below and never consulted, so a
+    # documented spec that ``--show-config`` resolves and attributes to the file
+    # was silently dropped while only ``-a`` and ``LANGSTAGE_AGENT_SPEC`` worked —
+    # and the sibling ``langstage-agui`` honoured the same key (gh #85). Model /
+    # workspace overrides fold in here too so cfg is final before resolution.
     cfg = _load_config()
     overrides: dict[str, Any] = {}
     if model_id:
@@ -466,6 +490,19 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
         from langstage_hermes.config import HermesConfig
 
         cfg = HermesConfig.resolve(overrides=overrides)
+
+    # Precedence: -a flag > LANGSTAGE_AGENT_SPEC env > [agent] spec TOML
+    # (cfg.agent_spec) > built-in. Mirrors langstage-agui, which passes --agent as
+    # an override and then loads cfg.agent_spec.
+    target, source, err = _resolve_agent(agent_spec, config_spec=cfg.agent_spec)
+    if err:
+        click.echo(click.style(err, fg="red" if source == "spec" else "yellow"), err=True)
+        if source == "builtin":
+            click.echo(
+                "(The rest of the CLI — cron, plugins, doctor, --show-config — still works.)",
+                err=True,
+            )
+        sys.exit(1)
 
     # Provider-aware API-key preflight BEFORE building the agent / entering the
     # REPL — the same gate verify/doctor run. Without the configured model's key
@@ -538,6 +575,7 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
         session_id=session_id,
         agent=target,
         agent_source=source,
+        spec=_effective_agent_spec(agent_spec, cfg.agent_spec),
     )
     while True:
         try:
