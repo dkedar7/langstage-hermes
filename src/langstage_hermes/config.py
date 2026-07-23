@@ -45,6 +45,7 @@ from langstage_core.host.config import (
     _malformed_toml,
     _read_toml,
     _warn_legacy_env,
+    _warn_malformed_env_value,
     load_toml_config,
 )
 
@@ -659,8 +660,19 @@ class HermesConfig(HostConfig):
                     if ev not in (None, "") and legacy != canonical:
                         _warn_legacy_env(legacy, canonical)
                 if ev is not None and ev != "":
-                    val = caster(ev)
-                    src = f"env:{used}"
+                    try:
+                        val = caster(ev)
+                        src = f"env:{used}"
+                    except (ValueError, TypeError) as exc:
+                        # A malformed numeric LANGSTAGE_HERMES_* env var used to raise
+                        # an uncaught ValueError out of resolve() and crash --show-config,
+                        # verify, skills list, curator, plugins — the very commands the
+                        # README says to run first (gh #83). Degrade like the base
+                        # HostConfig.resolve() now does (langstage-core #104): keep the
+                        # value resolved so far (a TOML value if one is set, else the
+                        # default), leave its source intact, and emit the same one-line
+                        # note. Same core helper so the wording can't drift.
+                        _warn_malformed_env_value(used, ev, exc, val, src)
 
             if name in overrides:
                 val = overrides[name]
