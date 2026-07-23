@@ -1017,6 +1017,140 @@ def _run_agent_turn(agent: Any, user_text: str, state: dict[str, Any]) -> None:
     _run_agent_turn_agui(agent, user_text, state)
 
 
+# ── search ─────────────────────────────────────────────────────────
+
+
+def _render_search_human(result: dict[str, Any]) -> None:
+    """Compact, colored render of a structured search result — matches the
+    audit/skills/cron CLI style (one line per hit, ids first). ASCII markers."""
+    mode = result.get("mode")
+    if mode == "discovery":
+        results = result.get("results", [])
+        if not results:
+            click.echo(f'No sessions match "{result.get("query", "")}".')
+            return
+        click.echo(click.style(f'Search "{result["query"]}" — {result["count"]} session(s), by BM25 relevance:', fg="cyan"))
+        for r in results:
+            title = r["title"] or "(no title)"
+            click.echo(f"  {r['session_id']}  #{r['message_id']}  {r['role']:<9}  {title}")
+            if r["snippet"]:
+                click.echo(click.style(f"      {r['snippet']}", fg="bright_black"))
+        click.echo(
+            click.style(
+                "\n  Scroll a hit: `langstage-hermes search --session <id> --around <msg_id> --window 10`",
+                fg="bright_black",
+            )
+        )
+    elif mode == "browse":
+        sessions = result.get("sessions", [])
+        if not sessions:
+            click.echo("No sessions in the store yet.")
+            return
+        click.echo(click.style(f"Recent sessions ({result['count']}):", fg="cyan"))
+        for s in sessions:
+            title = (s["title"] or "(no title)")[:28]
+            click.echo(
+                f"  {s['session_id']}  {title:<28}  [{s['source'] or '?'}]  "
+                f"msgs={s['message_count']}  last={_fmt_ts(s.get('last_active'))}"
+            )
+            if s["preview"]:
+                click.echo(click.style(f"      {s['preview']}", fg="bright_black"))
+    elif mode == "scroll":
+        if result.get("error"):
+            click.echo(click.style(f"scroll: {result['error']}", fg="yellow"))
+            return
+        title = result.get("title") or "(no title)"
+        click.echo(click.style(f"Session {result['session_id']} — {title}", fg="cyan"))
+        click.echo(
+            click.style(
+                f"  anchor #{result['anchor_message_id']}  (+/-{result['window']}; "
+                f"{result['messages_before']} before, {result['messages_after']} after)",
+                fg="bright_black",
+            )
+        )
+        for m in result.get("messages", []):
+            marker = "  <- anchor" if m["anchor"] else ""
+            tool = f" [{m['tool_name']}]" if m.get("tool_name") else ""
+            click.echo(f"  #{m['message_id']} {m['role']}{tool}: {m['content']}{marker}")
+        if result.get("at_start"):
+            click.echo(click.style("  (at session start)", fg="bright_black"))
+        if result.get("at_end"):
+            click.echo(click.style("  (at session end)", fg="bright_black"))
+
+
+@cli.command()
+@click.argument("query", nargs=-1)
+@click.option("--session", "session_id", default=None, help="SCROLL: session id to scroll within.")
+@click.option("--around", "around_message_id", type=int, default=None, help="SCROLL: anchor message id.")
+@click.option("--window", type=int, default=5, show_default=True, help="SCROLL: +/- messages around the anchor (1-20).")
+@click.option("--browse", is_flag=True, help="BROWSE: list recent sessions chronologically (ignores QUERY).")
+@click.option("--limit", type=int, default=10, show_default=True, help="Max results (DISCOVERY / BROWSE).")
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def search(
+    query: tuple[str, ...],
+    session_id: str | None,
+    around_message_id: int | None,
+    window: int,
+    browse: bool,
+    limit: int,
+    as_json: bool,
+) -> None:
+    """Search the local FTS5 session store — keyless, offline, no model.
+
+    The FTS5 session index is a headline feature, but its only reader was the
+    in-chat ``session_search`` tool (needs a live model + key). This exposes the
+    SAME store to a human, in the three documented modes (SPEC §13.3):
+
+    \b
+      DISCOVERY  langstage-hermes search "profile slow python" [--limit N] [--json]
+      SCROLL     langstage-hermes search --session <sid> --around <msg_id> [--window N]
+      BROWSE     langstage-hermes search --browse [--limit N]
+
+    Reads only ``<HERMES_HOME>/state.db`` (the path ``doctor`` / ``--show-config``
+    report). Prints session_id + message_id so hits are actionable. (gh #79)
+    """
+    import json as _json
+
+    from langstage_hermes.config import hermes_home
+    from langstage_hermes.search.session_search import search_sessions_structured
+    from langstage_hermes.store.sqlite_fts import SqliteFtsStore
+
+    db_path = hermes_home() / "state.db"
+    if not db_path.exists():
+        # No store yet — a clear message, never a traceback, and never create an
+        # empty DB as a side effect of a read command.
+        if as_json:
+            click.echo(_json.dumps({"mode": "empty", "db_path": str(db_path), "results": [], "sessions": [], "messages": []}))
+        else:
+            click.echo(click.style(f"No session store yet at {db_path}.", fg="yellow"))
+            click.echo(
+                click.style(
+                    "  Populate one with `langstage-hermes demo` or a `chat` session, then search it.",
+                    fg="bright_black",
+                )
+            )
+        return
+
+    store = SqliteFtsStore(db_path=str(db_path))
+    try:
+        result = search_sessions_structured(
+            store,
+            query=" ".join(query),
+            session_id=session_id or "",
+            around_message_id=around_message_id,
+            window=window,
+            browse=browse,
+            limit=max(1, limit),
+        )
+    finally:
+        store.close()
+
+    if as_json:
+        click.echo(_json.dumps(result, default=str))
+        return
+    _render_search_human(result)
+
+
 # ── tools ──────────────────────────────────────────────────────────
 
 

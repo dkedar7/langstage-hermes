@@ -357,6 +357,212 @@ def _discover(
 
 
 # ---------------------------------------------------------------------------
+# Structured 3-mode query (keyless CLI surface — gh #79)
+# ---------------------------------------------------------------------------
+#
+# ``run_session_search`` renders markdown for the in-chat agent tool. The
+# ``langstage-hermes search`` CLI needs the SAME retrieval but as plain
+# dicts/lists it can print as a compact human table OR as ``--json``. These
+# helpers reuse the exact store methods the markdown renderers call (no new
+# retrieval logic) and honour a caller-supplied ``limit``.
+
+
+def search_sessions_structured(
+    store: SqliteFtsStore,
+    *,
+    query: str = "",
+    session_id: str = "",
+    around_message_id: int | None = None,
+    window: int = 5,
+    browse: bool = False,
+    limit: int = 10,
+    sources_exclude: list[str] | None = None,
+    current_session_id: str = "",
+) -> dict[str, Any]:
+    """Keyless, structured twin of :func:`run_session_search`.
+
+    Mode is inferred exactly as the tool infers it:
+
+    * **SCROLL** — ``session_id`` + ``around_message_id``.
+    * **BROWSE** — ``browse=True`` or no ``query``.
+    * **DISCOVERY** — a non-empty ``query``.
+
+    Returns a JSON-serializable dict with a ``mode`` discriminator. Every
+    result carries ``session_id`` (and ``message_id`` where applicable) so the
+    output is actionable — pass them back to a SCROLL query.
+    """
+    excl = list(sources_exclude) if sources_exclude is not None else ["tool"]
+
+    if session_id and around_message_id is not None:
+        return _scroll_structured(
+            store,
+            session_id=session_id,
+            around_message_id=int(around_message_id),
+            window=window,
+            current_session_id=current_session_id,
+        )
+    if browse or not query.strip():
+        return _browse_structured(
+            store,
+            limit=limit,
+            current_session_id=current_session_id,
+            exclude_sources=excl,
+        )
+    return _discover_structured(
+        store,
+        query=query.strip(),
+        limit=limit,
+        current_session_id=current_session_id,
+        exclude_sources=excl,
+    )
+
+
+def _browse_structured(
+    store: SqliteFtsStore,
+    *,
+    limit: int,
+    current_session_id: str,
+    exclude_sources: list[str],
+) -> dict[str, Any]:
+    sessions = store.list_recent_sessions(limit=max(limit, 1), exclude_sources=exclude_sources)
+    current_root = store.resolve_to_lineage_root(current_session_id) if current_session_id else ""
+    out: list[dict[str, Any]] = []
+    for s in sessions:
+        if current_root and s["id"] == current_root:
+            continue
+        out.append(
+            {
+                "session_id": s["id"],
+                "title": s.get("title") or "",
+                "source": s.get("source") or "",
+                "model": s.get("model") or "",
+                "started_at": s.get("started_at"),
+                "last_active": s.get("last_active"),
+                "message_count": s.get("message_count") or 0,
+                "tool_call_count": s.get("tool_call_count") or 0,
+                "preview": s.get("preview") or "",
+            }
+        )
+        if len(out) >= limit:
+            break
+    return {"mode": "browse", "count": len(out), "sessions": out}
+
+
+def _discover_structured(
+    store: SqliteFtsStore,
+    *,
+    query: str,
+    limit: int,
+    current_session_id: str,
+    exclude_sources: list[str],
+) -> dict[str, Any]:
+    # No role_filter: unlike the in-chat tool (which hides tool-role rows the
+    # agent already has), a HUMAN searching their history wants everything in a
+    # real session — including the tool-role rows where crystallised-skill and
+    # session summaries land (the issue's own "profile slow python" example is
+    # one). Reflection-fork *sessions* (source=tool) are still excluded. (gh #79)
+    raw_hits = store.search_messages(
+        query,
+        limit=50,
+        exclude_sources=exclude_sources,
+    )
+    current_root = store.resolve_to_lineage_root(current_session_id) if current_session_id else ""
+
+    seen: dict[str, dict[str, Any]] = {}
+    for hit in raw_hits:
+        root = store.resolve_to_lineage_root(hit["session_id"])
+        if current_root and root == current_root:
+            continue
+        if root not in seen:
+            seen[root] = hit
+        if len(seen) >= limit:
+            break
+
+    results: list[dict[str, Any]] = []
+    for root, hit in seen.items():
+        meta = store.get_session(root) or {}
+        results.append(
+            {
+                "session_id": hit["session_id"],
+                "lineage_root": root,
+                "message_id": hit["id"],
+                "role": hit.get("role") or "",
+                "snippet": hit.get("snippet") or "",
+                "title": meta.get("title") or hit.get("title") or "",
+                "source": meta.get("source") or hit.get("source") or "",
+                "model": meta.get("model") or hit.get("model") or "",
+                "started_at": meta.get("started_at") or hit.get("session_started"),
+            }
+        )
+    return {"mode": "discovery", "query": query, "count": len(results), "results": results}
+
+
+def _scroll_structured(
+    store: SqliteFtsStore,
+    *,
+    session_id: str,
+    around_message_id: int,
+    window: int,
+    current_session_id: str,
+) -> dict[str, Any]:
+    try:
+        window = int(window)
+    except (TypeError, ValueError):
+        window = 5
+    window = max(1, min(window, 20))
+
+    if current_session_id:
+        try:
+            anchor_root = store.resolve_to_lineage_root(session_id)
+            cur_root = store.resolve_to_lineage_root(current_session_id)
+        except Exception:
+            anchor_root, cur_root = "", ""
+        if anchor_root and cur_root and anchor_root == cur_root:
+            return {
+                "mode": "scroll",
+                "session_id": session_id,
+                "error": "anchor is in the current session lineage (already in context)",
+            }
+
+    meta = store.get_session(session_id)
+    if not meta:
+        return {"mode": "scroll", "session_id": session_id, "error": f"session_id {session_id!r} not found"}
+
+    view = store.get_messages_around(session_id, around_message_id, window=window)
+    msgs = view["window"]
+    if not msgs:
+        return {
+            "mode": "scroll",
+            "session_id": session_id,
+            "anchor_message_id": around_message_id,
+            "error": f"message #{around_message_id} not in session {session_id!r}",
+        }
+
+    messages = [
+        {
+            "message_id": m.get("id"),
+            "role": m.get("role") or "",
+            "tool_name": m.get("tool_name"),
+            "content": _content_excerpt(m.get("content")),
+            "anchor": m.get("id") == around_message_id,
+        }
+        for m in msgs
+    ]
+    return {
+        "mode": "scroll",
+        "session_id": session_id,
+        "title": meta.get("title") or "",
+        "anchor_message_id": around_message_id,
+        "window": window,
+        "messages_before": view["messages_before"],
+        "messages_after": view["messages_after"],
+        "at_start": view["messages_before"] < window,
+        "at_end": view["messages_after"] < window,
+        "messages": messages,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Tool factory
 # ---------------------------------------------------------------------------
 
@@ -426,4 +632,4 @@ def make_session_search_tool(
     )
 
 
-__all__ = ["make_session_search_tool", "run_session_search"]
+__all__ = ["make_session_search_tool", "run_session_search", "search_sessions_structured"]

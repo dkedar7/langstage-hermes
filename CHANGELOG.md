@@ -2,6 +2,74 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.20] - 2026-07-23
+
+### Added
+- **`langstage-hermes search` — a keyless, offline CLI over the FTS5 session store (gh #79).** The
+  README sells FTS5 session search as a headline capability, but the only reader was the in-chat
+  `session_search` *agent tool* — reachable only from `chat`, i.e. behind a live model + API key. Every
+  other SQLite-backed subsystem here (`audit`, `skills`, `cron`, `curator`) has a read surface; the one
+  *headline* store did not, and it was exactly the keyless/offline audience the project courts who could
+  populate `state.db` (via `demo`/`verify`) but never read it back. `search` closes that gap with the same
+  three modes SPEC §13.3 documents, printing `session_id` + `message_id` so hits are actionable:
+  - **DISCOVERY** — `langstage-hermes search "profile slow python" [--limit N] [--json]`: BM25 top-N with a
+    highlighted snippet, deduped by session lineage.
+  - **SCROLL** — `langstage-hermes search --session <sid> --around <msg_id> [--window N]`: a ±window view
+    centred on an anchor message (clamped 1–20).
+  - **BROWSE** — `langstage-hermes search --browse [--limit N]` (also the default when no query is given):
+    recent sessions, newest first.
+  It reuses the existing retrieval in `search/session_search.py` (a new `search_sessions_structured`
+  twin of `run_session_search` that returns plain dicts) against `<HERMES_HOME>/state.db` — no model, no
+  key, no network — and honours `HERMES_HOME` exactly as `doctor`/`--show-config` report it. A `--json`
+  mode mirrors how `audit`/`skills` already print structured state, for scripting/CI. Unlike the in-chat
+  tool (which hides tool-role rows the agent already has), the human CLI searches **all** roles within a
+  real session — so the crystallised-skill / session-summary rows land in results (the `demo` store's
+  "profile slow python" skill is one) — while still excluding internal reflection-fork *sessions*
+  (`source=tool`). An absent or empty store prints a clear one-line message pointing at `demo`/`chat`,
+  never a traceback, and never creates an empty DB as a side effect of a read.
+
+### Fixed
+- **`chat` now honours `[agent] spec` from a TOML config — it was silently dropped while `--show-config`
+  reported it as active (gh #85).** `chat` loaded a custom agent only from the `-a/--agent` flag or the
+  `LANGSTAGE_AGENT_SPEC` (legacy `DEEPAGENT_AGENT_SPEC`) env var. The equivalent `[agent] spec` TOML key —
+  a first-class `HostConfig` field that `--show-config` fully resolves and attributes to the file
+  (`toml: agent.spec`) — was never consulted at runtime: `chat` fell back to the built-in hermes agent as
+  if nothing were configured. That was an advertised-vs-honored gap on the exact command the README points
+  users to for trust, made worse because the **sibling console script in the same wheel**,
+  `langstage-agui`, *does* honor `[agent] spec` — so two entry points shipped by one package disagreed on
+  a documented key, and the primary diagnostic (`--show-config`) green-lit a setting the runtime dropped
+  (the same trust-in-diagnostics theme as #61/#83). Root cause: `_resolve_agent` read the env var only and
+  was never handed `cfg.agent_spec`, even though `chat` loaded the config a few lines later. The fix
+  threads the resolved `cfg.agent_spec` into agent resolution as the layer **below** the flag and env var,
+  mirroring `langstage-agui` (which passes `--agent` as an override then loads `cfg.agent_spec`): precedence
+  is now `-a` flag > `LANGSTAGE_AGENT_SPEC` env > `[agent] spec` TOML > built-in default — matching how
+  every other config field layers. The chat context block also surfaces a TOML-sourced spec as `(active)`,
+  so the diagnostic no longer goes dark just because the spec came from a file rather than an env var.
+  Proven keyless with the issue's `echo_agent.py`: a `[agent] spec` in `langstage-hermes.toml` now runs the
+  custom graph (`MARKER-custom-agent-ran`) with no API key, instead of hitting the built-in hermes
+  ANTHROPIC preflight.
+- **A syntactically valid but unrecognized key in `langstage-hermes.toml` now warns on stderr instead of
+  vanishing without a trace (gh #84).** It was the last silent config-failure path: the CLI already emits a
+  `note:` for a malformed file (#61) and for deprecated env vars, but a mistyped key produced no stdout, no
+  stderr, no `--show-config` signal — the value simply never took effect. It is an easy mistake because the
+  accepted key names are internally inconsistent within a single section (`memory.memory_enabled` keeps the
+  prefix while `memory.nudge_interval`/`memory.provider` drop it; `model_aux` is spelled `model.aux_model`),
+  so the *natural* first guess (`[memory] enabled`, `[model] aux`) silently falls back to the default. Now,
+  after resolution, each hermes TOML file's leaf keys are diffed against the resolver's own
+  `field → toml-key` map and each genuinely-unknown key gets a one-line `note:` naming it and (via a
+  difflib near-match) the closest accepted key: `note: unknown config key '[memory] enabled' in
+  langstage-hermes.toml (ignored). Did you mean 'memory_enabled'?`. Care was taken to avoid false positives:
+  the recognized set is built from the **live** `HermesConfig._toml_map()` (base `HostConfig` keys like
+  `agent.spec` included) so it can never drift from what actually resolves; `[section]` headers are never
+  flagged (only leaves are); and free-form tables whose sub-keys are *data* — the dict-valued
+  `skills.platform_disabled` (keyed by arbitrary platform names) and the `configurable` passthrough — are
+  skipped. It covers **both** hermes config files (the global `$HERMES_HOME/config.toml` and the project
+  `langstage-hermes.toml`, plus the legacy `deepagent-hermes.toml`), but not the shared cross-host
+  `langstage.toml` (which legitimately carries keys for *other* hosts). It is a **warning only** — never a
+  hard error, never a changed exit code (a config file that suddenly failed to load would be a far worse
+  regression); ASCII-only for cp1252 Windows consoles; deduped per (file, key); suppressed under pytest and
+  via `LANGSTAGE_SUPPRESS_UNKNOWN_KEY_NOTICE=1`.
+
 ## [0.4.19] - 2026-07-19
 
 ### Fixed
