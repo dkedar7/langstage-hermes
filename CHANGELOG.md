@@ -2,6 +2,22 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.21] - 2026-07-23
+
+### Fixed
+- **A malformed numeric `LANGSTAGE_HERMES_*` env var no longer crashes the CLI with an uncaught
+  `ValueError` (gh #83).** A single bad char — `LANGSTAGE_HERMES_MEMORY_NUDGE_INTERVAL=10x`,
+  `COMPRESSION_THRESHOLD=high` — made `HermesConfig.resolve()` raise straight out and dump a
+  traceback (exit 1), taking down `--show-config`, `verify`, `skills list`, `curator status`, and
+  `plugins list` — including the exact commands the README tells a new user to run first. This is
+  the env-side mirror of the malformed-TOML handling that already degraded gracefully. `HermesConfig`
+  copies the base env-casting loop (it layers two TOML sources, so it can't just inherit
+  `HostConfig.resolve()`); that copy is now guarded the same way the base was in **langstage-core
+  1.0.23** (#104), reusing core's `_warn_malformed_env_value` helper so the wording can't drift: the
+  bad value is caught, a one-line `note:` goes to stderr, and resolution keeps the value from the
+  layer beneath (a `langstage-hermes.toml` value if set, else the default) rather than crashing.
+  Requires **langstage-core >= 1.0.23**.
+
 ## [0.4.20] - 2026-07-23
 
 ### Added

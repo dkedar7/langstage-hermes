@@ -424,3 +424,42 @@ def test_readme_host_snippet_actually_configures_the_agent(monkeypatch, tmp_path
         f"the documented langstage.toml snippet did not configure the agent "
         f"(agent_spec={cfg.agent_spec!r}) — it likely lacks the [agent] table header"
     )
+
+
+class TestMalformedNumericEnv:
+    """A malformed numeric LANGSTAGE_HERMES_* env var must degrade, not crash (gh #83).
+
+    HermesConfig.resolve() copies the base env-casting loop, which used to call the
+    caster with no error handling — so `LANGSTAGE_HERMES_MEMORY_NUDGE_INTERVAL=10x`
+    raised an uncaught ValueError out of resolve() and took down --show-config,
+    verify, skills list, curator, plugins. It now degrades like the base
+    HostConfig.resolve() (langstage-core #104), keeping the value resolved so far.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_note_dedupe(self):
+        import langstage_core.host.config as core_config
+
+        getattr(core_config, "_warned_malformed_env_value", set()).clear()
+        yield
+        getattr(core_config, "_warned_malformed_env_value", set()).clear()
+
+    def test_bad_int_env_does_not_crash(self):
+        cfg = HermesConfig.resolve(env={"LANGSTAGE_HERMES_MEMORY_NUDGE_INTERVAL": "10x"}, use_toml=False)
+        # Kept the field default rather than crashing.
+        assert cfg.memory_nudge_interval == HermesConfig.memory_nudge_interval
+        assert cfg.sources["memory_nudge_interval"] == "default"
+
+    def test_bad_float_env_does_not_crash(self):
+        cfg = HermesConfig.resolve(env={"LANGSTAGE_HERMES_COMPRESSION_THRESHOLD": "high"}, use_toml=False)
+        assert cfg.sources["compression_threshold"] == "default"
+
+    def test_bad_env_warns_on_stderr(self, capsys):
+        HermesConfig.resolve(env={"LANGSTAGE_HERMES_MEMORY_NUDGE_INTERVAL": "10x"}, use_toml=False)
+        err = capsys.readouterr().err
+        assert "ignoring malformed LANGSTAGE_HERMES_MEMORY_NUDGE_INTERVAL" in err
+        assert "'10x'" in err
+
+    def test_legacy_spelling_degrades_too(self):
+        cfg = HermesConfig.resolve(env={"DEEPAGENT_HERMES_MEMORY_NUDGE_INTERVAL": "10x"}, use_toml=False)
+        assert cfg.sources["memory_nudge_interval"] == "default"
