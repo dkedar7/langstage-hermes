@@ -74,8 +74,21 @@ def test_run_demo_restores_environment(tmp_path: Path, monkeypatch: pytest.Monke
     assert "DEEPAGENT_HERMES_HOME" not in os.environ
 
 
+def _unset_hermes_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the unset-HERMES_HOME branch of ``demo`` (throwaway home).
+
+    Since gh #88 ``demo`` records into an explicitly-set HERMES_HOME instead of a
+    throwaway. The throwaway path — asserted by the two tests below — only runs
+    when NO home env var is set, so these must clear all three (a dev/CI shell
+    with HERMES_HOME exported would otherwise route to the persistent branch).
+    """
+    for var in ("LANGSTAGE_HERMES_HOME", "DEEPAGENT_HERMES_HOME", "HERMES_HOME"):
+        monkeypatch.delenv(var, raising=False)
+
+
 def test_demo_command_closes_loop_and_cleans_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """The ``demo`` command reports the loop closing and removes its throwaway home."""
+    _unset_hermes_home(monkeypatch)
     scratch = tmp_path / "tmproot"
     scratch.mkdir()
     monkeypatch.setattr(tempfile_mod, "tempdir", str(scratch))
@@ -91,6 +104,7 @@ def test_demo_command_closes_loop_and_cleans_up(tmp_path: Path, monkeypatch: pyt
 
 def test_demo_command_keep_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """``--keep-workspace`` preserves the home so the user can inspect the skill."""
+    _unset_hermes_home(monkeypatch)
     scratch = tmp_path / "tmproot"
     scratch.mkdir()
     monkeypatch.setattr(tempfile_mod, "tempdir", str(scratch))
@@ -101,3 +115,39 @@ def test_demo_command_keep_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyP
     kept = list(scratch.glob("dah-demo-*"))
     assert len(kept) == 1, f"expected the home to be kept, found: {kept}"
     assert list(kept[0].rglob("SKILL.md")), "kept home should contain the generated SKILL.md"
+
+
+def test_demo_populates_the_store_search_reads(tmp_hermes_home: Path):
+    """gh #88: the documented keyless ``demo`` -> ``search`` loop closes.
+
+    The verbatim repro from the issue: with HERMES_HOME set to a fresh dir, run
+    ``demo`` then ``search "python"`` and the demo's session comes back. Before
+    the fix ``demo`` wrote to a throwaway ``mkdtemp`` home it then deleted, so the
+    configured ``<HERMES_HOME>/state.db`` stayed empty forever and ``search`` just
+    re-suggested ``demo`` — an infinite dead end. This drives the real CLI
+    commands (not ``run_demo`` directly, which always honoured its ``home=`` arg),
+    because the throwaway-vs-persistent decision lives in the ``demo`` command.
+    """
+    runner = CliRunner()
+
+    demo_res = runner.invoke(cli, ["demo"])
+    assert demo_res.exit_code == 0, demo_res.output
+    assert "DEMO: PASS" in demo_res.output
+    # It recorded into the configured home, not a throwaway it discarded.
+    assert (tmp_hermes_home / "state.db").exists(), "demo did not populate the configured HERMES_HOME"
+
+    # JSON so the assertion is on structured data, not colored text.
+    search_res = runner.invoke(cli, ["search", "python", "--json"])
+    assert search_res.exit_code == 0, search_res.output
+    import json
+
+    data = json.loads(search_res.output)
+    assert data["mode"] == "discovery", data
+    assert data["count"] >= 1, f"search found nothing in the demo store: {data}"
+    assert any(r["session_id"] == "demo-001" for r in data["results"]), data
+
+    # And the human hint no longer loops back to an empty store.
+    human_res = runner.invoke(cli, ["search", "python"])
+    assert human_res.exit_code == 0, human_res.output
+    assert "No session store yet" not in human_res.output
+    assert "demo-001" in human_res.output

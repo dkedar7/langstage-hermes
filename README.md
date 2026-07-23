@@ -141,7 +141,17 @@ langstage-hermes search --session sess-1a2b3c --around 8 --window 5
 langstage-hermes search --browse --limit 20
 ```
 
-`--json` emits structured output for scripting/CI, mirroring `audit`/`skills`. FTS5 syntax works: multi-word queries default to AND, and `OR`, quoted `"phrases"`, and prefix `wildcards*` are all honored. Populate a store to try it against with the keyless `langstage-hermes demo`.
+`--json` emits structured output for scripting/CI, mirroring `audit`/`skills`. FTS5 syntax works: multi-word queries default to AND, and `OR`, quoted `"phrases"`, and prefix `wildcards*` are all honored.
+
+Want a store to try it against, keyless? Point `HERMES_HOME` at a directory and run `langstage-hermes demo` — with `HERMES_HOME` set the demo records its session into that same `<HERMES_HOME>/state.db`, so `search` reads it straight back:
+
+```bash
+export HERMES_HOME=~/.langstage-hermes    # any stable directory
+langstage-hermes demo                     # populates <HERMES_HOME>/state.db
+langstage-hermes search "python"          # finds the demo session
+```
+
+(A bare `langstage-hermes demo` with no `HERMES_HOME` set uses a throwaway home and cleans up after itself, so it never litters your default store — pass `--keep-workspace` to inspect it.)
 
 ## Load into an existing host
 

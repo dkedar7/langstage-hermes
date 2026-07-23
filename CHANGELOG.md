@@ -2,6 +2,29 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.22] - 2026-07-23
+
+### Fixed
+- **`demo` now populates the store `search` reads, so the documented keyless `demo` → `search`
+  loop actually closes (gh #88).** The keyless `search` CLI (gh #79) reads `<HERMES_HOME>/state.db`,
+  and both the README *and* `search`'s own empty-store hint tell you to run `langstage-hermes demo`
+  to fill it. But `demo` always wrote to a throwaway `tempfile.mkdtemp(prefix="dah-demo-")` home and
+  `rmtree`d it on exit — so the demo store and the search store were structurally in different
+  directories and could never coincide. A user who followed the docs verbatim (`export HERMES_HOME=…`;
+  `demo`; `search "python"`) got an empty store forever, and the empty-store hint looped them straight
+  back to `demo`. (This is the exact trap where gh #79's own verification only found the demo data by
+  pointing `HERMES_HOME` at the *kept* `/tmp/dah-demo-…` dir — a path no doc mentions.) `demo` now
+  **honours an explicitly-set `HERMES_HOME`**: when `LANGSTAGE_HERMES_HOME` / legacy
+  `DEEPAGENT_HERMES_HOME` / `HERMES_HOME` is set it records the session into that real
+  `<HERMES_HOME>/state.db` (and never removes it), so `search` reads the demo session straight back —
+  exactly what the docs promise. With *no* home env var set, `demo` still uses a throwaway home and
+  cleans up on exit, so a bare `demo` never litters the default `~/.langstage-hermes` (the gh #69
+  no-pollution property is preserved for the case that wanted it). `search`'s empty-store hint and the
+  README's "populate a store" line were rewritten to match: they now name the `HERMES_HOME`
+  requirement instead of pointing an unset user at a `demo` that can't populate their default store.
+  Verified end-to-end keyless: `HERMES_HOME=<dir> langstage-hermes demo` then
+  `HERMES_HOME=<dir> langstage-hermes search "python"` returns the demo's `demo-001` session.
+
 ## [0.4.21] - 2026-07-23
 
 ### Fixed
