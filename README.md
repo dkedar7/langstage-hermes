@@ -141,7 +141,7 @@ langstage-hermes search --session sess-1a2b3c --around 8 --window 5
 langstage-hermes search --browse --limit 20
 ```
 
-`--json` emits structured output for scripting/CI, mirroring `audit`/`skills`. FTS5 syntax works: multi-word queries default to AND, and `OR`, quoted `"phrases"`, and prefix `wildcards*` are all honored.
+`--json` emits structured output for scripting/CI. The same flag is honored by `skills list`, `skills audit`, and `audit log`, so the skill inventory and mutation log are scriptable too (each prints one JSON object with stable keys). FTS5 syntax works: multi-word queries default to AND, and `OR`, quoted `"phrases"`, and prefix `wildcards*` are all honored.
 
 Want a store to try it against, keyless? Point `HERMES_HOME` at a directory and run `langstage-hermes demo` — with `HERMES_HOME` set the demo records its session into that same `<HERMES_HOME>/state.db`, so `search` reads it straight back:
 

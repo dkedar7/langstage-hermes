@@ -1306,7 +1306,8 @@ def _audit_log() -> Any:
 @skills.command("list")
 @click.option("--category", default=None, help="Filter by category.")
 @click.option("--query", default="", help="Substring match against name or description.")
-def skills_list(category: str | None, query: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def skills_list(category: str | None, query: str, as_json: bool) -> None:
     """List discovered skills (bundled + user)."""
     lib = _skill_library()
     items = lib.list()
@@ -1317,13 +1318,42 @@ def skills_list(category: str | None, query: str) -> None:
     # not a row. Warning only — the exit code stays 0 and the other skills still
     # list, matching how the loader itself tolerates one bad file. Emitted before
     # any --category/--query filtering, since the drop is independent of the filter
-    # (and the `No skills match.` path returns early).
-    _warn_skill_load_errors(lib)
+    # (and the `No skills match.` path returns early). In --json mode we keep stdout
+    # a single pure JSON object and carry the same drop signal inside it (see below),
+    # so we skip the stderr warning here.
+    if not as_json:
+        _warn_skill_load_errors(lib)
     if category:
         items = [s for s in items if (s.category or "") == category]
     if query:
         q = query.lower()
         items = [s for s in items if q in s.name.lower() or q in s.description.lower()]
+    if as_json:
+        # Structured twin of the human listing — same filtered set, machine-
+        # readable, so CI can assert bundle contents instead of scraping the
+        # table (gh #90). Mirrors `search --json`: one object on stdout, exit 0,
+        # stable keys, a `count`. Full (untruncated) descriptions; dropped skills
+        # surface under `load_errors` rather than as stderr noise.
+        import json as _json
+
+        from langstage_hermes.skills.library import format_load_error
+
+        payload = {
+            "skills": [
+                {
+                    "name": s.name,
+                    "category": s.category,
+                    "description": s.description,
+                    "version": s.version,
+                    "path": str(s.path),
+                }
+                for s in sorted(items, key=lambda x: (x.category or "", x.name))
+            ],
+            "count": len(items),
+            "load_errors": [format_load_error(e) for e in getattr(lib, "load_errors", [])],
+        }
+        click.echo(_json.dumps(payload, default=str))
+        return
     if not items:
         click.echo("No skills match.")
         return
@@ -1455,10 +1485,32 @@ def skills_uninstall(name: str) -> None:
 
 
 @skills.command("audit")
-def skills_audit() -> None:
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def skills_audit(as_json: bool) -> None:
     """Validate every skill against agentskills.io rules."""
     lib = _skill_library()
     errs_by_skill = lib.validate_all()
+    if as_json:
+        # Structured validation report for CI (gh #90). One object on stdout,
+        # stable keys, mirroring `search --json`. Every validated skill is listed
+        # with its own `ok`/`errors`, plus roll-up `ok`/`skill_count`/`failed_count`.
+        # The exit code is deliberately identical to the human command — 1 when any
+        # skill fails — so `--json` changes only the rendering, never the contract
+        # (and CI keeps the pass/fail signal without parsing).
+        import json as _json
+
+        results = [{"name": name, "ok": not errs, "errors": errs} for name, errs in sorted(errs_by_skill.items())]
+        failed = [r for r in results if not r["ok"]]
+        payload = {
+            "ok": len(failed) == 0,
+            "skill_count": len(results),
+            "failed_count": len(failed),
+            "results": results,
+        }
+        click.echo(_json.dumps(payload, default=str))
+        if failed:
+            sys.exit(1)
+        return
     if not errs_by_skill:
         n = len(lib.list())
         click.echo(click.style(f"All {n} skill(s) pass validation.", fg="green"))
@@ -1518,10 +1570,39 @@ def _format_mutation_row(row: Any, *, full: bool = False) -> str:
 @click.option("--skill", "skill_name", default=None, help="Restrict to one skill.")
 @click.option("--limit", type=int, default=20, show_default=True, help="Max rows to show.")
 @click.option("--full", is_flag=True, help="Show full row details (path, hashes, session).")
-def audit_log_cmd(skill_name: str | None, limit: int, full: bool) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def audit_log_cmd(skill_name: str | None, limit: int, full: bool, as_json: bool) -> None:
     """Print recent skill mutations, most recent first."""
     log = _audit_log()
     rows = log.list(skill_name=skill_name, limit=limit)
+    if as_json:
+        # Structured mutation log for CI — diff skill state across runs (gh #90).
+        # One object on stdout, exit 0, mirroring `search --json`. Honors --skill /
+        # --limit (they feed the query). `--full` is a human-display toggle; JSON is
+        # always complete, carrying every scalar field (the raw epoch `timestamp`,
+        # both hashes) but NOT the SKILL.md blobs — those belong to `audit show`.
+        import json as _json
+
+        payload = {
+            "mutations": [
+                {
+                    "id": r.id,
+                    "timestamp": r.timestamp,
+                    "skill_name": r.skill_name,
+                    "action": r.action,
+                    "source": r.source,
+                    "session_id": r.session_id,
+                    "tool_call_id": r.tool_call_id,
+                    "skill_path": r.skill_path,
+                    "before_hash": r.before_hash,
+                    "after_hash": r.after_hash,
+                }
+                for r in rows
+            ],
+            "count": len(rows),
+        }
+        click.echo(_json.dumps(payload, default=str))
+        return
     if not rows:
         if skill_name:
             click.echo(f"No mutations recorded for {skill_name!r}.")

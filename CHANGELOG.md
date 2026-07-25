@@ -2,6 +2,36 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.23] - 2026-07-25
+
+### Fixed
+- **`--json` is now honored on `skills list`, `skills audit`, and `audit log`, so the README's
+  cross-command scripting/CI claim is true instead of a crash (gh #90).** The keyless `search` CLI
+  (gh #79) shipped a `--json` mode, and its README section advertised that flag as a *cross-command*
+  surface — "`--json` emits structured output for scripting/CI, mirroring `audit`/`skills`" — but the
+  implementation wired `--json` onto `search` alone. A scripting/CI user who followed the docs and ran
+  `langstage-hermes skills list --json` (or `skills audit --json`, or `audit log --json`) hit a hard
+  `click` `No such option: '--json'` and exit 2 — a crash-out, not a graceful "unsupported". The
+  phrasing traces straight to #79's proposal, which described `--json` as mirroring how `audit`/`skills`
+  "already print structured state"; that wording landed in the README, but the wiring didn't. Rather
+  than walk the docs back, we honored them: the three commands the reporter reached for while
+  dogfooding all already computed clean structured state, so each now grows a `--json` flag that dumps
+  exactly that state as one JSON object on stdout, matching `search --json`'s conventions (stable keys,
+  a `count`, `default=str` serialization). `skills list --json` → `{"skills": [{name, category,
+  description, version, path}...], "count", "load_errors"}` (full untruncated descriptions; skills
+  dropped for broken frontmatter surface under `load_errors` inside the payload instead of as stderr
+  noise, so stdout stays a single pure JSON object). `skills audit --json` → `{"ok", "skill_count",
+  "failed_count", "results": [{name, ok, errors}...]}`. `audit log --json` → `{"mutations": [{id,
+  timestamp, skill_name, action, source, session_id, tool_call_id, skill_path, before_hash,
+  after_hash}...], "count"}` (honors `--skill`/`--limit`; carries every scalar field regardless of the
+  human-only `--full` toggle, but not the SKILL.md blobs — those stay in `audit show`). `--json`
+  changes only the rendering, never the contract: each command's human output is byte-for-byte
+  unchanged, and `skills audit --json` keeps the human command's exit code (1 when any skill fails,
+  0 otherwise) so CI gets the pass/fail signal without parsing. The README's `search` section was
+  rewritten to name exactly these commands, so the docs and the actual `--help`/behavior now agree
+  exactly. Verified keyless end-to-end: all three repro commands from the issue now emit valid JSON
+  and exit cleanly.
+
 ## [0.4.22] - 2026-07-23
 
 ### Fixed
