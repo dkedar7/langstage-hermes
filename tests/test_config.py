@@ -463,3 +463,31 @@ class TestMalformedNumericEnv:
     def test_legacy_spelling_degrades_too(self):
         cfg = HermesConfig.resolve(env={"DEEPAGENT_HERMES_MEMORY_NUDGE_INTERVAL": "10x"}, use_toml=False)
         assert cfg.sources["memory_nudge_interval"] == "default"
+
+
+class TestMalformedBoolEnv:
+    """A malformed BOOLEAN LANGSTAGE_HERMES_* env value degrades with a note, like the
+    numeric case (gh #92) — hermes's boolean casters are now _env_bool_strict, so a bad
+    value raises and resolve()'s guard keeps the default instead of a silent flip to False."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_note_dedupe(self):
+        import langstage_core.host.config as core_config
+
+        getattr(core_config, "_warned_malformed_env_value", set()).clear()
+        yield
+        getattr(core_config, "_warned_malformed_env_value", set()).clear()
+
+    def test_unrecognized_bool_keeps_default_not_silent_false(self):
+        # memory_enabled default is True; `enabled` must NOT silently flip it to False.
+        cfg = HermesConfig.resolve(env={"LANGSTAGE_HERMES_MEMORY_ENABLED": "enabled"}, use_toml=False)
+        assert cfg.memory_enabled is True
+        assert cfg.sources["memory_enabled"] == "default"
+
+    def test_unrecognized_bool_warns(self, capsys):
+        HermesConfig.resolve(env={"LANGSTAGE_HERMES_MEMORY_ENABLED": "enabled"}, use_toml=False)
+        assert "ignoring malformed LANGSTAGE_HERMES_MEMORY_ENABLED" in capsys.readouterr().err
+
+    def test_recognized_bool_values_still_resolve(self):
+        assert HermesConfig.resolve(env={"LANGSTAGE_HERMES_MEMORY_ENABLED": "false"}, use_toml=False).memory_enabled is False
+        assert HermesConfig.resolve(env={"LANGSTAGE_HERMES_MEMORY_ENABLED": "on"}, use_toml=False).memory_enabled is True

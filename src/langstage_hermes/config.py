@@ -40,6 +40,7 @@ from langstage_core.host.config import (
     _coerce,
     _deep_merge,
     _env_bool,
+    _env_bool_strict,
     _env_pair,
     _get_dotted,
     _malformed_toml,
@@ -393,9 +394,9 @@ class HermesConfig(HostConfig):
         ),
         "agent_task_completion_guidance": (
             "DEEPAGENT_HERMES_AGENT_TASK_COMPLETION_GUIDANCE",
-            _env_bool,
+            _env_bool_strict,
         ),
-        "agent_environment_probe": ("DEEPAGENT_HERMES_AGENT_ENVIRONMENT_PROBE", _env_bool),
+        "agent_environment_probe": ("DEEPAGENT_HERMES_AGENT_ENVIRONMENT_PROBE", _env_bool_strict),
         "agent_tool_use_enforcement": (
             "DEEPAGENT_HERMES_AGENT_TOOL_USE_ENFORCEMENT",
             str,
@@ -405,10 +406,10 @@ class HermesConfig(HostConfig):
             _env_list_csv,
         ),
         # [memory]
-        "memory_enabled": ("DEEPAGENT_HERMES_MEMORY_ENABLED", _env_bool),
+        "memory_enabled": ("DEEPAGENT_HERMES_MEMORY_ENABLED", _env_bool_strict),
         "memory_user_profile_enabled": (
             "DEEPAGENT_HERMES_MEMORY_USER_PROFILE_ENABLED",
-            _env_bool,
+            _env_bool_strict,
         ),
         "memory_nudge_interval": ("DEEPAGENT_HERMES_MEMORY_NUDGE_INTERVAL", int),
         "memory_char_limit": ("DEEPAGENT_HERMES_MEMORY_CHAR_LIMIT", int),
@@ -422,7 +423,7 @@ class HermesConfig(HostConfig):
         "skills_external_dirs": ("DEEPAGENT_HERMES_SKILLS_EXTERNAL_DIRS", _env_list_csv),
         "skills_disabled": ("DEEPAGENT_HERMES_SKILLS_DISABLED", _env_list_csv),
         # [compression]
-        "compression_enabled": ("DEEPAGENT_HERMES_COMPRESSION_ENABLED", _env_bool),
+        "compression_enabled": ("DEEPAGENT_HERMES_COMPRESSION_ENABLED", _env_bool_strict),
         "compression_threshold": ("DEEPAGENT_HERMES_COMPRESSION_THRESHOLD", _env_float),
         "compression_target_ratio": (
             "DEEPAGENT_HERMES_COMPRESSION_TARGET_RATIO",
@@ -438,7 +439,7 @@ class HermesConfig(HostConfig):
         ),
         "compression_abort_on_summary_failure": (
             "DEEPAGENT_HERMES_COMPRESSION_ABORT_ON_SUMMARY_FAILURE",
-            _env_bool,
+            _env_bool_strict,
         ),
         # [delegation]
         "delegation_max_concurrent_children": (
@@ -454,7 +455,7 @@ class HermesConfig(HostConfig):
             int,
         ),
         # [curator]
-        "curator_enabled": ("DEEPAGENT_HERMES_CURATOR_ENABLED", _env_bool),
+        "curator_enabled": ("DEEPAGENT_HERMES_CURATOR_ENABLED", _env_bool_strict),
         "curator_interval_hours": ("DEEPAGENT_HERMES_CURATOR_INTERVAL_HOURS", int),
         "curator_min_idle_hours": ("DEEPAGENT_HERMES_CURATOR_MIN_IDLE_HOURS", int),
         "curator_stale_after_days": ("DEEPAGENT_HERMES_CURATOR_STALE_AFTER_DAYS", int),
@@ -464,7 +465,7 @@ class HermesConfig(HostConfig):
         ),
         "curator_prune_builtins": (
             "DEEPAGENT_HERMES_CURATOR_PRUNE_BUILTINS",
-            _env_bool,
+            _env_bool_strict,
         ),
         # [cron]
         "cron_tick_seconds": ("DEEPAGENT_HERMES_CRON_TICK_SECONDS", int),
