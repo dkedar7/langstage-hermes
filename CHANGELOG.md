@@ -2,6 +2,21 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.24] - 2026-07-25
+
+### Fixed
+- **An unrecognized boolean `LANGSTAGE_HERMES_*` env value no longer silently flips a default off
+  (gh #92).** A value like `LANGSTAGE_HERMES_MEMORY_ENABLED=enabled` — a natural way to try to
+  *enable* the memory subsystem — coerced silently to `False` (disabling it), with `--show-config`
+  even crediting `[env:...]` as if the value was honored. This contradicted the policy already
+  established for malformed *numeric* env vars in #83 (a `note:` + fallback to the field default).
+  The boolean env fields now use langstage-core's strict boolean caster (`_env_bool_strict`, added
+  in **langstage-core 1.0.29**), which raises on an unrecognized value so `HermesConfig.resolve()`'s
+  guard emits the same one-line `note:` and keeps the field default — booleans and numbers now
+  degrade consistently. Recognized values (`1/true/yes/on`, `0/false/no/off`) are unaffected. The
+  lenient `_env_bool` is still used for the direct suppress-notice flag reads, where a typo should
+  mean "off", not warn. Requires **langstage-core >= 1.0.29**.
+
 ## [0.4.23] - 2026-07-25
 
 ### Fixed
