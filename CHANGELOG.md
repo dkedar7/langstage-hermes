@@ -2,6 +2,25 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.25] - 2026-07-26
+
+### Added
+- **A keyless `langstage-hermes memory notes "<query>"` CLI previews what the bundled
+  `MarkdownProvider` will recall — offline, no model (gh #94).** The MarkdownProvider is a headline
+  memory feature (drop hand-authored notes in `<HERMES_HOME>/memories/notes/*.md` and the agent
+  surfaces relevant sections on demand), but its only reader was the live agent — needing an API key
+  and a model turn to see what a note would surface. This is exactly the gap the keyless `search` CLI
+  (gh #79) closed for the FTS5 session store; the notes store now gets the same treatment. The new
+  nested `memory notes` subcommand resolves `<HERMES_HOME>/memories/notes` from the same config path
+  `doctor` / `--show-config` report, calls the already-exported pure `search_notes(...)` function
+  (near-zero new retrieval logic), and prints the source file + matching section so hits are
+  actionable. `--limit N` caps the sections returned; `--json` emits `{"query", "count", "results"}`
+  mirroring `search --json` (each result carries `file` / `section` / `snippet`, with `file` parsed
+  back out of the `_From <file>:_` prefix). A missing/empty notes dir or a no-match query prints a
+  clear message (and never creates the dir as a read-side effect), never a traceback. Note authors
+  finally have an offline feedback loop. Implemented as Option A (a nested `memory notes` command),
+  which fit the existing Click group structure (`skills`, `audit`, `cron`, ...) cleanly.
+
 ## [0.4.24] - 2026-07-25
 
 ### Fixed
