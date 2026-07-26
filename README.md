@@ -153,6 +153,17 @@ langstage-hermes search "python"          # finds the demo session
 
 (A bare `langstage-hermes demo` with no `HERMES_HOME` set uses a throwaway home and cleans up after itself, so it never litters your default store — pass `--keep-workspace` to inspect it.)
 
+## Preview your notes
+
+Drop hand-authored long-form context in `<HERMES_HOME>/memories/notes/*.md` and the bundled **MarkdownProvider** surfaces relevant sections to the agent on demand (enable it with `memory.provider = "markdown"`). Preview exactly what it will recall from the terminal — **keyless and offline, no model call** — so note authors get a feedback loop without a chat turn:
+
+```bash
+langstage-hermes memory notes "rollback"            # prints the source file + matching section
+langstage-hermes memory notes "rollback" --json     # {"query", "count", "results":[{file, section, snippet}]}
+```
+
+Recall is the same dumb-but-robust keyword overlap the agent uses (query tokens ≥ 3 chars, ranked by distinct hits). `--limit N` caps the sections returned; a missing/empty notes dir or a no-match query prints a clear message, never a traceback.
+
 ## Load into an existing host
 
 Any LangStage host can run this agent:
@@ -202,7 +213,7 @@ See [SPEC.md](./SPEC.md) for the full 21-section requirements doc. Top-level lay
 | `skill_view` / `skill_manage` / `skills_list` tools | ✅ working |
 | Frozen-snapshot memory (MEMORY.md / USER.md) | ✅ working — verified live (702 bytes written autonomously) |
 | SQLite FTS5 store + `session_search` (3 modes) | ✅ working — also a keyless `langstage-hermes search` CLI (DISCOVERY / SCROLL / BROWSE, `--json`) |
-| `MarkdownProvider` (bundled, opt-in via `memory.provider="markdown"`; the default is no-op) | ✅ keyword search over `<HERMES_HOME>/memories/notes/*.md` — zero deps |
+| `MarkdownProvider` (bundled, opt-in via `memory.provider="markdown"`; the default is no-op) | ✅ keyword search over `<HERMES_HOME>/memories/notes/*.md` — zero deps; also a keyless `langstage-hermes memory notes` CLI (`--json`) |
 | Iteration budget middleware | ✅ working |
 | Compression middleware (13-section template) | ✅ working |
 | Anthropic `system_and_3` caching strategy | ✅ working |

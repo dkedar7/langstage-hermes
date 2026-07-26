@@ -27,6 +27,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import os
+import re
 import shutil
 import sys
 from collections.abc import Callable
@@ -1179,6 +1180,110 @@ def search(
         click.echo(_json.dumps(result, default=str))
         return
     _render_search_human(result)
+
+
+# ── memory ─────────────────────────────────────────────────────────
+
+
+def _parse_note_snippet(snippet: str) -> tuple[str | None, str]:
+    """Split a ``search_notes`` snippet back into ``(file, section)``.
+
+    ``search_notes`` prefixes each hit with ``_From <file>:_\\n<section>`` so the
+    agent knows the source. Parse that prefix out again so ``--json`` can expose
+    ``file`` / ``section`` cleanly. Falls back to ``(None, whole snippet)`` if the
+    prefix isn't present — the caller always keeps the full snippet regardless.
+    """
+    first, sep, rest = snippet.partition("\n")
+    m = re.match(r"^_From (.+):_$", first)
+    if sep and m:
+        return m.group(1), rest
+    return None, snippet
+
+
+def _render_notes_human(query: str, notes_dir: Path, snippets: list[str]) -> None:
+    """Compact, colored render of note-recall hits — mirrors ``search``'s
+    discovery render (cyan header, source id per hit, dim body). ASCII markers."""
+    if not snippets:
+        # Distinguish "no notes authored yet" from "notes exist, none matched" —
+        # the first is a setup gap worth pointing at, the second is just a miss.
+        has_notes = notes_dir.is_dir() and any(notes_dir.glob("*.md"))
+        if not has_notes:
+            click.echo(click.style(f"No notes yet at {notes_dir}.", fg="yellow"))
+            click.echo(
+                click.style(
+                    f"  Drop hand-authored context in {notes_dir} as one or more *.md files "
+                    "and the agent surfaces relevant sections on demand. Re-run this to preview "
+                    "what it will recall.",
+                    fg="bright_black",
+                )
+            )
+        else:
+            click.echo(f'No notes match "{query}".')
+        return
+    click.echo(click.style(f'Notes matching "{query}" — {len(snippets)} section(s):', fg="cyan"))
+    for snip in snippets:
+        file, section = _parse_note_snippet(snip)
+        if file:
+            click.echo(click.style(f"  {file}", fg="cyan"))
+        for line in section.splitlines():
+            click.echo(click.style(f"      {line}", fg="bright_black"))
+        click.echo("")
+
+
+@cli.group()
+def memory() -> None:
+    """Preview and inspect the notes-recall memory layer (keyless)."""
+
+
+@memory.command("notes")
+@click.argument("query", nargs=-1)
+@click.option("--limit", type=int, default=5, show_default=True, help="Max note sections to surface.")
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def memory_notes(query: tuple[str, ...], limit: int, as_json: bool) -> None:
+    """Preview what the bundled MarkdownProvider will recall — keyless, offline, no model.
+
+    The MarkdownProvider keyword-searches ``<HERMES_HOME>/memories/notes/*.md`` and
+    surfaces relevant sections to the agent on demand — but its only reader was the
+    live agent (needs an API key + a model turn). This exposes the SAME recall to a
+    human so note authors get an offline feedback loop:
+
+    \b
+      langstage-hermes memory notes "rollback" [--limit N] [--json]
+
+    Reads only ``<HERMES_HOME>/memories/notes`` (the home ``doctor`` /
+    ``--show-config`` report). Prints the source file + section so hits are
+    actionable. (gh #94)
+    """
+    import json as _json
+
+    from langstage_hermes.config import hermes_home
+    from langstage_hermes.plugins.builtin.markdown_provider import search_notes
+
+    query_str = " ".join(query).strip()
+    notes_dir = hermes_home() / "memories" / "notes"
+
+    # An empty query can't match anything (search_notes drops <3-char tokens and a
+    # bare query tokenizes to nothing) — name the requirement instead of silently
+    # reporting "no notes match".
+    if not query_str:
+        if as_json:
+            click.echo(_json.dumps({"query": "", "count": 0, "results": []}))
+        else:
+            click.echo(click.style('Provide a query, e.g. `langstage-hermes memory notes "rollback"`.', fg="yellow"))
+        return
+
+    snippets = search_notes(query_str, notes_dir, limit=max(1, limit))
+
+    if as_json:
+        results = [
+            {"file": file, "section": section, "snippet": snip}
+            for snip in snippets
+            for file, section in [_parse_note_snippet(snip)]
+        ]
+        click.echo(_json.dumps({"query": query_str, "count": len(results), "results": results}))
+        return
+
+    _render_notes_human(query_str, notes_dir, snippets)
 
 
 # ── tools ──────────────────────────────────────────────────────────
