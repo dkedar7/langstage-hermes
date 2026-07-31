@@ -7,7 +7,7 @@ Subcommands:
 
   - ``chat``             — interactive REPL with slash-command dispatch
   - ``tools``            — list registered toolsets + check status
-  - ``skills``           — list / show / install / audit (validates)
+  - ``skills``           — list / show / install / validate / audit
   - ``audit``            — log / show / diff / rollback (skill mutation history)
   - ``cron``             — list / create / delete / pause / resume / run-due / daemon
   - ``curator``          — status / run / pause / resume / pin / unpin
@@ -32,7 +32,7 @@ import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, NoReturn
 
 import click
 
@@ -340,6 +340,45 @@ def _missing_provider_install_line(model_for_run: str, exc: BaseException) -> st
     if not hit:
         return None
     return f"for {entry.label} models install: {entry.install}"
+
+
+def _model_scheme(model: str) -> str:
+    """The provider scheme of a model id (the part before ``:``).
+
+    ``"openai:openai/gpt-4o-mini"`` → ``"openai"``, ``"anthropic:claude-…"`` →
+    ``"anthropic"``. Used by ``doctor`` to decide whether ``model_aux`` needs its
+    own key row: an aux model on the SAME scheme as the main model shares the same
+    key check (already reported), so only a DIFFERENT-provider aux is surfaced —
+    exactly the mixed-provider gap #96 is about.
+    """
+    return model.split(":", 1)[0] if ":" in model else model
+
+
+def _doctor_report_model_key(model_for_run: str, *, label: str) -> None:
+    """Print one model's id + provider-aware API-key status, ``doctor``-style.
+
+    Shared by the main model and the aux model (the reflection review subagent's
+    model) so both get the identical provider→key check and can't drift (gh #96).
+    ``label`` is ``"model"`` or ``"model (aux)"``; the missing-key line repeats the
+    ``aux`` qualifier so a missing aux key reads distinctly from a missing main one.
+    """
+    qualifier = "aux " if "aux" in label else ""
+    click.echo(f"  {label}: {model_for_run or '(unresolved)'}")
+    if model_for_run.startswith("openai:"):
+        if os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY"):
+            click.echo("  OPENAI_API_KEY / OPENROUTER_API_KEY: set")
+        else:
+            click.echo(f"  OPENAI_API_KEY / OPENROUTER_API_KEY: not set (required for the configured {qualifier}openai:* model)")
+    elif model_for_run.startswith("anthropic:"):
+        if os.getenv("ANTHROPIC_API_KEY"):
+            click.echo("  ANTHROPIC_API_KEY: set")
+        else:
+            click.echo(f"  ANTHROPIC_API_KEY: not set (required for the configured {qualifier}anthropic:* model)")
+    else:
+        # Unknown / custom provider — report present keys without asserting one.
+        for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"):
+            if os.getenv(var):
+                click.echo(f"  {var}: set")
 
 
 def _try_import_agent() -> tuple[Any | None, str | None]:
@@ -1037,6 +1076,22 @@ def _run_agent_turn(agent: Any, user_text: str, state: dict[str, Any]) -> None:
 # ── search ─────────────────────────────────────────────────────────
 
 
+def _scroll_names_missing_session(result: dict[str, Any]) -> bool:
+    """True when a SCROLL result failed because the *named session* doesn't exist.
+
+    ``search --session <id> --around N`` names a specific session; if it isn't in
+    the store that's a lookup failure exactly like ``skills show <missing>`` /
+    ``audit show <missing>``, both of which exit 1. This must exit 1 too (gh #99).
+
+    It is NOT the same as a missing *message* inside an existing session
+    (``--around 999999``): there the session was found and only the anchor id is
+    out of range, which stays exit 0. ``search_sessions_structured`` sets
+    ``anchor_message_id`` on the result only after the session lookup succeeds, so
+    an errored scroll that lacks that key is precisely the missing-session case.
+    """
+    return result.get("mode") == "scroll" and bool(result.get("error")) and "anchor_message_id" not in result
+
+
 def _render_search_human(result: dict[str, Any]) -> None:
     """Compact, colored render of a structured search result — matches the
     audit/skills/cron CLI style (one line per hit, ids first). ASCII markers."""
@@ -1178,8 +1233,14 @@ def search(
 
     if as_json:
         click.echo(_json.dumps(result, default=str))
-        return
-    _render_search_human(result)
+    else:
+        _render_search_human(result)
+    # A named session that doesn't exist is a lookup failure — exit 1 on both the
+    # human and --json render paths, matching skills/audit not-found (gh #99). The
+    # correct message / JSON `error` was already emitted above; only the exit code
+    # was wrong.
+    if _scroll_names_missing_session(result):
+        sys.exit(1)
 
 
 # ── memory ─────────────────────────────────────────────────────────
@@ -1635,6 +1696,71 @@ def skills_audit(as_json: bool) -> None:
         sys.exit(1)
 
 
+@skills.command("validate")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def skills_validate(path: Path, as_json: bool) -> None:
+    """Validate a SKILL.md at PATH WITHOUT installing it — keyless, non-mutating.
+
+    The keyless-preview counterpart to ``search`` (gh #79) and ``memory notes``
+    (gh #94), for skill authoring: run the same agentskills.io frontmatter
+    validator ``skills install`` / ``skills audit`` use, against an arbitrary
+    working tree, and write nothing — no copy into ``<HERMES_HOME>/skills`` and no
+    ``audit`` row (the side effects that made ``skills install`` an awkward
+    "did I get the frontmatter right?" check). Drops straight into a pre-commit
+    hook or a CI gate for a skills repo (gh #98):
+
+    \b
+      langstage-hermes skills validate ./my-skill [--json]
+
+    PATH mirrors ``skills install``: a SKILL.md file OR a directory containing
+    one. Exit 0 when valid, 1 when invalid.
+    """
+    import json as _json
+
+    from langstage_hermes.skills.validator import validate as validate_frontmatter
+
+    src_dir = path if path.is_dir() else path.parent
+    skill_md = src_dir / "SKILL.md"
+
+    def _fail(errors: list[str], *, name: str | None = None) -> NoReturn:
+        if as_json:
+            click.echo(_json.dumps({"path": str(skill_md), "name": name, "valid": False, "errors": errors}))
+        else:
+            click.echo(click.style("SKILL.md frontmatter is invalid:", fg="red"))
+            for e in errors:
+                click.echo(f"  - {e}")
+        sys.exit(1)
+
+    if not skill_md.is_file():
+        _fail([f"no SKILL.md found at {src_dir}"])
+
+    import frontmatter
+
+    # A SKILL.md whose YAML won't even parse is an authoring error too — report it
+    # cleanly (as `skills audit` does) instead of leaking a traceback.
+    try:
+        post = frontmatter.load(skill_md)
+    except Exception as exc:
+        _fail([f"parse failure: {exc}"])
+
+    fm = dict(post.metadata)
+    # Mirror `skills install`'s parent-dir resolution exactly, so `validate`
+    # predicts install's verdict: install lands the skill under its frontmatter
+    # `name` (falling back to the source dir), and validates the name against that.
+    raw_name = fm.get("name")
+    install_name = raw_name if isinstance(raw_name, str) and raw_name else src_dir.name
+    errs = validate_frontmatter(fm, parent_dir_name=install_name)
+    display_name = raw_name if isinstance(raw_name, str) and raw_name else None
+    if errs:
+        _fail(errs, name=display_name)
+
+    if as_json:
+        click.echo(_json.dumps({"path": str(skill_md), "name": display_name, "valid": True, "errors": []}))
+    else:
+        click.echo(click.style(f"✓ valid — {display_name or install_name}", fg="green"))
+
+
 # ── audit ──────────────────────────────────────────────────────────
 
 
@@ -1874,7 +2000,14 @@ def cron_delete(id: str) -> None:
     """Delete a cron job by ID."""
     from langstage_hermes.cron.jobs import delete_job
 
-    click.echo("Deleted." if delete_job(id) else f"No cron job with id {id!r}.")
+    if delete_job(id):
+        click.echo("Deleted.")
+    else:
+        # A missing id is a lookup failure, not a no-op success — exit 1 like
+        # every other not-found path (`skills remove`, `audit rollback`) so a
+        # CI/script wrapper can tell a typo'd id from a real delete (gh #97).
+        click.echo(f"No cron job with id {id!r}.")
+        sys.exit(1)
 
 
 @cron.command("pause")
@@ -1884,7 +2017,11 @@ def cron_pause(id: str, reason: str) -> None:
     """Pause a cron job (disables without deleting)."""
     from langstage_hermes.cron.jobs import pause_job
 
-    click.echo("Paused." if pause_job(id, reason) else f"No cron job with id {id!r}.")
+    if pause_job(id, reason):
+        click.echo("Paused.")
+    else:
+        click.echo(f"No cron job with id {id!r}.")
+        sys.exit(1)  # not-found → exit 1, matching the CLI norm (gh #97)
 
 
 @cron.command("resume")
@@ -1893,7 +2030,11 @@ def cron_resume(id: str) -> None:
     """Resume a paused cron job."""
     from langstage_hermes.cron.jobs import resume_job
 
-    click.echo("Resumed." if resume_job(id) else f"No cron job with id {id!r}.")
+    if resume_job(id):
+        click.echo("Resumed.")
+    else:
+        click.echo(f"No cron job with id {id!r}.")
+        sys.exit(1)  # not-found → exit 1, matching the CLI norm (gh #97)
 
 
 @cron.command("run-due")
@@ -2259,6 +2400,18 @@ def verify(model_id: str | None, keep_workspace: bool) -> None:
     model_for_run = model_id or cfg.model_default
     click.echo(click.style(f"  · model:  {model_for_run}", fg="bright_black"))
     _preflight_model_key(model_for_run)
+    # The reflection review subagent — the headline closed-loop feature — runs on
+    # `model_aux`, which on the documented mixed-provider path is a DIFFERENT
+    # provider/key than the main model (e.g. openai:* main + anthropic:* aux with
+    # no ANTHROPIC_API_KEY). verify promises "if this passes, chat will work", so
+    # it must preflight the aux model's key too or the loop fails at first
+    # reflection while verify was green (gh #96). `--model` overrides only the
+    # main model, so aux always comes from the resolved config. Skip when aux is
+    # empty or identical to the main model id (already covered above).
+    aux_model = (cfg.model_aux or "").strip()
+    if aux_model and aux_model != model_for_run:
+        click.echo(click.style(f"  · model (aux):  {aux_model}", fg="bright_black"))
+        _preflight_model_key(aux_model)
 
     # ── (4) build the agent in an isolated workspace ─────────────────────
     # The workspace is a throwaway temp dir; wrap everything that follows in a
@@ -2527,25 +2680,20 @@ def doctor() -> None:
     from langstage_hermes.config import HermesConfig
 
     try:
-        model_for_run = HermesConfig.resolve().model_default
+        _cfg = HermesConfig.resolve()
+        model_for_run = _cfg.model_default
+        aux_model = (_cfg.model_aux or "").strip()
     except Exception:
         model_for_run = ""
-    click.echo(f"  model: {model_for_run or '(unresolved)'}")
-    if model_for_run.startswith("openai:"):
-        if os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY"):
-            click.echo("  OPENAI_API_KEY / OPENROUTER_API_KEY: set")
-        else:
-            click.echo("  OPENAI_API_KEY / OPENROUTER_API_KEY: not set (required for the configured openai:* model)")
-    elif model_for_run.startswith("anthropic:"):
-        if os.getenv("ANTHROPIC_API_KEY"):
-            click.echo("  ANTHROPIC_API_KEY: set")
-        else:
-            click.echo("  ANTHROPIC_API_KEY: not set (required for the configured anthropic:* model)")
-    else:
-        # Unknown / custom provider — report present keys without asserting one.
-        for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"):
-            if os.getenv(var):
-                click.echo(f"  {var}: set")
+        aux_model = ""
+    _doctor_report_model_key(model_for_run, label="model")
+    # Surface `model_aux` too — the reflection review subagent runs on it, and on
+    # the mixed-provider path it needs a DIFFERENT key than the main model (the
+    # #96 gap: a green doctor while the aux provider's key is unset). Only report
+    # it when it introduces a new provider scheme; a same-scheme aux shares the
+    # key line already printed above.
+    if aux_model and _model_scheme(aux_model) != _model_scheme(model_for_run):
+        _doctor_report_model_key(aux_model, label="model (aux)")
 
     # Provider PACKAGE importability — the dep most likely to be missing on a
     # fresh `pip install langstage-hermes` (no extras): the openai:* path needs

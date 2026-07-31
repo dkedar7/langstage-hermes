@@ -2,6 +2,41 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.26] - 2026-07-31
+
+### Added
+- **`langstage-hermes skills validate PATH [--json]` — a keyless, non-mutating pre-install check for a
+  `SKILL.md` (gh #98).** Skill creation is the project's headline activity, yet it was the one authoring
+  loop with no offline red/green: the only ways to run the agentskills.io validator were `skills install`
+  (which copies the skill into `<HERMES_HOME>/skills` **and** appends a `create` audit row) or `skills audit`
+  (which only checks already-installed skills). `validate` runs the **exact same** validator against an
+  arbitrary working tree and writes nothing — no store copy, no audit row, no model, no key — so an author
+  or a CI gate for a skills repo can ask "did I get the frontmatter right?" without side effects. PATH
+  mirrors `skills install` (a `SKILL.md` file or a directory containing one) and the effective name is
+  resolved exactly as `install` resolves it, so `validate`'s verdict predicts `install`'s. Exit 0 valid,
+  1 invalid; `--json` emits `{"path", "name", "valid", "errors"}` mirroring the other `--json` surfaces.
+  This closes the keyless-preview set — `search` (#79), `memory notes` (#94), and now skills.
+
+### Fixed
+- **`verify` / `doctor` now preflight `model_aux`, not only the main model (gh #96).** The reflection review
+  subagent — the project's headline closed-loop feature — runs on `model_aux`. On the documented mixed-provider
+  path (an `openai:*` main model + the default `anthropic:*` aux), a user who set only the main model and
+  `OPENAI_API_KEY` sailed through `verify` green, then hit an Anthropic auth error at the first reflection
+  (~iteration 10). Both commands now run the same provider-aware key preflight against the aux model too:
+  `verify` fails preflight (exit 2) before building the agent, and `doctor` prints a `model (aux):` row plus
+  its distinct key requirement — surfaced only when the aux model uses a different provider scheme than the
+  main model, so the default all-anthropic config is unchanged.
+- **`cron delete` / `cron pause` / `cron resume` now exit 1 on a non-existent job id (gh #97).** They printed
+  `No cron job with id 'X'.` but exited 0, so a CI/script wrapper around the cron lifecycle could not tell a
+  typo'd or stale id from a real success (`cron pause $ID && echo ok` printed `ok` even when nothing was
+  paused). They now exit 1 like every other not-found path in the CLI (`skills remove`, `audit rollback`, …),
+  keeping the same message.
+- **`search --session <missing> --around N` (SCROLL) now exits 1 when the named session doesn't exist
+  (gh #99).** It printed `scroll: session_id 'X' not found` (and the `--json` body carried a matching `error`
+  key) but exited 0 — the one not-found path in `search` that broke the CLI's exit-1 norm (a sibling of #97
+  in a different subsystem). A missing *message* inside an *existing* session still exits 0 (the session was
+  found; only the anchor id was out of range), as does an empty discovery result.
+
 ## [0.4.25] - 2026-07-26
 
 ### Added

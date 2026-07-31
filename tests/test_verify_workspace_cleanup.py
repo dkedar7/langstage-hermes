@@ -69,9 +69,12 @@ def _inject_fake_factory(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_verify_removes_workspace_on_build_failure(tmp_hermes_home: Path, scratch_tmp: Path, monkeypatch):
     """The build-failure path (issue repro) must clean up its workspace."""
     # An openai:* model + a dummy key gets past verify's key gate, so the
-    # workspace IS created — then we force the build to fail after it.
+    # workspace IS created — then we force the build to fail after it. verify also
+    # preflights the default anthropic:* aux model now (gh #96), so give it a dummy
+    # ANTHROPIC_API_KEY too or it short-circuits before the workspace is created.
     monkeypatch.setenv("LANGSTAGE_HERMES_MODEL_DEFAULT", "openai:openai/gpt-4o-mini")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-dummy-not-real")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-dummy-not-real")
 
     def boom(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("simulated agent build failure")

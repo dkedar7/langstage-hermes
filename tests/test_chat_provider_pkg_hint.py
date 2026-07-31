@@ -128,6 +128,10 @@ def test_verify_reads_the_same_table(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("LANGSTAGE_HERMES_MODEL_DEFAULT", "openai:openai/gpt-4o-mini")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-anything")
+    # This test is about the agent-BUILD hint, so it must get past BOTH key
+    # preflights: verify now also preflights the default anthropic:* aux model
+    # (gh #96), which would otherwise short-circuit before the build here.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-anything")
     monkeypatch.setattr(
         "langstage_hermes.create_hermes_agent",
         lambda *a, **kw: (_ for _ in ()).throw(ImportError(_LANGCHAIN_OPENAI_IMPORT_ERROR)),
