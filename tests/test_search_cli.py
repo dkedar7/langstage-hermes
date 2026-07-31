@@ -96,9 +96,29 @@ def test_scroll_json_marks_anchor(populated_home):
 
 
 def test_scroll_missing_message_is_clean_error(populated_home):
+    # Session EXISTS, only the anchor id is out of range → still exit 0 (the
+    # session lookup succeeded; nothing was "not found"). Contrast the missing-
+    # *session* case below (gh #99).
     res = CliRunner().invoke(cli, ["search", "--session", "sess-a", "--around", "999999"])
     assert res.exit_code == 0, res.output
     assert "not in session" in res.output
+
+
+def test_scroll_missing_session_exits_1_human(populated_home):
+    """gh #99: a named session that doesn't exist is a lookup failure — exit 1,
+    matching `skills show <missing>` / `audit show <missing>`."""
+    res = CliRunner().invoke(cli, ["search", "--session", "GHOST", "--around", "3"])
+    assert res.exit_code == 1, res.output
+    assert "not found" in res.output
+
+
+def test_scroll_missing_session_exits_1_json(populated_home):
+    """The --json body already carried the `error`; only the exit code was wrong."""
+    res = CliRunner().invoke(cli, ["search", "--session", "GHOST", "--around", "3", "--json"])
+    assert res.exit_code == 1, res.output
+    data = json.loads(res.output)
+    assert data["mode"] == "scroll"
+    assert "not found" in data["error"]
 
 
 # ── BROWSE ─────────────────────────────────────────────────────────
