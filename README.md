@@ -164,6 +164,19 @@ langstage-hermes memory notes "rollback" --json     # {"query", "count", "result
 
 Recall is the same dumb-but-robust keyword overlap the agent uses (query tokens ≥ 3 chars, ranked by distinct hits). `--limit N` caps the sections returned; a missing/empty notes dir or a no-match query prints a clear message, never a traceback.
 
+## Read your memory
+
+The **frozen-snapshot memory** (`MEMORY.md` + `USER.md`) is the layer the agent grows about you and the session, but inside a chat only the `/memory` slash command could read it — and `chat` needs an API key. Dump the current snapshot straight from the terminal — **keyless and offline, no model call** — to answer "what has the agent learned about me?" without spending a turn:
+
+```bash
+langstage-hermes memory show                 # both USER.md + MEMORY.md, with char count vs budget
+langstage-hermes memory show --user          # just USER.md
+langstage-hermes memory show --session       # just MEMORY.md
+langstage-hermes memory show --json          # {"user": {...}, "memory": {...}} for scripting / CI
+```
+
+Each layer prints its char count against the configured truncation budget (`memory_char_limit` = 2200, `memory_user_char_limit` = 1375) so you can see when a snapshot is near or over budget. A missing/empty layer prints a clear one-line message, never a traceback (`memory dump` is an alias for `memory show`).
+
 ## Load into an existing host
 
 Any LangStage host can run this agent:
@@ -211,7 +224,7 @@ See [SPEC.md](./SPEC.md) for the full 21-section requirements doc. Top-level lay
 | Skill library + agentskills.io validator | ✅ working |
 | Skill loader (system-prompt injection + progressive disclosure) | ✅ working |
 | `skill_view` / `skill_manage` / `skills_list` tools | ✅ working |
-| Frozen-snapshot memory (MEMORY.md / USER.md) | ✅ working — verified live (702 bytes written autonomously) |
+| Frozen-snapshot memory (MEMORY.md / USER.md) | ✅ working — verified live (702 bytes written autonomously); also a keyless `langstage-hermes memory show` CLI (`--user` / `--session` / `--json`) |
 | SQLite FTS5 store + `session_search` (3 modes) | ✅ working — also a keyless `langstage-hermes search` CLI (DISCOVERY / SCROLL / BROWSE, `--json`) |
 | `MarkdownProvider` (bundled, opt-in via `memory.provider="markdown"`; the default is no-op) | ✅ keyword search over `<HERMES_HOME>/memories/notes/*.md` — zero deps; also a keyless `langstage-hermes memory notes` CLI (`--json`) |
 | Iteration budget middleware | ✅ working |

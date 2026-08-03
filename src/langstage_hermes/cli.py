@@ -248,7 +248,7 @@ def _configured_hermes_home() -> Path | None:
     return Path(override) if override else None
 
 
-def _preflight_model_key(model_for_run: str, *, suggest_verify: bool = False) -> None:
+def _preflight_model_key(model_for_run: str, *, suggest_verify: bool = False, qualifier: str = "") -> None:
     """Provider-aware API-key preflight shared by ``verify`` and ``chat``.
 
     If the configured model's provider key is missing, print the same clean,
@@ -258,11 +258,20 @@ def _preflight_model_key(model_for_run: str, *, suggest_verify: bool = False) ->
     used to (gh #76). Factored out of ``verify``'s "(3) model API key sanity"
     gate so the two commands can't drift. ``suggest_verify`` appends a pointer to
     the full preflight, used at ``chat`` startup.
+
+    ``qualifier`` (e.g. ``"aux "``) names *which* model the message is about, so
+    the aux-model preflight reads ``aux model is anthropic:* but ...``. Without it,
+    a user on the documented mixed-provider path (an ``openai:*`` main model with
+    its key set + the default ``anthropic:*`` aux missing ``ANTHROPIC_API_KEY``)
+    reads a bare ``model is anthropic:*`` failure two lines under an ``openai:*``
+    main-model row and thinks their (fine) main model is at fault (gh #103).
+    Mirrors ``_doctor_report_model_key``'s ``label`` qualifier so ``verify`` and
+    ``doctor`` name the aux model identically and can't drift.
     """
     if model_for_run.startswith("anthropic:") and not os.getenv("ANTHROPIC_API_KEY"):
-        msg = "model is anthropic:* but ANTHROPIC_API_KEY not set"
+        msg = f"{qualifier}model is anthropic:* but ANTHROPIC_API_KEY not set"
     elif model_for_run.startswith("openai:") and not (os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")):
-        msg = "model is openai:* but neither OPENAI_API_KEY nor OPENROUTER_API_KEY set"
+        msg = f"{qualifier}model is openai:* but neither OPENAI_API_KEY nor OPENROUTER_API_KEY set"
     else:
         return
     click.echo(click.style(f"  ✗ {msg}", fg="red"))
@@ -354,31 +363,40 @@ def _model_scheme(model: str) -> str:
     return model.split(":", 1)[0] if ":" in model else model
 
 
-def _doctor_report_model_key(model_for_run: str, *, label: str) -> None:
+def _doctor_report_model_key(model_for_run: str, *, label: str) -> bool:
     """Print one model's id + provider-aware API-key status, ``doctor``-style.
 
     Shared by the main model and the aux model (the reflection review subagent's
     model) so both get the identical provider→key check and can't drift (gh #96).
     ``label`` is ``"model"`` or ``"model (aux)"``; the missing-key line repeats the
     ``aux`` qualifier so a missing aux key reads distinctly from a missing main one.
+
+    Returns ``True`` when a *required* provider key is missing, so ``doctor`` can
+    exit non-zero to match ``verify`` (exit 2) and its own missing-provider-package
+    path — a visible ``✗``/failure diagnostic must not coexist with a clean exit
+    (gh #104). An unknown/custom provider has no required key, so it returns
+    ``False``.
     """
     qualifier = "aux " if "aux" in label else ""
     click.echo(f"  {label}: {model_for_run or '(unresolved)'}")
     if model_for_run.startswith("openai:"):
         if os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY"):
             click.echo("  OPENAI_API_KEY / OPENROUTER_API_KEY: set")
-        else:
-            click.echo(f"  OPENAI_API_KEY / OPENROUTER_API_KEY: not set (required for the configured {qualifier}openai:* model)")
+            return False
+        click.echo(f"  OPENAI_API_KEY / OPENROUTER_API_KEY: not set (required for the configured {qualifier}openai:* model)")
+        return True
     elif model_for_run.startswith("anthropic:"):
         if os.getenv("ANTHROPIC_API_KEY"):
             click.echo("  ANTHROPIC_API_KEY: set")
-        else:
-            click.echo(f"  ANTHROPIC_API_KEY: not set (required for the configured {qualifier}anthropic:* model)")
+            return False
+        click.echo(f"  ANTHROPIC_API_KEY: not set (required for the configured {qualifier}anthropic:* model)")
+        return True
     else:
         # Unknown / custom provider — report present keys without asserting one.
         for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"):
             if os.getenv(var):
                 click.echo(f"  {var}: set")
+        return False
 
 
 def _try_import_agent() -> tuple[Any | None, str | None]:
@@ -1293,7 +1311,8 @@ def _render_notes_human(query: str, notes_dir: Path, snippets: list[str]) -> Non
 
 @cli.group()
 def memory() -> None:
-    """Preview and inspect the notes-recall memory layer (keyless)."""
+    """Inspect the memory layers offline (keyless): `show` dumps the frozen-snapshot
+    memory (MEMORY.md + USER.md); `notes` previews MarkdownProvider recall."""
 
 
 @memory.command("notes")
@@ -1345,6 +1364,116 @@ def memory_notes(query: tuple[str, ...], limit: int, as_json: bool) -> None:
         return
 
     _render_notes_human(query_str, notes_dir, snippets)
+
+
+@memory.command("show")
+@click.option("--user", "only_user", is_flag=True, help="Show only USER.md (what the agent has learned about you).")
+@click.option("--session", "only_session", is_flag=True, help="Show only MEMORY.md (the current session snapshot).")
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def memory_show(only_user: bool, only_session: bool, as_json: bool) -> None:
+    """Print the frozen-snapshot memory (MEMORY.md + USER.md) — keyless, offline, no model.
+
+    The frozen-snapshot memory is the README's *first* headline bullet, yet its only
+    reader was the `/memory` slash command inside a keyed `chat`: offline there was
+    no way to answer "what has the agent learned about me?" (USER.md) or "what's in
+    the current session snapshot?" (MEMORY.md) short of `cat`-ing the files by hand.
+    This reads `<HERMES_HOME>/memories/{USER.md,MEMORY.md}` — the same home `doctor`
+    / `--show-config` report — and prints each layer with its char count vs the
+    configured truncation budget, so authors get the near/over-budget feedback loop
+    `/memory` in chat never gave. Pure file read: no key, no model, no side effects.
+
+    \b
+      langstage-hermes memory show                 # both USER.md + MEMORY.md
+      langstage-hermes memory show --user          # just USER.md
+      langstage-hermes memory show --session       # just MEMORY.md
+      langstage-hermes memory show --json          # {"user": {...}, "memory": {...}}
+
+    A missing/empty layer prints a clear one-line message, never a traceback — the
+    same graceful-empty contract as `memory notes`. `--json` emits stable keys
+    (`path`, `exists`, `chars`, `limit`, `over_limit`, `content`) per layer. (gh #101)
+    """
+    import json as _json
+
+    from langstage_hermes.config import HermesConfig, hermes_home
+
+    try:
+        cfg = HermesConfig.resolve()
+        user_limit = cfg.memory_user_char_limit
+        session_limit = cfg.memory_char_limit
+    except Exception:
+        # A malformed config must never turn an offline read into a traceback;
+        # fall back to the documented defaults (SPEC §2).
+        user_limit, session_limit = 1375, 2200
+
+    mem_dir = hermes_home() / "memories"
+
+    # Default (no flags) shows both layers; either flag narrows to just that one.
+    show_user = only_user or not only_session
+    show_session = only_session or not only_user
+
+    layers: list[tuple[str, str, int]] = []  # (json key, filename, char limit)
+    if show_user:
+        layers.append(("user", "USER.md", user_limit))
+    if show_session:
+        layers.append(("memory", "MEMORY.md", session_limit))
+
+    def _read(fname: str) -> tuple[Path, str]:
+        path = mem_dir / fname
+        try:
+            return path, (path.read_text(encoding="utf-8") if path.is_file() else "")
+        except OSError:
+            return path, ""
+
+    if as_json:
+        out: dict[str, Any] = {}
+        for key, fname, limit in layers:
+            path, text = _read(fname)
+            out[key] = {
+                "path": str(path),
+                "exists": path.is_file(),
+                "chars": len(text),
+                "limit": limit,
+                "over_limit": len(text) > limit,
+                "content": text,
+            }
+        click.echo(_json.dumps(out))
+        return
+
+    shown_anything = False
+    for key, fname, limit in layers:
+        path, text = _read(fname)
+        if text.strip():
+            shown_anything = True
+            chars = len(text)
+            over = chars > limit
+            budget = click.style(f"{chars:,} / {limit:,} chars", fg="yellow" if over else "bright_black")
+            if over:
+                budget += click.style("  (over budget — will be truncated)", fg="yellow")
+            click.echo(click.style(f"{fname}  ", fg="cyan", bold=True) + budget)
+            click.echo(click.style(f"  {path}", fg="bright_black"))
+            click.echo(text.rstrip("\n"))
+            click.echo()
+        else:
+            noun = "user memory" if key == "user" else "session memory"
+            click.echo(click.style(f"no {noun} yet at {path}", fg="bright_black"))
+
+    if not shown_anything:
+        click.echo(
+            click.style(
+                "  Memory grows as the reflection subagent decides something is worth saving,",
+                fg="bright_black",
+            )
+        )
+        click.echo(
+            click.style(
+                '  or by user request ("remember that I prefer X"). Run `langstage-hermes demo` to see it populated.',
+                fg="bright_black",
+            )
+        )
+
+
+# ``memory dump`` is a documented alias for ``memory show`` (gh #101).
+memory.add_command(memory_show, name="dump")
 
 
 # ── tools ──────────────────────────────────────────────────────────
@@ -2411,7 +2540,9 @@ def verify(model_id: str | None, keep_workspace: bool) -> None:
     aux_model = (cfg.model_aux or "").strip()
     if aux_model and aux_model != model_for_run:
         click.echo(click.style(f"  · model (aux):  {aux_model}", fg="bright_black"))
-        _preflight_model_key(aux_model)
+        # Name it the AUX model so a user with a working openai:* main model isn't
+        # misled into thinking their main model is the anthropic one at fault (gh #103).
+        _preflight_model_key(aux_model, qualifier="aux ")
 
     # ── (4) build the agent in an isolated workspace ─────────────────────
     # The workspace is a throwaway temp dir; wrap everything that follows in a
@@ -2686,14 +2817,16 @@ def doctor() -> None:
     except Exception:
         model_for_run = ""
         aux_model = ""
-    _doctor_report_model_key(model_for_run, label="model")
+    key_missing = _doctor_report_model_key(model_for_run, label="model")
     # Surface `model_aux` too — the reflection review subagent runs on it, and on
     # the mixed-provider path it needs a DIFFERENT key than the main model (the
     # #96 gap: a green doctor while the aux provider's key is unset). Only report
     # it when it introduces a new provider scheme; a same-scheme aux shares the
     # key line already printed above.
     if aux_model and _model_scheme(aux_model) != _model_scheme(model_for_run):
-        _doctor_report_model_key(aux_model, label="model (aux)")
+        # A missing aux key is just as fatal to the reflection loop as a missing
+        # main key, so it feeds the exit gate too (gh #104).
+        key_missing = _doctor_report_model_key(aux_model, label="model (aux)") or key_missing
 
     # Provider PACKAGE importability — the dep most likely to be missing on a
     # fresh `pip install langstage-hermes` (no extras): the openai:* path needs
@@ -2726,11 +2859,13 @@ def doctor() -> None:
     click.echo(f"  cron dir: {'exists' if cron_dir.exists() else 'absent (will be created on first use)'}")
     click.echo(f"  shutil.which('bash'): {shutil.which('bash') or 'not on PATH (no_agent shell scripts will fail)'}")
 
-    # A missing provider package means the configured agent cannot build, so
-    # doctor must NOT return a clean exit. We defer the exit to here (rather than
-    # bailing mid-report) so the full diagnostic still prints — doctor's value
-    # over verify is the complete picture — while the exit code matches verify. (gh #41)
-    if provider_pkg_missing:
+    # A missing provider package OR a missing required API key means the configured
+    # agent cannot make a single model call, so doctor must NOT return a clean exit
+    # — it would disagree with verify (exit 2) and with doctor's own missing-package
+    # path. We defer the exit to here (rather than bailing mid-report) so the full
+    # diagnostic still prints — doctor's value over verify is the complete picture —
+    # while the exit code matches verify. (gh #41 for the package; gh #104 for the key.)
+    if provider_pkg_missing or key_missing:
         sys.exit(2)
 
 

@@ -52,3 +52,28 @@ def test_verify_flags_unauthenticated_aux_model(monkeypatch, tmp_path):
     assert "ANTHROPIC_API_KEY" in r.output
     # ...and caught it at PREFLIGHT — before building the agent or its workspace.
     assert "isolated workspace" not in r.output
+
+
+def test_verify_aux_preflight_message_names_aux(monkeypatch, tmp_path):
+    """gh #103: the aux-model preflight message must name that it's the AUX model.
+
+    On the documented mixed-provider path (openai:* main WITH its key set + the
+    default anthropic:* aux missing ANTHROPIC_API_KEY), verify used to print a bare
+    ``model is anthropic:* but ANTHROPIC_API_KEY not set`` — two lines under an
+    ``openai:*`` main-model row — reading as if the (fine) main model were the
+    anthropic one at fault. The message must now read ``aux model is anthropic:*
+    but ANTHROPIC_API_KEY not set`` so a user isn't misdirected to their main model.
+    """
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("LANGSTAGE_HERMES_MODEL_DEFAULT", "openai:openai/gpt-4o-mini")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-dummy-not-real")  # main model key present
+
+    r = CliRunner().invoke(cli, ["verify"])
+
+    assert r.exit_code == 2, r.output
+    # The failure line explicitly qualifies the model as `aux`.
+    assert "aux model is anthropic:* but ANTHROPIC_API_KEY not set" in r.output
+    # And it does NOT read as the un-qualified main-model failure (the #103 bug):
+    # the only occurrence of "model is anthropic:*" must carry the aux qualifier.
+    assert "· model is anthropic:*" not in r.output  # no bare main-model-styled failure
+    assert " ✗ model is anthropic:*" not in r.output

@@ -2,6 +2,43 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.27] - 2026-08-03
+
+### Added
+- **`langstage-hermes memory show` — a keyless, offline reader for the frozen-snapshot memory (`MEMORY.md` +
+  `USER.md`), gh #101.** The frozen-snapshot memory is the README's *first* headline bullet, yet its only reader
+  was the `/memory` slash command inside a keyed `chat`: offline there was no way to see "what has the agent
+  learned about me?" (`USER.md`) or "what's in the session snapshot?" (`MEMORY.md`) short of `cat`-ing the files
+  by hand. This closes the last agent-only-data gap the keyless-preview line of work (`search` #79, `memory
+  notes` #94, `skills validate` #98) was built for. `memory show` reads `<HERMES_HOME>/memories/{USER.md,MEMORY.md}`
+  from the same home `doctor` / `--show-config` report — no key, no model, no side effects — and prints each layer
+  with its char count vs the configured truncation budget (`memory_char_limit` = 2200, `memory_user_char_limit` =
+  1375), the near/over-budget feedback loop `/memory` in chat never gave. `--user` / `--session` narrow to one
+  layer; `--json` emits stable per-layer keys (`path`, `exists`, `chars`, `limit`, `over_limit`, `content`)
+  mirroring the other `--json` surfaces; `memory dump` is an alias. A missing/empty layer prints a clear one-line
+  message (and never creates the files as a read side effect), never a traceback.
+
+### Fixed
+- **`demo`'s showcase session no longer records failed `ls` tool calls (gh #102).** The keyless `demo` — the
+  headline "watch the reflection→skill loop close" onboarding path — drove its scripted agent with `ls` calls
+  carrying `args: {}`. The bundled `ls` tool requires a `path`, so each call failed schema validation and recorded
+  an `Error invoking tool 'ls' … path: Field required` ToolMessage into the `demo-001` session — which the README
+  then sends brand-new users to inspect with `search` (both SCROLL and DISCOVERY). A new user's first hands-on
+  look at the flagship loop was a session full of failures. The scripted `ls` now carries a valid `{"path": "."}`
+  (a read-only, side-effect-free cwd listing), so the recorded trace is clean and `search` surfaces success.
+- **`verify`'s aux-model key preflight now names the aux model (gh #103, follow-up to #96).** On the documented
+  mixed-provider path (an `openai:*` main model with its key set + the default `anthropic:*` aux missing
+  `ANTHROPIC_API_KEY`), `verify` printed a bare `model is anthropic:* but ANTHROPIC_API_KEY not set` — two lines
+  under an `openai:*` main-model row — reading as if the (fine) main model were the anthropic one at fault. The
+  shared `_preflight_model_key` now threads a qualifier so the aux failure reads `aux model is anthropic:* but
+  ANTHROPIC_API_KEY not set`, mirroring `doctor`'s `model (aux)` labelling so the two commands can't drift.
+- **`doctor` now exits non-zero when the configured model's required API key is missing (gh #104).** `doctor`
+  printed the required-key failure (`ANTHROPIC_API_KEY: not set (required …)`) but still exited 0 — disagreeing
+  with `verify` (exit 2) and with `doctor`'s own missing-provider-package path (exit 2, #41), so a `✗` coexisted
+  with a clean bill of health and the exit code was useless as a CI/scripted health gate. `doctor` now exits 2
+  when the main model's — or a distinct-scheme aux model's — required key is missing, deferring the exit so the
+  full diagnostic still prints. The sibling of #41 (missing package) it never covered.
+
 ## [0.4.26] - 2026-07-31
 
 ### Added
