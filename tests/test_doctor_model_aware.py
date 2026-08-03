@@ -3,6 +3,12 @@
 doctor used to hardcode ANTHROPIC_API_KEY and stay silent on a missing
 OpenAI/OpenRouter key, so on the README's openai:* / OpenRouter path it both
 cited the wrong key and hid the one actually required.
+
+Since gh #104, a missing *required* key also makes doctor exit non-zero (2) —
+matching verify and doctor's own missing-provider-package path — so a visible ✗
+never coexists with a clean exit. Tests that isolate a dimension orthogonal to the
+key (provider-package presence, aux-row suppression) therefore set a dummy key so
+the key dimension passes and doesn't mask what they mean to check.
 """
 
 from click.testing import CliRunner
@@ -34,7 +40,9 @@ def test_doctor_flags_openai_key_for_openai_model(monkeypatch, tmp_path):
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
 
     r = CliRunner().invoke(cli, ["doctor"])
-    assert r.exit_code == 0, r.output
+    # The required openai/openrouter key is missing → non-zero exit (gh #104), and
+    # the report still names the RIGHT missing key (the original #35 concern).
+    assert r.exit_code == 2, r.output
     assert "openai:openai/gpt-4o-mini" in r.output  # reports the configured model
     assert "OPENAI_API_KEY / OPENROUTER_API_KEY: not set" in r.output  # the right missing key
     # The MAIN model line must not wrongly cite anthropic (the original #35 bug).
@@ -47,7 +55,8 @@ def test_doctor_checks_anthropic_for_default_model(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
 
     r = CliRunner().invoke(cli, ["doctor"])
-    assert r.exit_code == 0, r.output
+    # Default anthropic:* model with no ANTHROPIC_API_KEY → non-zero exit (gh #104).
+    assert r.exit_code == 2, r.output
     assert "ANTHROPIC_API_KEY: not set (required for the configured anthropic:* model)" in r.output
 
 
@@ -68,8 +77,10 @@ def test_doctor_fails_when_openai_provider_pkg_missing(monkeypatch, tmp_path):
 
 def test_doctor_passes_when_provider_pkg_present(monkeypatch, tmp_path):
     """The default anthropic:* path: langchain-anthropic is a core dep, so the
-    provider-package check passes and doctor still exits 0."""
+    provider-package check passes and doctor exits 0 (with the required key set, so
+    the gh #104 key gate doesn't fire — this test isolates the package dimension)."""
     _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-dummy")  # hold the key dimension fixed
 
     r = CliRunner().invoke(cli, ["doctor"])
     assert r.exit_code == 0, r.output
@@ -89,7 +100,9 @@ def test_doctor_surfaces_mixed_provider_aux_model(monkeypatch, tmp_path):
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
 
     r = CliRunner().invoke(cli, ["doctor"])
-    assert r.exit_code == 0, r.output
+    # The aux anthropic:* key is missing → non-zero exit (gh #104), and the report
+    # surfaces the AUX model row + its distinct key requirement (the #96 concern).
+    assert r.exit_code == 2, r.output
     assert "model (aux):" in r.output  # the aux row exists
     assert "anthropic:claude-haiku" in r.output  # names the default aux model
     assert "aux anthropic:* model" in r.output  # and its distinct key requirement
@@ -98,9 +111,43 @@ def test_doctor_surfaces_mixed_provider_aux_model(monkeypatch, tmp_path):
 def test_doctor_no_aux_row_when_same_provider(monkeypatch, tmp_path):
     """Default config: main + aux are both anthropic, so the aux shares the main
     model's key check — doctor prints a single anthropic key row, not a redundant
-    aux one (gh #96 only surfaces a DIFFERENT-provider aux)."""
+    aux one (gh #96 only surfaces a DIFFERENT-provider aux). Key set so the gh #104
+    exit gate doesn't fire — this test isolates the aux-row-suppression behavior."""
     _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-dummy")  # hold the key dimension fixed
 
     r = CliRunner().invoke(cli, ["doctor"])
     assert r.exit_code == 0, r.output
     assert "model (aux):" not in r.output
+
+
+# ── gh #104: a missing REQUIRED key makes doctor exit non-zero ──────
+
+
+def test_doctor_exits_nonzero_when_required_key_missing(monkeypatch, tmp_path):
+    """gh #104: doctor printed the required-key failure but still exited 0, so it
+    disagreed with verify (exit 2) and with its OWN missing-provider-package path
+    (exit 2), and couldn't be used as a scripted/CI health gate. On the default
+    anthropic:* config with no ANTHROPIC_API_KEY it must now exit 2 — a visible ✗
+    can't coexist with a clean bill of health."""
+    _isolate(monkeypatch, tmp_path)
+    # langchain_anthropic is a base dep, so the provider-package check passes; hold
+    # it fixed anyway so the exit is unambiguously driven by the missing KEY.
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+
+    r = CliRunner().invoke(cli, ["doctor"])
+    assert r.exit_code == 2, r.output
+    assert "ANTHROPIC_API_KEY: not set (required for the configured anthropic:* model)" in r.output
+
+
+def test_doctor_exits_zero_when_required_key_present(monkeypatch, tmp_path):
+    """The counterpart: with the required key present (and no other failure), doctor
+    exits 0 — proving it's the missing KEY, not something else, driving the gh #104
+    non-zero exit above."""
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-dummy")
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+
+    r = CliRunner().invoke(cli, ["doctor"])
+    assert r.exit_code == 0, r.output
+    assert "ANTHROPIC_API_KEY: set" in r.output

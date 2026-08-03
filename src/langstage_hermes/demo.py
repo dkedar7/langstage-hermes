@@ -120,8 +120,12 @@ class DemoMainModel(_ScriptedModel):
     def _generate(self, messages: list[Any], stop: Any = None, run_manager: Any = None, **kwargs: Any) -> ChatResult:
         n_ai = sum(1 for m in messages if isinstance(m, AIMessage))
         if n_ai < self.nudge_interval:
-            # A real, side-effect-free tool call — bumps iters_since_skill.
-            return self._result(AIMessage(content="", tool_calls=[{"name": _LS_TOOL, "id": f"ls-{n_ai}", "args": {}}]))
+            # A real, side-effect-free tool call — bumps iters_since_skill. The
+            # bundled `ls` tool requires a `path`; an empty `args: {}` fails schema
+            # validation and records an *error* ToolMessage into the showcase session
+            # that the README then sends new users to inspect with `search` (gh #102).
+            # A valid, read-only cwd listing keeps the recorded trace clean.
+            return self._result(AIMessage(content="", tool_calls=[{"name": _LS_TOOL, "id": f"ls-{n_ai}", "args": {"path": "."}}]))
         if n_ai == self.nudge_interval:
             # Cross the threshold, then spawn the reflection review subagent the
             # same way the live agent does — via the genuine `task` tool.

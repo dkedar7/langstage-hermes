@@ -302,10 +302,15 @@ def test_slash_cron_empty_state(tmp_hermes_home: Path, monkeypatch):
 # ── doctor still works ─────────────────────────────────────────────────
 
 
-def test_doctor_runs_clean():
+def test_doctor_runs_clean(monkeypatch):
+    # doctor now exits non-zero when the configured model's required key is missing
+    # (gh #104); this test is about doctor producing its full report and exiting
+    # clean when properly configured, so set the default model's key deterministically
+    # (mirroring key-unset CI, which would otherwise make a bare `doctor` exit 2).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-dummy")
     runner = CliRunner()
     result = runner.invoke(cli, ["doctor"])
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
     assert "python" in result.output
     assert "HERMES_HOME" in result.output
 

@@ -117,6 +117,52 @@ def test_demo_command_keep_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert list(kept[0].rglob("SKILL.md")), "kept home should contain the generated SKILL.md"
 
 
+def test_demo_session_has_no_failed_tool_calls(tmp_hermes_home: Path):
+    """gh #102: the showcase demo session — which the README sends new users to
+    inspect with ``search`` — must record only SUCCESSFUL tool calls.
+
+    The scripted ``ls`` calls used to carry ``args: {}``; the bundled ``ls`` tool
+    requires a ``path``, so each one failed schema validation and recorded an
+    ``Error invoking tool 'ls' ... path: Field required`` ToolMessage into the
+    ``demo-001`` session. A brand-new user's first hands-on look at the flagship
+    loop — via ``search --session demo-001`` (SCROLL) and ``search "Field required"``
+    (DISCOVERY) — was a session full of failures. This drives the real ``demo`` CLI
+    (which records into the configured HERMES_HOME, gh #88) then reads the recorded
+    messages back the way ``search`` does, and asserts none is a failure.
+    """
+    import sqlite3
+
+    runner = CliRunner()
+    demo_res = runner.invoke(cli, ["demo"])
+    assert demo_res.exit_code == 0, demo_res.output
+    assert "DEMO: PASS" in demo_res.output
+
+    db = tmp_hermes_home / "state.db"
+    assert db.exists(), "demo did not populate the configured HERMES_HOME"
+    conn = sqlite3.connect(str(db))
+    try:
+        rows = conn.execute("SELECT role, tool_name, content FROM messages WHERE session_id = 'demo-001'").fetchall()
+    finally:
+        conn.close()
+
+    tool_rows = [(name, content or "") for role, name, content in rows if role == "tool"]
+    # The scripted ls calls really ran (guard against the fix silently dropping them)...
+    ls_rows = [(name, content) for name, content in tool_rows if name == "ls"]
+    assert ls_rows, f"expected recorded ls tool calls in the demo session: {tool_rows}"
+    # ...and NONE of the recorded tool messages is a failure.
+    for name, content in tool_rows:
+        assert "Error invoking tool" not in content, (name, content)
+        assert "Field required" not in content, (name, content)
+        assert not content.startswith("Error:"), (name, content)
+
+    # The DISCOVERY repro from the issue surfaces the error text no more.
+    hit = runner.invoke(cli, ["search", "Field required", "--json"])
+    assert hit.exit_code == 0, hit.output
+    import json
+
+    assert json.loads(hit.output)["count"] == 0
+
+
 def test_demo_populates_the_store_search_reads(tmp_hermes_home: Path):
     """gh #88: the documented keyless ``demo`` -> ``search`` loop closes.
 
