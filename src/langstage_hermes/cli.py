@@ -280,6 +280,21 @@ def _preflight_model_key(model_for_run: str, *, suggest_verify: bool = False, qu
     sys.exit(2)
 
 
+def _required_key_detail(model_for_run: str, *, qualifier: str = "") -> str | None:
+    """The missing-required-key message for a model, or ``None`` when the key is
+    present / not required.
+
+    Same provider-aware logic and phrasing as ``_preflight_model_key``, but PURE
+    (no print, no ``sys.exit``) so ``verify --json`` can record the key status as
+    a structured check instead of hard-exiting mid-report (gh #108).
+    """
+    if model_for_run.startswith("anthropic:") and not os.getenv("ANTHROPIC_API_KEY"):
+        return f"{qualifier}model is anthropic:* but ANTHROPIC_API_KEY not set"
+    if model_for_run.startswith("openai:") and not (os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")):
+        return f"{qualifier}model is openai:* but neither OPENAI_API_KEY nor OPENROUTER_API_KEY set"
+    return None
+
+
 class _ProviderPkg(NamedTuple):
     """How a model-id prefix maps to the package that makes it work.
 
@@ -363,40 +378,68 @@ def _model_scheme(model: str) -> str:
     return model.split(":", 1)[0] if ":" in model else model
 
 
-def _doctor_report_model_key(model_for_run: str, *, label: str) -> bool:
-    """Print one model's id + provider-aware API-key status, ``doctor``-style.
+def _doctor_report_model_key(model_for_run: str, *, label: str, as_json: bool = False) -> tuple[bool, list[dict[str, Any]]]:
+    """Report one model's id + provider-aware API-key status, ``doctor``-style.
 
     Shared by the main model and the aux model (the reflection review subagent's
     model) so both get the identical provider→key check and can't drift (gh #96).
     ``label`` is ``"model"`` or ``"model (aux)"``; the missing-key line repeats the
     ``aux`` qualifier so a missing aux key reads distinctly from a missing main one.
 
-    Returns ``True`` when a *required* provider key is missing, so ``doctor`` can
-    exit non-zero to match ``verify`` (exit 2) and its own missing-provider-package
-    path — a visible ``✗``/failure diagnostic must not coexist with a clean exit
-    (gh #104). An unknown/custom provider has no required key, so it returns
-    ``False``.
+    Returns ``(key_missing, checks)``: ``key_missing`` is ``True`` when a
+    *required* provider key is missing, so ``doctor`` can exit non-zero to match
+    ``verify`` (exit 2) and its own missing-provider-package path — a visible
+    ``✗``/failure diagnostic must not coexist with a clean exit (gh #104). An
+    unknown/custom provider has no required key, so it returns ``False``.
+    ``checks`` is the structured pair (a ``model`` check + an ``api_key`` check)
+    that feeds ``doctor --json`` (gh #108); the human lines are printed unless
+    ``as_json`` is set, so the two renders share one source of truth.
     """
     qualifier = "aux " if "aux" in label else ""
-    click.echo(f"  {label}: {model_for_run or '(unresolved)'}")
+    aux = "aux" in label
+    model_key_name = "model_aux" if aux else "model"
+    api_key_name = "api_key_aux" if aux else "api_key"
+
+    def _echo(line: str) -> None:
+        if not as_json:
+            click.echo(line)
+
+    _echo(f"  {label}: {model_for_run or '(unresolved)'}")
+    model_check = {"name": model_key_name, "ok": bool(model_for_run), "detail": model_for_run or "(unresolved)"}
+
     if model_for_run.startswith("openai:"):
         if os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY"):
-            click.echo("  OPENAI_API_KEY / OPENROUTER_API_KEY: set")
-            return False
-        click.echo(f"  OPENAI_API_KEY / OPENROUTER_API_KEY: not set (required for the configured {qualifier}openai:* model)")
-        return True
+            _echo("  OPENAI_API_KEY / OPENROUTER_API_KEY: set")
+            return False, [model_check, {"name": api_key_name, "ok": True, "detail": "OPENAI_API_KEY / OPENROUTER_API_KEY set"}]
+        _echo(f"  OPENAI_API_KEY / OPENROUTER_API_KEY: not set (required for the configured {qualifier}openai:* model)")
+        key_check = {
+            "name": api_key_name,
+            "ok": False,
+            "detail": "OPENAI_API_KEY / OPENROUTER_API_KEY not set",
+            "hint": "export OPENAI_API_KEY=… (or OPENROUTER_API_KEY=…)",
+        }
+        return True, [model_check, key_check]
     elif model_for_run.startswith("anthropic:"):
         if os.getenv("ANTHROPIC_API_KEY"):
-            click.echo("  ANTHROPIC_API_KEY: set")
-            return False
-        click.echo(f"  ANTHROPIC_API_KEY: not set (required for the configured {qualifier}anthropic:* model)")
-        return True
+            _echo("  ANTHROPIC_API_KEY: set")
+            return False, [model_check, {"name": api_key_name, "ok": True, "detail": "ANTHROPIC_API_KEY set"}]
+        _echo(f"  ANTHROPIC_API_KEY: not set (required for the configured {qualifier}anthropic:* model)")
+        key_check = {
+            "name": api_key_name,
+            "ok": False,
+            "detail": "ANTHROPIC_API_KEY not set",
+            "hint": "export ANTHROPIC_API_KEY=…",
+        }
+        return True, [model_check, key_check]
     else:
         # Unknown / custom provider — report present keys without asserting one.
+        present = []
         for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"):
             if os.getenv(var):
-                click.echo(f"  {var}: set")
-        return False
+                _echo(f"  {var}: set")
+                present.append(var)
+        detail = f"{', '.join(present)} set" if present else "no required key for this provider scheme"
+        return False, [model_check, {"name": api_key_name, "ok": True, "detail": detail}]
 
 
 def _try_import_agent() -> tuple[Any | None, str | None]:
@@ -1701,10 +1744,18 @@ def skills_install(path: Path) -> None:
     from langstage_hermes.config import hermes_home
     from langstage_hermes.skills.validator import validate as validate_frontmatter
 
-    src_dir = path if path.is_dir() else path.parent
-    skill_md = src_dir / "SKILL.md"
+    # Honor the EXACT path given (gh #107): a directory resolves to its SKILL.md,
+    # but a FILE is used as-is rather than swapped for a sibling SKILL.md — so
+    # `install ./draft.md` acts on draft.md, and never silently installs a
+    # DIFFERENT skill (the sibling) than the one the user named.
+    if path.is_dir():
+        src_dir = path
+        skill_md = src_dir / "SKILL.md"
+    else:
+        skill_md = path
+        src_dir = path.parent
     if not skill_md.is_file():
-        click.echo(click.style(f"No SKILL.md found at {src_dir}.", fg="yellow"))
+        click.echo(click.style(f"No SKILL.md found at {path}.", fg="yellow"))
         sys.exit(2)
 
     import frontmatter
@@ -1730,6 +1781,12 @@ def skills_install(path: Path) -> None:
         sys.exit(1)
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src_dir, target)
+    # If the user named a non-SKILL.md file (validated above), make THAT file the
+    # installed skill's SKILL.md — so the copied tree loads under the content the
+    # user pointed at, never a stale sibling SKILL.md that copytree also copied
+    # over (gh #107).
+    if skill_md.name != "SKILL.md":
+        shutil.copy2(skill_md, target / "SKILL.md")
     # Land an audit row so `audit log` shows the install and `audit rollback`
     # behaves like any other create — honoring the `audit` group's promise that
     # "every CLI skill mutation appends a row." Best-effort: never fail an
@@ -1849,8 +1906,17 @@ def skills_validate(path: Path, as_json: bool) -> None:
 
     from langstage_hermes.skills.validator import validate as validate_frontmatter
 
-    src_dir = path if path.is_dir() else path.parent
-    skill_md = src_dir / "SKILL.md"
+    # Honor the EXACT path given (gh #107): a directory resolves to its SKILL.md
+    # (the documented convention), but a FILE is validated as-is — never swapped
+    # for a sibling SKILL.md in the same directory. Pointing this at an invalid
+    # draft that happens to sit next to a valid SKILL.md must report the DRAFT as
+    # invalid, not a false `✓ valid` about the sibling — this command is
+    # advertised as a CI/pre-commit gate, so a false PASS on a different file
+    # defeats its whole purpose.
+    if path.is_dir():
+        skill_md = path / "SKILL.md"
+    else:
+        skill_md = path
 
     def _fail(errors: list[str], *, name: str | None = None) -> NoReturn:
         if as_json:
@@ -1862,7 +1928,9 @@ def skills_validate(path: Path, as_json: bool) -> None:
         sys.exit(1)
 
     if not skill_md.is_file():
-        _fail([f"no SKILL.md found at {src_dir}"])
+        # Only reachable for a directory with no SKILL.md — a file PATH always
+        # exists (click's exists=True) and is used verbatim above.
+        _fail([f"no SKILL.md found at {path}"])
 
     import frontmatter
 
@@ -1878,7 +1946,7 @@ def skills_validate(path: Path, as_json: bool) -> None:
     # predicts install's verdict: install lands the skill under its frontmatter
     # `name` (falling back to the source dir), and validates the name against that.
     raw_name = fm.get("name")
-    install_name = raw_name if isinstance(raw_name, str) and raw_name else src_dir.name
+    install_name = raw_name if isinstance(raw_name, str) and raw_name else skill_md.parent.name
     errs = validate_frontmatter(fm, parent_dir_name=install_name)
     display_name = raw_name if isinstance(raw_name, str) and raw_name else None
     if errs:
@@ -2088,12 +2156,41 @@ def cron() -> None:
     """Manage scheduled cron jobs (SPEC §14)."""
 
 
+def _cron_job_json(job: dict[str, Any]) -> dict[str, Any]:
+    """Stable, machine-readable projection of a job dict for ``--json`` (gh #109).
+
+    Picks the scalar fields a scheduler/monitor needs — id, name, schedule
+    (display form), lifecycle state, run timestamps, last status, per-job model —
+    out of the ~30-field internal record, mirroring the "one object with stable
+    keys" convention the other ``--json`` surfaces use.
+    """
+    return {
+        "id": job.get("id"),
+        "name": job.get("name"),
+        "schedule": job.get("schedule_display"),
+        "state": job.get("state"),
+        "next_run": job.get("next_run_at"),
+        "last_run": job.get("last_run_at"),
+        "last_status": job.get("last_status"),
+        "model": job.get("model"),
+    }
+
+
 @cron.command("list")
-def cron_list() -> None:
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def cron_list(as_json: bool) -> None:
     """List all scheduled cron jobs."""
+    import json as _json
+
     from langstage_hermes.cron.jobs import list_jobs
 
     items = list_jobs()
+    if as_json:
+        # One object on stdout with stable keys, mirroring `search`/`skills list`
+        # --json; the fixed-width human table is awkward to parse (gh #109).
+        jobs = [_cron_job_json(job) for job in items]
+        click.echo(_json.dumps({"jobs": jobs, "count": len(jobs)}, default=str))
+        return
     if not items:
         click.echo("No cron jobs scheduled.")
         return
@@ -2111,67 +2208,127 @@ def cron_list() -> None:
 @click.option("--schedule", "schedule_expr", required=True, help="Schedule expression.")
 @click.option("--name", default=None, help="Friendly name (defaults to first 50 chars of prompt).")
 @click.option("--model", default=None, help="Per-job model override.")
-def cron_create(prompt: str, schedule_expr: str, name: str | None, model: str | None) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def cron_create(prompt: str, schedule_expr: str, name: str | None, model: str | None, as_json: bool) -> None:
     """Create a new cron job."""
+    import json as _json
+
     from langstage_hermes.cron.jobs import create_job
 
     try:
         job = create_job(prompt, schedule_expr, name=name, model=model)
     except ValueError as e:
-        click.echo(click.style(f"Error: {e}", fg="red"), err=True)
+        # Preserve the exit code (2); emit the reason as a parseable object in
+        # --json mode instead of the human stderr line.
+        if as_json:
+            click.echo(_json.dumps({"error": str(e)}))
+        else:
+            click.echo(click.style(f"Error: {e}", fg="red"), err=True)
         sys.exit(2)
-    click.echo(f"Created cron job {job['id']} ({job['name']}); next run {job['next_run_at']}.")
+    if as_json:
+        click.echo(
+            _json.dumps(
+                {
+                    "id": job["id"],
+                    "name": job["name"],
+                    "schedule": job.get("schedule_display"),
+                    "next_run": job.get("next_run_at"),
+                },
+                default=str,
+            )
+        )
+    else:
+        click.echo(f"Created cron job {job['id']} ({job['name']}); next run {job['next_run_at']}.")
 
 
 @cron.command("delete")
 @click.argument("id")
-def cron_delete(id: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def cron_delete(id: str, as_json: bool) -> None:
     """Delete a cron job by ID."""
+    import json as _json
+
     from langstage_hermes.cron.jobs import delete_job
 
     if delete_job(id):
-        click.echo("Deleted.")
+        click.echo(_json.dumps({"id": id, "action": "delete", "ok": True}) if as_json else "Deleted.")
     else:
         # A missing id is a lookup failure, not a no-op success — exit 1 like
         # every other not-found path (`skills remove`, `audit rollback`) so a
-        # CI/script wrapper can tell a typo'd id from a real delete (gh #97).
-        click.echo(f"No cron job with id {id!r}.")
+        # CI/script wrapper can tell a typo'd id from a real delete (gh #97). The
+        # --json path preserves that exit code (gh #109).
+        if as_json:
+            click.echo(_json.dumps({"id": id, "action": "delete", "ok": False, "error": "not found"}))
+        else:
+            click.echo(f"No cron job with id {id!r}.")
         sys.exit(1)
 
 
 @cron.command("pause")
 @click.argument("id")
 @click.option("--reason", default="", help="Optional reason recorded in paused_reason.")
-def cron_pause(id: str, reason: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def cron_pause(id: str, reason: str, as_json: bool) -> None:
     """Pause a cron job (disables without deleting)."""
+    import json as _json
+
     from langstage_hermes.cron.jobs import pause_job
 
     if pause_job(id, reason):
-        click.echo("Paused.")
+        click.echo(_json.dumps({"id": id, "action": "pause", "ok": True}) if as_json else "Paused.")
     else:
-        click.echo(f"No cron job with id {id!r}.")
+        if as_json:
+            click.echo(_json.dumps({"id": id, "action": "pause", "ok": False, "error": "not found"}))
+        else:
+            click.echo(f"No cron job with id {id!r}.")
         sys.exit(1)  # not-found → exit 1, matching the CLI norm (gh #97)
 
 
 @cron.command("resume")
 @click.argument("id")
-def cron_resume(id: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def cron_resume(id: str, as_json: bool) -> None:
     """Resume a paused cron job."""
+    import json as _json
+
     from langstage_hermes.cron.jobs import resume_job
 
     if resume_job(id):
-        click.echo("Resumed.")
+        click.echo(_json.dumps({"id": id, "action": "resume", "ok": True}) if as_json else "Resumed.")
     else:
-        click.echo(f"No cron job with id {id!r}.")
+        if as_json:
+            click.echo(_json.dumps({"id": id, "action": "resume", "ok": False, "error": "not found"}))
+        else:
+            click.echo(f"No cron job with id {id!r}.")
         sys.exit(1)  # not-found → exit 1, matching the CLI norm (gh #97)
 
 
 @cron.command("run-due")
-def cron_run_due() -> None:
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def cron_run_due(as_json: bool) -> None:
     """Run a single tick — execute every due job and exit."""
+    import json as _json
+
+    from langstage_hermes.cron.jobs import get_job
     from langstage_hermes.cron.scheduler import HermesCron
 
     results = HermesCron().tick()
+    if as_json:
+        # A JSON summary of what fired + whether anything failed is what makes an
+        # external tick loop observable without log-scraping (gh #109). Name is a
+        # best-effort lookup — a one-shot at its repeat limit is auto-deleted after
+        # it runs, so its record may already be gone.
+        ran = [
+            {
+                "id": r.get("job_id"),
+                "name": (get_job(r.get("job_id")) or {}).get("name"),
+                "status": "ok" if r.get("success") else "error",
+                "error": r.get("error"),
+            }
+            for r in results
+        ]
+        click.echo(_json.dumps({"ran": ran, "count": len(ran)}, default=str))
+        return
     click.echo(f"Tick complete: {len(results)} job(s) run.")
     for r in results:
         click.echo(f"  {r['job_id']}: {'ok' if r['success'] else 'error'}")
@@ -2423,7 +2580,158 @@ def plugins_disable(name: str) -> None:
     click.echo(f"(Plugin disable for {name!r} TBD — edit langstage-hermes.toml.)")
 
 
-# ── doctor ─────────────────────────────────────────────────────────
+# ── verify ─────────────────────────────────────────────────────────
+
+
+def _verify_json(*, model_id: str | None, keep_workspace: bool) -> NoReturn:
+    """``verify --json``: the human path's readiness checks as one JSON object.
+
+    Fail-SOFT (collects every check, like ``doctor``) rather than the human
+    path's fail-fast, so the payload carries the full picture; the exit code still
+    matches (2 on any failure, 0 on pass). The live round-trip is attempted only
+    when the offline preflight passes AND the required key(s) are present —
+    otherwise it is reported ``skipped`` (never a false failure, and never an
+    accidental paid call in a keyless CI run), exactly as the issue example shows.
+    """
+    import json as _json
+    import sqlite3
+    import tempfile
+    import time
+    from pathlib import Path
+
+    from langstage_hermes.config import HermesConfig, hermes_home
+
+    checks: list[dict[str, Any]] = []
+
+    def _add(name: str, ok: bool, detail: str, **extra: Any) -> None:
+        checks.append({"name": name, "ok": ok, "detail": detail, **extra})
+
+    # ── (1) packaging / bundled assets ───────────────────────────────────
+    pkg_dir = Path(__file__).resolve().parent
+    prompts_dir = pkg_dir / "_prompts"
+    skills_dir = pkg_dir / "_bundled_skills"
+    needed_prompts = [
+        "default_identity.md",
+        "combined_review.md",
+        "skill_review.md",
+        "memory_review.md",
+        "compression_summary.md",
+    ]
+    missing = [p for p in needed_prompts if not (prompts_dir / p).is_file()]
+    _add("bundled_prompts", not missing, f"{len(needed_prompts)} critical present" if not missing else f"missing: {missing}")
+
+    # Mirror the human exit gate: a load exception or "files ship but 0 load"
+    # fails; an empty library (0 files) is a warning, not a failure.
+    n_files = sum(1 for _ in skills_dir.rglob("SKILL.md")) if skills_dir.is_dir() else 0
+    try:
+        from langstage_hermes.skills.library import SkillLibrary, _bundled_skills_dir
+
+        n_loaded = len(SkillLibrary(dirs=[_bundled_skills_dir()]).list())
+        if n_files == 0:
+            _add("bundled_skills", True, "no bundled SKILL.md files found (empty library)")
+        elif n_loaded == 0:
+            _add("bundled_skills", False, f"{n_files} SKILL.md files ship but the SkillLibrary loaded 0")
+        else:
+            suffix = "" if n_loaded == n_files else f" ({n_files} shipped; rest platform-gated)"
+            _add("bundled_skills", True, f"{n_loaded} loaded{suffix}")
+    except Exception as exc:  # pragma: no cover - defensive
+        _add("bundled_skills", False, f"failed to load bundled skills: {exc}")
+
+    # ── (2) HERMES_HOME writability ──────────────────────────────────────
+    home = hermes_home()
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        probe = home / ".verify_write_test"
+        probe.write_text("ok")
+        probe.unlink()
+        _add("hermes_home", True, f"writable ({home})", writable=True)
+    except OSError as e:
+        _add("hermes_home", False, f"not writable ({home}): {e}", writable=False)
+
+    # ── (3) model + aux key preflight (pure — no exit) ───────────────────
+    cfg = HermesConfig.resolve()
+    model_for_run = model_id or cfg.model_default
+    aux_model = (cfg.model_aux or "").strip()
+
+    main_key_detail = _required_key_detail(model_for_run)
+    _add("model_key", main_key_detail is None, main_key_detail or "required key present")
+    key_ok = main_key_detail is None
+    # `--model` overrides only the MAIN model, so aux always comes from config;
+    # preflight it when it's a distinct model id (gh #96), matching the human path.
+    if aux_model and aux_model != model_for_run:
+        aux_detail = _required_key_detail(aux_model, qualifier="aux ")
+        _add("model_key_aux", aux_detail is None, aux_detail or "required aux key present")
+        key_ok = key_ok and (aux_detail is None)
+
+    offline_ok = all(c["ok"] for c in checks)
+
+    # ── (4-6) one live round-trip — only when everything above is green ──
+    if not offline_ok:
+        # Skip (not fail) on a missing key so a keyless CI readiness check never
+        # triggers a paid call; distinguish that from a genuine preflight failure.
+        _add("round_trip", False, "skipped — no key" if not key_ok else "skipped — preflight failed")
+    else:
+        workspace = Path(tempfile.mkdtemp(prefix="dah-verify-"))
+        try:
+            overrides: dict[str, Any] = {"model_default": model_id} if model_id else {}
+            cfg_for_run = HermesConfig.resolve(overrides=overrides) if overrides else cfg
+            from langstage_hermes import create_hermes_agent
+
+            agent: Any = None
+            try:
+                agent = create_hermes_agent(cfg_for_run, workspace=workspace, session_id="verify-001")
+            except Exception as e:
+                _add("round_trip", False, f"agent build failed: {type(e).__name__}: {e}")
+            if agent is not None:
+                try:
+                    t0 = time.perf_counter()
+                    result = agent.invoke(
+                        {
+                            "messages": [{"role": "user", "content": "Reply with one word, either YES or NO: are you working?"}],
+                            "session_id": "verify-001",
+                            "iteration_budget_remaining": 5,
+                        },
+                        config={"configurable": {"thread_id": "verify-001"}},
+                    )
+                    invoke_s = time.perf_counter() - t0
+                    msgs = result.get("messages", [])
+                    last_ai = next((m for m in reversed(msgs) if getattr(m, "type", None) == "ai"), None)
+                    content = getattr(last_ai, "content", "")
+                    if isinstance(content, list):
+                        content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
+                    if not content:
+                        _add("round_trip", False, "model returned an empty response")
+                    else:
+                        _add("round_trip", True, f"{content.strip()[:80]!r} in {invoke_s:.1f}s")
+                        # FTS5 store wrote the turn (a missing session row is a
+                        # warning in the human path, not a failure — mirror that).
+                        db = home / "state.db"
+                        if not db.exists():
+                            _add("fts5_store", False, "FTS5 store wasn't created")
+                        else:
+                            conn = sqlite3.connect(str(db))
+                            try:
+                                n_sess = conn.execute("SELECT COUNT(*) FROM sessions WHERE id = ?", ("verify-001",)).fetchone()[0]
+                                n_msgs = conn.execute(
+                                    "SELECT COUNT(*) FROM messages WHERE session_id = ?", ("verify-001",)
+                                ).fetchone()[0]
+                            finally:
+                                conn.close()
+                            _add("fts5_store", True, f"{n_sess} session(s), {n_msgs} message(s) recorded")
+                except Exception as e:
+                    _add("round_trip", False, f"model invoke failed: {type(e).__name__}: {e}")
+        finally:
+            if not keep_workspace:
+                shutil.rmtree(workspace, ignore_errors=True)
+
+    overall_ok = all(c["ok"] for c in checks)
+    click.echo(
+        _json.dumps(
+            {"ok": overall_ok, "model": model_for_run, "model_aux": aux_model or None, "checks": checks},
+            default=str,
+        )
+    )
+    sys.exit(0 if overall_ok else 2)
 
 
 @cli.command()
@@ -2433,7 +2741,8 @@ def plugins_disable(name: str) -> None:
     is_flag=True,
     help="Keep the isolated /tmp workspace for post-mortem inspection instead of removing it.",
 )
-def verify(model_id: str | None, keep_workspace: bool) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def verify(model_id: str | None, keep_workspace: bool, as_json: bool) -> None:
     """End-to-end smoke: one live model round-trip + write the side effects.
 
     Catches the kinds of fresh-install problems ``doctor`` misses — packaging
@@ -2444,12 +2753,24 @@ def verify(model_id: str | None, keep_workspace: bool) -> None:
     Honest about cost: this makes a single model call (one prompt, ≤20 tokens
     of output). On the default Anthropic Sonnet 4.5 that's a fraction of a
     cent; on gpt-4o-mini via OpenRouter it's effectively free.
+
+    ``--json`` emits ``{"ok", "model", "model_aux", "checks": [...]}`` for
+    scripting/CI, mirroring the cross-command ``--json`` convention. It reports
+    the live round-trip as ``skipped`` when a required key is absent, so a keyless
+    CI readiness check never triggers a paid call; ``.ok`` matches the exit code
+    (gh #108).
     """
     import tempfile
     import time
     from pathlib import Path
 
     from langstage_hermes.config import HermesConfig, hermes_home
+
+    if as_json:
+        # JSON mode is a self-contained, fail-soft collector (see `_verify_json`)
+        # so the richly-formatted, fail-fast human path below stays byte-for-byte
+        # unchanged. Both share the same offline predicates + live-invoke shape.
+        _verify_json(model_id=model_id, keep_workspace=keep_workspace)
 
     click.echo(click.style("langstage-hermes verify — live end-to-end smoke", fg="cyan", bold=True))
     click.echo()
@@ -2788,21 +3109,42 @@ def demo(nudge_interval: int, keep_workspace: bool) -> None:
 
 
 @cli.command()
-def doctor() -> None:
-    """Sanity check: Python version, deps, env vars, HERMES_HOME writability."""
+@click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
+def doctor(as_json: bool) -> None:
+    """Sanity check: Python version, deps, env vars, HERMES_HOME writability.
+
+    ``--json`` emits ``{"ok": bool, "checks": [{"name", "ok", "detail", ...}]}``
+    for scripting/CI, mirroring the ``skills audit --json`` convention — top-level
+    ``ok`` plus a per-check list. ``.ok`` equals ``exit code == 0`` (so
+    ``doctor --json | jq -e .ok`` is a one-liner readiness gate); the exit code
+    and the human render are otherwise unchanged (gh #108).
+    """
+    import json as _json
+
     from langstage_hermes.config import hermes_home
 
-    click.echo("langstage-hermes doctor:")
-    click.echo(f"  python: {sys.version.split()[0]} (need >= 3.11)")
+    checks: list[dict[str, Any]] = []
+
+    def _emit(line: str) -> None:
+        if not as_json:
+            click.echo(line)
+
+    _emit("langstage-hermes doctor:")
+
     py_ok = sys.version_info >= (3, 11)
-    click.echo(f"    {'OK' if py_ok else 'FAIL'}")
+    py_detail = f"{sys.version.split()[0]} (need >= 3.11)"
+    _emit(f"  python: {py_detail}")
+    _emit(f"    {'OK' if py_ok else 'FAIL'}")
+    checks.append({"name": "python", "ok": py_ok, "detail": py_detail})
 
     try:
         import langstage_core  # noqa: F401
 
-        click.echo("  langstage-core: installed")
+        _emit("  langstage-core: installed")
+        checks.append({"name": "langstage-core", "ok": True, "detail": "installed"})
     except ImportError as e:
-        click.echo(f"  langstage-core: MISSING ({e})")
+        _emit(f"  langstage-core: MISSING ({e})")
+        checks.append({"name": "langstage-core", "ok": False, "detail": f"MISSING ({e})"})
 
     # Check the key the CONFIGURED model actually needs — not a hardcoded
     # ANTHROPIC_API_KEY. Mirrors verify's provider-aware gate so the two
@@ -2817,7 +3159,8 @@ def doctor() -> None:
     except Exception:
         model_for_run = ""
         aux_model = ""
-    key_missing = _doctor_report_model_key(model_for_run, label="model")
+    key_missing, main_checks = _doctor_report_model_key(model_for_run, label="model", as_json=as_json)
+    checks.extend(main_checks)
     # Surface `model_aux` too — the reflection review subagent runs on it, and on
     # the mixed-provider path it needs a DIFFERENT key than the main model (the
     # #96 gap: a green doctor while the aux provider's key is unset). Only report
@@ -2826,7 +3169,9 @@ def doctor() -> None:
     if aux_model and _model_scheme(aux_model) != _model_scheme(model_for_run):
         # A missing aux key is just as fatal to the reflection loop as a missing
         # main key, so it feeds the exit gate too (gh #104).
-        key_missing = _doctor_report_model_key(aux_model, label="model (aux)") or key_missing
+        aux_missing, aux_checks = _doctor_report_model_key(aux_model, label="model (aux)", as_json=as_json)
+        key_missing = aux_missing or key_missing
+        checks.extend(aux_checks)
 
     # Provider PACKAGE importability — the dep most likely to be missing on a
     # fresh `pip install langstage-hermes` (no extras): the openai:* path needs
@@ -2840,10 +3185,19 @@ def doctor() -> None:
     _entry = _provider_package(model_for_run)
     if _entry is not None:
         if importlib.util.find_spec(_entry.module) is None:
-            click.echo(f"  ✗ provider package '{_entry.module}' not importable for {model_for_run} — {_entry.install}")
+            _emit(f"  ✗ provider package '{_entry.module}' not importable for {model_for_run} — {_entry.install}")
             provider_pkg_missing = True
+            checks.append(
+                {
+                    "name": "provider_pkg",
+                    "ok": False,
+                    "detail": f"'{_entry.module}' not importable for {model_for_run}",
+                    "hint": _entry.install,
+                }
+            )
         else:
-            click.echo(f"  provider package: {_entry.module} installed")
+            _emit(f"  provider package: {_entry.module} installed")
+            checks.append({"name": "provider_pkg", "ok": True, "detail": f"{_entry.module} installed"})
 
     home = hermes_home()
     try:
@@ -2851,13 +3205,22 @@ def doctor() -> None:
         probe = home / ".doctor_write_test"
         probe.write_text("ok")
         probe.unlink()
-        click.echo(f"  HERMES_HOME ({home}): writable")
+        _emit(f"  HERMES_HOME ({home}): writable")
+        checks.append({"name": "hermes_home", "ok": True, "detail": str(home), "writable": True})
     except OSError as e:
-        click.echo(f"  HERMES_HOME ({home}): NOT writable — {e}")
+        _emit(f"  HERMES_HOME ({home}): NOT writable — {e}")
+        checks.append({"name": "hermes_home", "ok": False, "detail": f"{home}: {e}", "writable": False})
 
     cron_dir = home / "cron"
-    click.echo(f"  cron dir: {'exists' if cron_dir.exists() else 'absent (will be created on first use)'}")
-    click.echo(f"  shutil.which('bash'): {shutil.which('bash') or 'not on PATH (no_agent shell scripts will fail)'}")
+    cron_detail = "exists" if cron_dir.exists() else "absent (created on first use)"
+    _emit(f"  cron dir: {'exists' if cron_dir.exists() else 'absent (will be created on first use)'}")
+    checks.append({"name": "cron_dir", "ok": True, "detail": cron_detail})
+
+    bash_path = shutil.which("bash")
+    _emit(f"  shutil.which('bash'): {bash_path or 'not on PATH (no_agent shell scripts will fail)'}")
+    checks.append(
+        {"name": "bash", "ok": bash_path is not None, "detail": bash_path or "not on PATH (no_agent shell scripts will fail)"}
+    )
 
     # A missing provider package OR a missing required API key means the configured
     # agent cannot make a single model call, so doctor must NOT return a clean exit
@@ -2865,7 +3228,14 @@ def doctor() -> None:
     # path. We defer the exit to here (rather than bailing mid-report) so the full
     # diagnostic still prints — doctor's value over verify is the complete picture —
     # while the exit code matches verify. (gh #41 for the package; gh #104 for the key.)
-    if provider_pkg_missing or key_missing:
+    ready = not (provider_pkg_missing or key_missing)
+    if as_json:
+        # `ok` mirrors the EXIT CODE (readiness), not "every check passed": doctor
+        # only gates its exit on the required key + provider package (an old Python
+        # or a missing bash is informational, never a non-zero exit), so
+        # `doctor --json | jq -e .ok` matches `doctor; echo $?`. (gh #108)
+        click.echo(_json.dumps({"ok": ready, "checks": checks}, default=str))
+    if not ready:
         sys.exit(2)
 
 

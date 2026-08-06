@@ -2,6 +2,40 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.28] - 2026-08-06
+
+### Fixed
+- **`skills validate` / `skills install` with a file PATH now act on THAT file, never a sibling `SKILL.md` (gh
+  #107).** Both commands resolved a file argument to `PATH.parent / "SKILL.md"`, discarding the filename you
+  passed — so pointing `validate` at an invalid draft that happened to sit next to a valid `SKILL.md` returned a
+  false `✓ valid` / exit 0 about the *sibling*, defeating a command the docstring markets as a CI/pre-commit gate,
+  and `install ./draft.md` silently installed the sibling skill instead. Path resolution now honors the exact
+  argument: a **directory** resolves to its `SKILL.md` (the documented convention), a **file** is used as-is. An
+  invalid draft beside a valid `SKILL.md` is now reported invalid (validate: exit 1; install: rejected, exit 2),
+  and `--json`'s `path` field names the file you actually passed. A validator advertised for CI gating can no
+  longer return a false PASS about a different file.
+
+### Added
+- **`--json` on `doctor` and `verify` — the two "run this first" readiness checks are now machine-readable (gh
+  #108).** `doctor` and `verify` are the commands the README tells a fresh adopter to run first, and the two
+  you'd gate a setup script / CI job / Dockerfile healthcheck on — yet they were the only user-facing commands
+  with no `--json`, leaving a script grepping human prose and inferring cause from an exit code. Both now accept
+  `--json`, emitting a top-level `ok` plus a per-check `checks` list (mirroring the `skills audit --json` shape).
+  `doctor --json` carries `python` / `langstage-core` / `model` / `api_key` / `provider_pkg` / `hermes_home` /
+  `cron_dir` / `bash`; `verify --json` carries `bundled_prompts` / `bundled_skills` / `hermes_home` / `model_key`
+  (+ `model_key_aux` on the mixed-provider path, the natural home for the #96 aux preflight) / `round_trip`, plus
+  top-level `model` / `model_aux`. `.ok` equals `exit code == 0`, so `doctor --json | jq -e .ok` is a one-liner
+  readiness gate; exit codes and the human render are unchanged. `verify --json` reports the live round-trip as
+  `skipped` when a required key is absent, so a keyless CI run never triggers a paid model call.
+- **`--json` on the `cron` subcommands — the scheduler is now scriptable like every other surface (gh #109).**
+  `cron` is the subsystem you'd actually build automation *around*, yet monitoring which jobs exist, their state /
+  next run, or what a tick executed meant scraping a fixed-width text table. `cron list` / `create` / `run-due` /
+  `delete` / `pause` / `resume` now accept `--json`, each emitting one object with stable keys: `list` →
+  `{"jobs":[{id,name,schedule,state,next_run,last_run,last_status,model}],"count"}`; `create` →
+  `{id,name,schedule,next_run}`; `run-due` → `{"ran":[{id,name,status,error}],"count"}` so an external tick loop
+  can tell what fired and whether anything failed; the mutations → `{id,action,ok[,error]}`. The not-found exit
+  codes a prior fix established (gh #97) are preserved: `delete` / `pause` / `resume` still exit 1 on a missing id.
+
 ## [0.4.27] - 2026-08-03
 
 ### Added
