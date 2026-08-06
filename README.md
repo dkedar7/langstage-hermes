@@ -104,6 +104,8 @@ langstage-hermes verify
 
 does one live round-trip against the configured model and confirms the prompts, bundled skills, and FTS5 store all wire up correctly. Run this first on any fresh install — if it passes, `chat` will work.
 
+Both `verify` and `doctor` accept `--json` for scripting/CI — a top-level `ok` plus a per-check list, with `.ok` equal to `exit code == 0` (so `langstage-hermes doctor --json | jq -e .ok` is a one-liner readiness gate). `verify --json` reports the live round-trip as `skipped` when no key is set, so a keyless CI check never triggers a paid call.
+
 ## Quick start
 
 ```bash
@@ -141,7 +143,7 @@ langstage-hermes search --session sess-1a2b3c --around 8 --window 5
 langstage-hermes search --browse --limit 20
 ```
 
-`--json` emits structured output for scripting/CI. The same flag is honored by `skills list`, `skills audit`, and `audit log`, so the skill inventory and mutation log are scriptable too (each prints one JSON object with stable keys). FTS5 syntax works: multi-word queries default to AND, and `OR`, quoted `"phrases"`, and prefix `wildcards*` are all honored.
+`--json` emits structured output for scripting/CI. The same flag is honored by `skills list`, `skills audit`, `audit log`, `memory show` / `memory notes`, the readiness checks `doctor` / `verify`, and the `cron` subcommands (`list`, `create`, `run-due`, `delete`, `pause`, `resume`) — so the skill inventory, mutation log, setup diagnostics, and scheduler are all scriptable too (each prints one JSON object with stable keys). FTS5 syntax works: multi-word queries default to AND, and `OR`, quoted `"phrases"`, and prefix `wildcards*` are all honored.
 
 Want a store to try it against, keyless? Point `HERMES_HOME` at a directory and run `langstage-hermes demo` — with `HERMES_HOME` set the demo records its session into that same `<HERMES_HOME>/state.db`, so `search` reads it straight back:
 

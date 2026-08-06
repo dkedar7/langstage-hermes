@@ -89,3 +89,51 @@ def test_validate_no_skill_md_exits_1(tmp_hermes_home: Path, tmp_path: Path):
     r = CliRunner().invoke(cli, ["skills", "validate", str(empty)])
     assert r.exit_code == 1, r.output
     assert "no skill.md" in r.output.lower()
+
+
+# ── gh #107: a FILE path validates THAT file, never a sibling SKILL.md ──
+
+
+def test_validate_named_file_is_acted_on_not_sibling_skill_md(tmp_hermes_home: Path, tmp_path: Path):
+    """gh #107: pointing at a file must validate THAT file, not a sibling SKILL.md.
+
+    The dangerous case the issue reports: an INVALID draft sits next to a VALID
+    SKILL.md. The old resolution (``path.parent / "SKILL.md"``) discarded the
+    filename and validated the sibling, returning a false ``✓ valid`` / exit 0 —
+    defeating a command advertised as a CI/pre-commit gate. It must now report the
+    draft as invalid (exit 1).
+    """
+    # A VALID SKILL.md sibling in the same directory.
+    d = _write_skill_dir(tmp_path / "wt", "sib", {"name": "sib", "description": "a valid sibling skill"})
+    # The INVALID file the user actually names (no frontmatter at all).
+    draft = d / "draft.md"
+    draft.write_text("this is not a valid skill\n", encoding="utf-8")
+
+    r = CliRunner().invoke(cli, ["skills", "validate", str(draft)])
+    assert r.exit_code == 1, r.output  # NOT a false ✓ valid about the sibling
+    assert "invalid" in r.output.lower()
+
+    # --json makes the target explicit: the reported path is the file named, not
+    # the sibling SKILL.md the tool used to silently swap in.
+    rj = CliRunner().invoke(cli, ["skills", "validate", str(draft), "--json"])
+    assert rj.exit_code == 1, rj.output
+    data = json.loads(rj.output)
+    assert data["valid"] is False
+    assert Path(data["path"]).name == "draft.md", data["path"]
+    assert data["errors"]
+
+
+def test_install_named_file_is_acted_on_not_sibling_skill_md(tmp_hermes_home: Path, tmp_path: Path):
+    """gh #107: `install FILE` acts on FILE, never a sibling SKILL.md.
+
+    Pointing `install` at an invalid draft beside a valid SKILL.md must REJECT the
+    draft (exit 2), not silently install the sibling skill under its own name.
+    """
+    d = _write_skill_dir(tmp_path / "wt", "sib2", {"name": "sibling-skill", "description": "a valid sibling"})
+    draft = d / "draft.md"
+    draft.write_text("this is not a valid skill\n", encoding="utf-8")
+
+    r = CliRunner().invoke(cli, ["skills", "install", str(draft)])
+    assert r.exit_code == 2, r.output  # invalid frontmatter → rejected
+    # And it did NOT install the sibling skill.
+    assert not (tmp_hermes_home / "skills" / "sibling-skill").exists()
