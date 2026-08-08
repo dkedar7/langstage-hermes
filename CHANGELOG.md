@@ -2,6 +2,20 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.29] - 2026-08-08
+
+### Fixed
+- **`cron run-due` / the daemon no longer dump a ~126-line Python traceback on every failed job (gh #111).** When
+  a scheduled job's agent invoke failed (an expired/missing key, a rate limit, a network blip), the scheduler
+  logged it with `logger.exception(...)`, spilling a full stack trace to stderr — on both the one-shot `cron
+  run-due` and the long-running `cron daemon`. The failure is *already* captured cleanly in the job's
+  `last_status: error` / `error` field (and in `run-due --json`), so the traceback was pure duplicate noise on an
+  automation surface, and inconsistent with the "clean guidance, not raw tracebacks" norm #76 established for
+  `chat`. Failures now log **one clean line** (job id + concise cause) by default; the full traceback is preserved
+  under `LANGSTAGE_DEBUG` (the family-wide debug switch). The run is still recorded as failed and exit/return
+  behavior is unchanged — only the console noise. The top-level job-crash, deliverer-failure, and daemon-tick
+  handlers get the same treatment.
+
 ## [0.4.28] - 2026-08-06
 
 ### Fixed
