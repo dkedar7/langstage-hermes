@@ -36,6 +36,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from langstage_core.host.config import _env_bool
+
 from langstage_hermes.cron import jobs as cron_jobs
 from langstage_hermes.cron.deliverers import get_deliverer
 
@@ -46,6 +48,39 @@ SILENT_MARKER = "[SILENT]"
 
 # Toolsets a cron-spawned agent must never receive (per SPEC §14.3).
 _CRON_ALWAYS_STRIPPED = ("cronjob", "messaging", "clarify")
+
+
+# ── failure logging (gh #111) ──────────────────────────────────────
+
+
+def _debug_enabled() -> bool:
+    """True when full tracebacks are wanted on the console.
+
+    Gated on ``LANGSTAGE_DEBUG`` — the family-wide debug switch
+    (:attr:`langstage_core.host.config.HostConfig.debug`). Off by default so the
+    automation surfaces (``cron run-due`` and the long-running daemon) stay
+    quiet. Read directly (a lenient flag read, like the config module's other
+    ``LANGSTAGE_*`` switches) so a bad tick never has to stand up full config
+    resolution just to decide how loudly to complain.
+    """
+    return _env_bool(os.getenv("LANGSTAGE_DEBUG"))
+
+
+def _log_cron_failure(msg: str, *args: Any, exc: BaseException) -> None:
+    """Log a cron failure without flooding the console (gh #111).
+
+    Default path: one clean ``WARNING`` line — ``"<msg>: <exc>"`` — carrying the
+    same concise cause already surfaced structurally in ``last_status``/``error``
+    and in ``run-due --json``, so the raw ~126-line traceback would be pure
+    duplicate noise on an automation surface. Under ``LANGSTAGE_DEBUG`` the full
+    traceback is preserved, at ``ERROR`` with ``exc_info``. Either way the caller
+    still records the run as failed and returns unchanged — only console noise
+    changes.
+    """
+    if _debug_enabled():
+        logger.error(msg, *args, exc_info=True)
+    else:
+        logger.warning("%s: %s", msg % args if args else msg, exc)
 
 
 # ── tick lock ──────────────────────────────────────────────────────
@@ -193,7 +228,7 @@ def _build_cron_response(job: dict[str, Any], *, prompt: str) -> tuple[bool, str
             }
         )
     except Exception as e:
-        logger.exception("Cron job %s: agent invoke failed", job.get("id"))
+        _log_cron_failure("Cron job %s: agent invoke failed", job.get("id"), exc=e)
         return False, f"[agent invoke failed: {e}]"
 
     messages = (result or {}).get("messages") or []
@@ -254,8 +289,8 @@ def _deliver_output(
         assert deliverer_cls is not None, "LocalDeliverer should always be registered"
     try:
         deliverer_cls().deliver(job, output, output_path=output_path)
-    except Exception:
-        logger.exception("cron deliverer %r failed", deliverer_name)
+    except Exception as e:
+        _log_cron_failure("cron deliverer %r failed", deliverer_name, exc=e)
         # caller updates last_delivery_error
         raise
 
@@ -309,7 +344,7 @@ def run_job(job: dict[str, Any]) -> dict[str, Any]:
                 except Exception as e:  # pragma: no cover - defensive
                     delivery_error = f"{type(e).__name__}: {e}"
     except Exception as e:  # pragma: no cover - top-level safety net
-        logger.exception("Cron job %s crashed", job_id)
+        _log_cron_failure("Cron job %s crashed", job_id, exc=e)
         success = False
         error = f"{type(e).__name__}: {e}"
 
@@ -372,8 +407,8 @@ class HermesCron:
             while not self._stop.is_set():
                 try:
                     self.tick()
-                except Exception:  # pragma: no cover - never let one bad tick kill the loop
-                    logger.exception("Cron tick raised; continuing")
+                except Exception as e:  # pragma: no cover - never let one bad tick kill the loop
+                    _log_cron_failure("Cron tick raised; continuing", exc=e)
                 self._stop.wait(self.tick_seconds)
 
 

@@ -9,9 +9,12 @@ mirroring the ``no_agent`` (script) path. These tests monkeypatch the real
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 from langstage_hermes.cron import jobs as cron_jobs
 from langstage_hermes.cron import scheduler
@@ -85,3 +88,70 @@ def test_successful_agent_invoke_delivers_and_records_ok(tmp_hermes_home: Path):
     assert rec is not None
     assert rec["last_status"] == "ok"
     assert rec["last_error"] is None
+
+
+def test_failed_job_logs_clean_one_line_by_default(
+    tmp_hermes_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    """Default path: a failed job logs ONE clean line, no ~126-line traceback (gh #111).
+
+    ``cron run-due`` / the daemon are automation surfaces; the failure is already
+    captured cleanly in ``last_status``/``error``, so the raw traceback is pure
+    duplicate noise. Assert the record is a single-line ``WARNING`` with no
+    ``exc_info`` attached (nothing for a formatter to expand into a stack).
+    """
+    monkeypatch.delenv("LANGSTAGE_DEBUG", raising=False)
+    job = cron_jobs.create_job("write my morning brief", "every 1m", name="brief")
+
+    with (
+        patch("langstage_hermes.agent.create_hermes_agent", lambda *a, **k: _RaisingAgent()),
+        patch.object(scheduler, "_deliver_output"),
+        caplog.at_level(logging.DEBUG, logger="langstage_hermes.cron.scheduler"),
+    ):
+        result = scheduler.run_job(job)
+
+    # Failure bookkeeping is unchanged — only the console noise differs.
+    assert result["success"] is False
+
+    failures = [r for r in caplog.records if "agent invoke failed" in r.getMessage()]
+    assert len(failures) == 1
+    rec = failures[0]
+    assert rec.levelno == logging.WARNING
+    # No traceback attached to the record...
+    assert rec.exc_info is None
+    # ...and even fully formatted it is a single clean line with the concise cause.
+    formatted = logging.Formatter().format(rec)
+    assert "Traceback (most recent call last)" not in formatted
+    assert "\n" not in formatted
+    assert "Could not resolve authentication method" in formatted
+
+
+def test_failed_job_preserves_full_traceback_under_debug(
+    tmp_hermes_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    """LANGSTAGE_DEBUG=1: the full traceback is preserved at ERROR (gh #111)."""
+    monkeypatch.setenv("LANGSTAGE_DEBUG", "1")
+    job = cron_jobs.create_job("write my morning brief", "every 1m", name="brief")
+
+    with (
+        patch("langstage_hermes.agent.create_hermes_agent", lambda *a, **k: _RaisingAgent()),
+        patch.object(scheduler, "_deliver_output"),
+        caplog.at_level(logging.DEBUG, logger="langstage_hermes.cron.scheduler"),
+    ):
+        result = scheduler.run_job(job)
+
+    assert result["success"] is False
+
+    failures = [r for r in caplog.records if "agent invoke failed" in r.getMessage()]
+    assert len(failures) == 1
+    rec = failures[0]
+    assert rec.levelno == logging.ERROR
+    # exc_info is attached → the formatter renders the multi-line stack.
+    assert rec.exc_info is not None
+    formatted = logging.Formatter().format(rec)
+    assert "Traceback (most recent call last)" in formatted
+    assert "RuntimeError" in formatted
