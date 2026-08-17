@@ -47,6 +47,7 @@ from langstage_core.host.config import (
     _read_toml,
     _warn_legacy_env,
     _warn_malformed_env_value,
+    _warn_malformed_toml_value,
     load_toml_config,
 )
 
@@ -637,12 +638,28 @@ class HermesConfig(HostConfig):
                 # because we check it second (overwrites).
                 tv = _get_dotted(base_toml_data, tkey)
                 if tv is not None:
-                    val = _coerce(f, tv)
-                    src = _toml_source_label(base_toml_parsed, tkey)
+                    try:
+                        val = _coerce(f, tv)
+                    except (ValueError, TypeError) as exc:
+                        # A type-mismatched TOML value must degrade, not crash the
+                        # command that loads config (gh #122). The env layer below
+                        # already does this (gh #83), and so does the base
+                        # HostConfig.resolve() for its own TOML cast — but this
+                        # override re-implements the TOML loop to layer both TOML
+                        # stacks and dropped the guard. Keep the value/source
+                        # resolved so far and emit the same one-line note via the
+                        # shared core helper so the wording can't drift.
+                        _warn_malformed_toml_value(tkey, tv, exc, val, base_toml_paths)
+                    else:
+                        src = _toml_source_label(base_toml_parsed, tkey)
                 tv2 = _get_dotted(hermes_toml_data, tkey)
                 if tv2 is not None:
-                    val = _coerce(f, tv2)
-                    src = _toml_source_label(hermes_toml_parsed, tkey)
+                    try:
+                        val = _coerce(f, tv2)
+                    except (ValueError, TypeError) as exc:
+                        _warn_malformed_toml_value(tkey, tv2, exc, val, hermes_toml_paths)
+                    else:
+                        src = _toml_source_label(hermes_toml_parsed, tkey)
 
             if name in env_map:
                 var, caster = env_map[name]
