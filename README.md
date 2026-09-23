@@ -145,7 +145,7 @@ langstage-hermes search --browse --limit 20
 
 `--json` emits structured output for scripting/CI. The same flag is honored by `skills list`, `skills audit`, `audit log`, `memory show` / `memory notes`, the readiness checks `doctor` / `verify`, and the `cron` subcommands (`list`, `create`, `run-due`, `delete`, `pause`, `resume`) — so the skill inventory, mutation log, setup diagnostics, and scheduler are all scriptable too (each prints one JSON object with stable keys). FTS5 syntax works: multi-word queries default to AND, and `OR`, quoted `"phrases"`, and prefix `wildcards*` are all honored.
 
-Want a store to try it against, keyless? Point `HERMES_HOME` at a directory and run `langstage-hermes demo` — with `HERMES_HOME` set the demo records its session into that same `<HERMES_HOME>/state.db`, so `search` reads it straight back:
+Want a store to try it against, keyless? Point `HERMES_HOME` at a directory and run `langstage-hermes demo` — with `HERMES_HOME` set the demo copies its session (and only its session) into that same `<HERMES_HOME>/state.db`, so `search` reads it straight back:
 
 ```bash
 export HERMES_HOME=~/.langstage-hermes    # any stable directory
@@ -153,7 +153,7 @@ langstage-hermes demo                     # populates <HERMES_HOME>/state.db
 langstage-hermes search "python"          # finds the demo session
 ```
 
-(A bare `langstage-hermes demo` with no `HERMES_HOME` set uses a throwaway home and cleans up after itself, so it never litters your default store — pass `--keep-workspace` to inspect it.)
+(The loop itself always runs in a throwaway home that is cleaned up afterwards — pass `--keep-workspace` to inspect it — so the demo's generated skill and scripted user-memory note never land in your real skill library or `USER.md`. A bare `langstage-hermes demo` with no `HERMES_HOME` set writes nothing outside that throwaway home.)
 
 ## Preview your notes
 

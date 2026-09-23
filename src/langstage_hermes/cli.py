@@ -916,7 +916,7 @@ def _slash_curator(args: str, state: dict[str, Any]) -> bool:
     click.echo(f"  last activity: {_fmt_ts(last_act)}")
     lib = state.get("skill_lib") or _skill_library()
     state["skill_lib"] = lib
-    pinned = [s.name for s in lib.list() if (s.metadata or {}).get("hermes", {}).get("pinned")]
+    pinned = [s.name for s in lib.list() if s.pinned]
     if pinned:
         click.echo(f"  pinned ({len(pinned)}): {', '.join(pinned[:5])}{'...' if len(pinned) > 5 else ''}")
     return False
@@ -1589,7 +1589,11 @@ def _skill_library(*, with_audit: bool = True) -> Any:
 
     cfg = HermesConfig.resolve()
     dirs: list[Path] = []
-    bundled = Path(__file__).resolve().parent / "_bundled_skills"
+    # One source of truth for the packaged tree, so SkillLibrary's bundled guard
+    # (gh #154) recognizes exactly the dir listed here.
+    from langstage_hermes.skills import library as _skill_library_mod
+
+    bundled = _skill_library_mod._bundled_skills_dir()
     if bundled.is_dir():
         dirs.append(bundled)
     dirs.append(hermes_home() / "skills")
@@ -1802,8 +1806,17 @@ def skills_install(path: Path) -> None:
 
 def _skills_remove(name: str) -> None:
     """Archive an installed skill and record a rollback-able delete mutation."""
+    from langstage_hermes.skills.library import BundledSkillError
+
     lib = _skill_library()
-    if lib.delete(name):
+    try:
+        removed = lib.delete(name)
+    except BundledSkillError as exc:
+        # A bundled skill lives inside the installed package — removing it would
+        # delete it for every HERMES_HOME on this interpreter (gh #154).
+        click.echo(click.style(str(exc), fg="yellow"))
+        sys.exit(1)
+    if removed:
         click.echo(
             click.style(
                 f"Removed {name} — archived under skills/_archived/; restore with `audit rollback`.",
@@ -1825,6 +1838,10 @@ def skills_remove(name: str) -> None:
     skill (under skills/_archived/<name>-<ts>/, not a hard delete) and lands a
     `delete` audit row, so `audit rollback <name> <id>` restores it. Removing a
     user skill that shadows a bundled one re-exposes the bundled skill. (gh #39)
+
+    A bundled skill (shipped inside the installed package) is refused with exit 1:
+    removing it would change the install for every HERMES_HOME and user. Hide it
+    with `skills.disabled` instead. (gh #154)
     """
     _skills_remove(name)
 
@@ -2413,7 +2430,7 @@ def curator_status() -> None:
 
     # Pinned skills
     lib = _skill_library()
-    pinned = [s for s in lib.list() if (s.metadata or {}).get("hermes", {}).get("pinned")]
+    pinned = [s for s in lib.list() if s.pinned]
     if pinned:
         click.echo(click.style(f"\nPinned skills ({len(pinned)}):", fg="cyan"))
         for s in sorted(pinned, key=lambda x: x.name):
@@ -2429,10 +2446,18 @@ def curator_run(dry_run: bool) -> None:
 
     Bypasses the interval + idle gates — useful for one-off cleanup.
     """
-    from langstage_hermes.curator import mark_stale_and_archive
+    from langstage_hermes.curator import mark_stale_and_archive, read_skill_last_used
 
     cfg = _load_config()
     lib = _skill_library()
+    # Age skills by recorded agent usage (skill_view / skill_manage stamps), not
+    # just SKILL.md mtime — the same signal the in-agent CuratorMiddleware reads
+    # (gh #141).
+    store = _curator_store()
+
+    def _last_used(name: str) -> float | None:
+        return read_skill_last_used(store, name)
+
     if dry_run:
         # Run against a no-op library wrapper so nothing persists.
         class _Wrap:
@@ -2442,7 +2467,7 @@ def curator_run(dry_run: bool) -> None:
             def list(self) -> Any:
                 return self._i.list()
 
-            def write(self, *a: Any, **k: Any) -> Any:
+            def update_frontmatter(self, *a: Any, **k: Any) -> Any:
                 return None
 
             def delete(self, *a: Any, **k: Any) -> Any:
@@ -2452,6 +2477,7 @@ def curator_run(dry_run: bool) -> None:
             _Wrap(lib),
             stale_days=cfg.curator_stale_after_days,
             archive_days=cfg.curator_archive_after_days,
+            state_meta_get=_last_used,
         )
         click.echo(click.style("(dry-run — no changes written)", fg="yellow"))
     else:
@@ -2459,6 +2485,7 @@ def curator_run(dry_run: bool) -> None:
             lib,
             stale_days=cfg.curator_stale_after_days,
             archive_days=cfg.curator_archive_after_days,
+            state_meta_get=_last_used,
         )
         import time
 
@@ -2497,26 +2524,20 @@ def curator_resume() -> None:
 
 
 def _set_pinned(name: str, value: bool) -> int:
-    import frontmatter
+    # The agent's skill_manage(pin) writer, so CLI and agent pins land on the same
+    # `metadata.hermes.pinned` key the curator reads (gh #119).
+    from langstage_hermes.skills.tools import _action_pin
 
     lib = _skill_library()
-    skill = lib.get(name)
-    if skill is None:
+    if lib.get(name) is None:
         click.echo(click.style(f"No skill named {name!r}.", fg="yellow"))
         return 1
-    post = frontmatter.load(skill.path)
-    fm = dict(post.metadata)
-    hermes_meta = dict(fm.get("hermes") or {})
-    if value:
-        hermes_meta["pinned"] = True
-    else:
-        hermes_meta.pop("pinned", None)
-    if hermes_meta:
-        fm["hermes"] = hermes_meta
-    elif "hermes" in fm:
-        del fm["hermes"]
-    post.metadata = fm
-    skill.path.write_text(frontmatter.dumps(post), encoding="utf-8")
+    lib.set_mutation_context(source="cli")
+    try:
+        _action_pin(lib, name=name, pinned=value)
+    except ValueError as exc:  # incl. BundledSkillError — never rewrite the installed package
+        click.echo(click.style(str(exc), fg="yellow"))
+        return 1
     verb = "pinned" if value else "unpinned"
     click.echo(click.style(f"{verb}: {name}", fg="green"))
     return 0
@@ -2968,8 +2989,7 @@ def verify(model_id: str | None, keep_workspace: bool, as_json: bool) -> None:
 @click.option(
     "--keep-workspace",
     is_flag=True,
-    help="Keep the throwaway HERMES_HOME so you can inspect the generated SKILL.md / MEMORY.md yourself "
-    "(no-op when HERMES_HOME is set — a real home is never removed).",
+    help="Keep the throwaway demo home so you can inspect the generated SKILL.md / USER.md yourself.",
 )
 def demo(nudge_interval: int, keep_workspace: bool) -> None:
     """Watch the reflection→skill-creation loop close — keyless, offline, deterministic.
@@ -2985,40 +3005,39 @@ def demo(nudge_interval: int, keep_workspace: bool) -> None:
     against a scripted fake model instead of a live provider. No network, no key.
     It prints the generated skill so you can see exactly what the loop produces.
 
-    Where the side effects land depends on ``HERMES_HOME`` (gh #88):
+    The loop always runs in a throwaway ``mkdtemp`` home, removed on exit
+    (``--keep-workspace`` keeps it): the generated skill and the scripted user
+    memory note are illustrations and never land in your real skill library or
+    ``USER.md`` (gh #114).
 
     \b
-      - ``HERMES_HOME`` set   → records into that real ``<HERMES_HOME>/state.db``,
-        so ``langstage-hermes search`` reads the demo session straight back —
-        exactly what the README and the empty-store hint promise.
-      - ``HERMES_HOME`` unset → a throwaway ``mkdtemp`` home, removed on exit
-        (``--keep-workspace`` keeps it), so a bare ``demo`` never litters the
-        default ``~/.langstage-hermes`` (gh #69).
+      - ``HERMES_HOME`` set   → additionally copies the demo *session* (only) into
+        that real ``<HERMES_HOME>/state.db``, so ``langstage-hermes search`` reads
+        it straight back — exactly what the README and the empty-store hint
+        promise (gh #88). Re-running replaces the previous demo session.
+      - ``HERMES_HOME`` unset → nothing is written outside the throwaway home, so
+        a bare ``demo`` never litters the default ``~/.langstage-hermes`` (gh #69).
     """
     import tempfile
 
-    from langstage_hermes.demo import run_demo
+    from langstage_hermes.demo import publish_session, run_demo
 
     click.echo(click.style("langstage-hermes demo — reflection→skill loop (offline, no API key)", fg="cyan", bold=True))
     click.echo()
 
-    # gh #88: honour an explicitly-set HERMES_HOME so `demo` populates the very
-    # store `search` reads (the documented populate->search loop). Only fall back
-    # to a throwaway when HERMES_HOME is unset — a bare `demo` stays side-effect
-    # free and never pollutes the default ~/.langstage-hermes.
+    # gh #88: an explicitly-set HERMES_HOME receives the demo session so `search`
+    # reads it back (the documented populate->search loop). gh #114: but ONLY the
+    # session — the loop itself runs in a throwaway home either way, so the demo
+    # skill + fabricated USER.md note never enter the user's real library/memory.
     configured_home = _configured_hermes_home()
     persistent = configured_home is not None
-    if persistent:
-        home = configured_home  # type: ignore[assignment]  # not None when persistent
-        home.mkdir(parents=True, exist_ok=True)
-    else:
-        home = Path(tempfile.mkdtemp(prefix="dah-demo-"))
+    home = Path(tempfile.mkdtemp(prefix="dah-demo-"))
     try:
         if persistent:
-            click.echo(click.style(f"  · HERMES_HOME: {home}", fg="bright_black"))
+            click.echo(click.style(f"  · throwaway demo home: {home}", fg="bright_black"))
             click.echo(
                 click.style(
-                    "    (recording into this store so `langstage-hermes search` reads it back)",
+                    f"    (only the demo session is copied into HERMES_HOME={configured_home} for `search`)",
                     fg="bright_black",
                 )
             )
@@ -3071,6 +3090,16 @@ def demo(nudge_interval: int, keep_workspace: bool) -> None:
             click.echo(click.style(f"  ✓ audit log recorded: {', '.join(res.audit_actions)}", fg="green"))
         if res.sessions_recorded:
             click.echo(click.style(f"  ✓ FTS5 store recorded {res.sessions_recorded} session(s)", fg="green"))
+        if configured_home is not None:
+            configured_home.mkdir(parents=True, exist_ok=True)
+            publish_session(src_home=home, dest_home=configured_home)
+            click.echo(
+                click.style(
+                    f"  ✓ demo session copied into {configured_home / 'state.db'}"
+                    " (skill + memory note stay in the throwaway home)",
+                    fg="green",
+                )
+            )
 
         # ── show what the loop actually produced ─────────────────────────────
         click.echo()
@@ -3097,11 +3126,9 @@ def demo(nudge_interval: int, keep_workspace: bool) -> None:
                 )
             )
     finally:
-        if persistent:
-            # Never remove the user's real HERMES_HOME — the whole point is that
-            # the demo session persists there for `search` (gh #88).
-            pass
-        elif keep_workspace:
+        # `home` is always the throwaway — the user's real HERMES_HOME only ever
+        # received the copied session above and is never removed.
+        if keep_workspace:
             click.echo()
             click.echo(click.style(f"  · workspace kept for inspection: {home}", fg="bright_black"))
         else:

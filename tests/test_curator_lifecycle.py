@@ -40,9 +40,11 @@ class FakeSkill:
 class FakeLibrary:
     """Disk-backed test double for ``SkillLibrary``.
 
-    Each skill is a ``<root>/<name>/SKILL.md`` file. ``write`` overwrites the
-    markdown body; ``delete`` archives by moving the directory to
-    ``<root>/_archived/<name>/`` (recoverable, per SPEC §10).
+    Each skill is a ``<root>/<name>/SKILL.md`` file. ``update_frontmatter``
+    rewrites the frontmatter in place (same signature as the real
+    ``SkillLibrary.update_frontmatter`` — the old fake's ``write(skill)`` matched
+    no real method, which hid gh #120); ``delete`` archives by moving the
+    directory to ``<root>/_archived/<name>/`` (recoverable, per SPEC §10).
     """
 
     def __init__(self, root: Path) -> None:
@@ -74,8 +76,9 @@ class FakeLibrary:
         skill_md = self._skill_dir(name) / "SKILL.md"
         return FakeSkill(name=name, path=skill_md, metadata=self._read_meta(skill_md))
 
-    def write(self, skill: FakeSkill) -> None:
-        skill.path.parent.mkdir(parents=True, exist_ok=True)
+    def update_frontmatter(self, name: str, frontmatter_data: dict[str, Any], *, audit_action: str) -> None:
+        skill = self.get(name)
+        skill.metadata = dict(frontmatter_data)
         skill.path.write_text(self._serialize(skill), encoding="utf-8")
 
     def delete(self, name: str) -> None:
@@ -163,16 +166,17 @@ def test_lifecycle_archives_long_unused_and_marks_stale(library: FakeLibrary):
     assert not (library.root / "ancient-skill").exists(), "should be archived"
     assert (library.root / "_archived" / "ancient-skill" / "SKILL.md").exists()
 
+    # The marker lives under the nested ``metadata.hermes`` block (SPEC §9, gh #119).
     fresh = library.get("fresh-skill")
-    assert fresh.metadata.get("hermes", {}).get("lifecycle") != "stale"
+    assert fresh.metadata.get("metadata", {}).get("hermes", {}).get("lifecycle") != "stale"
 
     stale = library.get("stale-skill")
-    assert stale.metadata.get("hermes", {}).get("lifecycle") == "stale"
+    assert stale.metadata["metadata"]["hermes"]["lifecycle"] == "stale"
 
 
 def test_pinned_skills_are_immune(library: FakeLibrary):
     """A pinned skill is left alone even when it would otherwise be archived."""
-    _write_skill(library, "ancient-pinned", hermes={"pinned": True})
+    _write_skill(library, "ancient-pinned", metadata={"hermes": {"pinned": True}})
     _write_skill(library, "ancient-unpinned")
 
     now = time.time()
@@ -217,7 +221,7 @@ def test_missing_state_meta_falls_back_to_mtime(library: FakeLibrary):
 def test_already_marked_stale_is_idempotent(library: FakeLibrary):
     """A skill already at ``lifecycle == "stale"`` doesn't appear in
     ``marked_stale`` on the next pass — no re-write churn."""
-    _write_skill(library, "stale-skill", hermes={"lifecycle": "stale"})
+    _write_skill(library, "stale-skill", metadata={"hermes": {"lifecycle": "stale"}})
     now = time.time()
     result = mark_stale_and_archive(
         library,

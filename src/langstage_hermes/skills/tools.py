@@ -16,7 +16,6 @@ import logging
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-import frontmatter
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolCallId, tool
 from langgraph.types import Command
@@ -123,11 +122,15 @@ def skill_manage(
 # ---------------------------------------------------------------------------
 
 
-def make_skill_tools(library: SkillLibrary) -> list[BaseTool]:
+def make_skill_tools(library: SkillLibrary, *, store: Any = None) -> list[BaseTool]:
     """Build the three tools bound to a specific library.
 
     Use this in the agent factory so the same library instance backs both the
     middleware (which renders the index) and the tools (which mutate it).
+
+    ``store`` (the agent's ``SqliteFtsStore``) is where ``skill_view`` /
+    ``skill_manage`` stamp ``skill_last_used:<name>`` — the usage signal the
+    curator's inactivity lifecycle reads (gh #141). Omit it for read-only callers.
     """
 
     @tool("skills_list")
@@ -150,7 +153,7 @@ def make_skill_tools(library: SkillLibrary) -> list[BaseTool]:
         Args:
             name: The skill name (as reported by ``skills_list``).
         """
-        return _skill_view_impl(library, name=name, tool_call_id=tool_call_id)
+        return _skill_view_impl(library, name=name, tool_call_id=tool_call_id, store=store)
 
     @tool("skill_manage")
     def _skill_manage(
@@ -176,6 +179,7 @@ def make_skill_tools(library: SkillLibrary) -> list[BaseTool]:
             new_str=new_str,
             frontmatter_data=frontmatter_data,
             tool_call_id=tool_call_id,
+            store=store,
         )
 
     return [_skills_list, _skill_view, _skill_manage]
@@ -210,12 +214,22 @@ def _render_list(library: SkillLibrary, *, query: str, category: str) -> str:
     return "\n".join(lines)
 
 
-def _skill_view_impl(library: SkillLibrary, *, name: str, tool_call_id: str) -> Command:
+def _record_use(store: Any, name: str) -> None:
+    """Stamp ``skill_last_used:<name>`` so the curator sees real usage (gh #141)."""
+    if store is None:
+        return
+    from langstage_hermes.curator import record_skill_use
+
+    record_skill_use(store, name)
+
+
+def _skill_view_impl(library: SkillLibrary, *, name: str, tool_call_id: str, store: Any = None) -> Command:
     """Return a Command that loads the named skill body into state."""
     skill = library.get(name)
     if skill is None:
         payload = json.dumps({"success": False, "error": f"skill {name!r} not found"})
         return _command_with_tool_message(payload, tool_call_id=tool_call_id)
+    _record_use(store, skill.name)
 
     body = skill.body
     payload = json.dumps(
@@ -250,6 +264,7 @@ def _skill_manage_impl(
     new_str: str,
     frontmatter_data: dict[str, Any] | None,
     tool_call_id: str,
+    store: Any = None,
 ) -> Command:
     """Implement the five mutation actions and return a state-resetting Command."""
     # Stash provenance so the audit log records who made the change.
@@ -290,6 +305,11 @@ def _skill_manage_impl(
             json.dumps({"success": False, "action": action, "error": str(exc)}),
             tool_call_id=tool_call_id,
         )
+
+    # Curating a skill is using it — keep it out of the curator's inactivity
+    # lifecycle (gh #141). Not for delete: the skill is gone.
+    if action != "delete":
+        _record_use(store, name)
 
     # Successful mutation -> invalidate prompt cache + reset reflection counter.
     clear_prompt_cache()
@@ -337,6 +357,11 @@ def _action_patch(library: SkillLibrary, *, name: str, old_str: str, new_str: st
         raise ValueError(f"patch: 'old_str' is ambiguous (matched {count} times) — supply more context")
     full = full.replace(old_str, new_str, 1)
     after_bytes = full.encode("utf-8")
+    if skill.bundled:
+        # Never edit the installed package: copy-on-write into the user dir, whose
+        # copy then shadows the bundled one (SPEC §10.2; gh #154). Only after the
+        # patch is known to apply, so a failed patch leaves no stray copy.
+        skill = library.shadow_bundled(name)
     skill.path.write_bytes(after_bytes)
     library._record_mutation(
         skill_name=name,
@@ -362,6 +387,13 @@ def _action_write_file(
     fm.setdefault("name", name)
     # Preserve the originating dir / category if the skill exists; else default.
     existing = library.get(name)
+    if existing is not None and existing.bundled:
+        # Copy-on-write, never into the installed package (gh #154). Validate first
+        # so a rejected write leaves no stray shadow copy behind.
+        errors = validate_frontmatter(fm, parent_dir_name=name)
+        if errors:
+            raise ValueError(f"SKILL.md frontmatter for {name!r} is invalid:\n- " + "\n- ".join(errors))
+        existing = library.shadow_bundled(name)
     category: str | None = None
     target_dir: Path | None = None
     if existing is not None:
@@ -373,10 +405,24 @@ def _action_write_file(
 
 
 def _action_pin(library: SkillLibrary, *, name: str, pinned: bool) -> Path:
+    """Set/clear ``metadata.hermes.pinned`` — the one pin writer.
+
+    Shared by the agent's ``skill_manage(pin|unpin)`` and the CLI's ``curator
+    pin|unpin`` so the key the curator reads is the key both write (gh #119). A
+    legacy top-level ``hermes.pinned`` (written by ``curator pin`` before #119)
+    is migrated away so ``unpin`` really unpins.
+    """
     skill = library.get(name)
     if skill is None:
         raise ValueError(f"skill {name!r} not found")
     meta = dict(skill.metadata)
+    legacy = meta.get("hermes")
+    if isinstance(legacy, dict) and "pinned" in legacy:
+        legacy = {k: v for k, v in legacy.items() if k != "pinned"}
+        if legacy:
+            meta["hermes"] = legacy
+        else:
+            del meta["hermes"]
     nested = dict(meta.get("metadata") or {})
     hermes = dict(nested.get("hermes") or {})
     if pinned:
@@ -391,22 +437,8 @@ def _action_pin(library: SkillLibrary, *, name: str, pinned: bool) -> Path:
         meta["metadata"] = nested
     elif "metadata" in meta:
         del meta["metadata"]
-    # Re-validate + rewrite (preserves dir/category — we keep the existing path).
-    errors = validate_frontmatter(meta, parent_dir_name=skill.name)
-    if errors:
-        raise ValueError("pin/unpin would produce invalid frontmatter:\n- " + "\n- ".join(errors))
-    before_bytes = skill.path.read_bytes()
-    post = frontmatter.Post(skill.body, **meta)
-    after_bytes = frontmatter.dumps(post).encode("utf-8")
-    skill.path.write_bytes(after_bytes)
-    library._record_mutation(
-        skill_name=name,
-        action="pin" if pinned else "unpin",
-        skill_path=skill.path,
-        before_content=before_bytes,
-        after_content=after_bytes,
-    )
-    return skill.path
+    # Re-validate + rewrite in place (preserves dir/category), with an audit row.
+    return library.update_frontmatter(name, meta, audit_action="pin" if pinned else "unpin")
 
 
 # ---------------------------------------------------------------------------

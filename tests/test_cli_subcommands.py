@@ -173,14 +173,15 @@ def test_curator_pin_then_unpin(tmp_hermes_home: Path):
     # Verify frontmatter actually changed on disk.
     skill_path = tmp_hermes_home / "skills" / "pinnable" / "SKILL.md"
     post = frontmatter.load(skill_path)
-    assert post.metadata.get("hermes", {}).get("pinned") is True
+    # The canonical nested key the curator + agent read (gh #119).
+    assert post.metadata["metadata"]["hermes"]["pinned"] is True
 
     result = runner.invoke(cli, ["curator", "unpin", "pinnable"])
     assert result.exit_code == 0
     assert "unpinned" in result.output
 
     post = frontmatter.load(skill_path)
-    assert "pinned" not in (post.metadata.get("hermes") or {})
+    assert "pinned" not in ((post.metadata.get("metadata") or {}).get("hermes") or {})
 
 
 def test_curator_pin_missing_skill():

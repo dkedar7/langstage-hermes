@@ -13,7 +13,9 @@ This module closes that gap. It drives the **real** shipped machinery —
 ``skill_manage`` / ``memory`` tools, the audit log and the FTS5 store — against
 two *scripted* fake chat models instead of a live provider. No network, no API
 key, fully deterministic. The side effects are real: a genuine ``SKILL.md`` and
-``USER.md`` land under the demo's throwaway ``HERMES_HOME``.
+``USER.md`` land under the demo's throwaway ``HERMES_HOME`` — always a throwaway,
+never the user's real home (gh #114); :func:`publish_session` copies only the
+recorded session into a real home for ``search``.
 
 The only thing faked is the model: the ``model=`` / ``aux_model=`` kwargs that
 ``create_hermes_agent`` already accepts (the bring-your-own-model path) let us
@@ -315,6 +317,56 @@ def run_demo(
     )
 
 
+def publish_session(*, src_home: Path, dest_home: Path, session_id: str = "demo-001") -> int:
+    """Copy ONLY the demo's recorded session into ``<dest_home>/state.db``.
+
+    The demo always runs against a throwaway home, because the loop's other side
+    effects — the ``profile-slow-python`` skill, the scripted ``USER.md``
+    "preference" and their audit rows — must never land in a real ``HERMES_HOME``
+    (the frozen memory snapshot would feed that fabricated note to every future
+    real session, gh #114). What the docs promise a set ``HERMES_HOME`` gets is
+    the *session*, so ``search`` can read it back (gh #88); this copies just that
+    — the ``sessions`` row(s) and their ``messages`` (the FTS indexes follow via
+    the insert triggers). A previous demo copy of the same session is replaced,
+    so re-running ``demo`` doesn't duplicate it; no other session is touched.
+
+    Returns the number of messages copied.
+    """
+    from langstage_hermes.store.sqlite_fts import SqliteFtsStore
+
+    src_db = Path(src_home) / "state.db"
+    if not src_db.exists():
+        return 0
+    dest_db = Path(dest_home) / "state.db"
+    SqliteFtsStore(db_path=dest_db).close()  # create the schema + FTS triggers if new
+
+    conn = sqlite3.connect(str(dest_db))
+    try:
+        conn.execute("ATTACH DATABASE ? AS demo", (str(src_db),))
+        # The demo session plus any child (subagent) sessions it spawned.
+        ids = [session_id] + [
+            r[0] for r in conn.execute("SELECT id FROM demo.sessions WHERE parent_session_id = ?", (session_id,))
+        ]
+        marks = ",".join("?" * len(ids))
+        session_cols = [r[1] for r in conn.execute("PRAGMA main.table_info(sessions)")]
+        message_cols = [r[1] for r in conn.execute("PRAGMA main.table_info(messages)") if r[1] != "id"]
+        scols, mcols = ",".join(session_cols), ",".join(message_cols)
+        with conn:
+            conn.execute(f"DELETE FROM main.messages WHERE session_id IN ({marks})", ids)
+            conn.execute(f"DELETE FROM main.sessions WHERE id IN ({marks})", ids)
+            conn.execute(f"INSERT INTO main.sessions ({scols}) SELECT {scols} FROM demo.sessions WHERE id IN ({marks})", ids)
+            cur = conn.execute(
+                f"INSERT INTO main.messages ({mcols}) SELECT {mcols} FROM demo.messages "
+                f"WHERE session_id IN ({marks}) ORDER BY id",
+                ids,
+            )
+            copied = cur.rowcount
+        conn.execute("DETACH DATABASE demo")
+    finally:
+        conn.close()
+    return copied
+
+
 def _close_agent_resources(agent: Any) -> None:
     """Close the agent's SQLite-backed resources (store + skill audit log).
 
@@ -405,5 +457,6 @@ __all__ = [
     "DemoMainModel",
     "DemoResult",
     "DemoReviewModel",
+    "publish_session",
     "run_demo",
 ]

@@ -20,9 +20,15 @@ State is persisted in the ``store`` under namespace ``curator_state`` (key
 ``state``) so the schedule survives process restarts.
 
 Skill "last used" timestamps live in the ``state_meta`` namespace under keys
-``skill_last_used:<name>``; ``SkillToolsMiddleware.skill_view`` and
-``skill_manage`` are expected to update them. The lifecycle function tolerates
-missing entries (treats them as "never used" → archive based on file mtime).
+``skill_last_used:<name>`` (value ``{"ts": <unix float>}``). The agent's
+``skill_view`` and ``skill_manage`` tools stamp them via
+:func:`record_skill_use` (gh #141); :func:`read_skill_last_used` reads them. The
+lifecycle function tolerates missing entries (a skill never used through the
+agent falls back to its SKILL.md mtime).
+
+Bundled skills (shipped inside the installed package) are never stale-marked or
+archived: the package is shared by every ``HERMES_HOME``, so a per-home pass must
+not mutate it (gh #154). Hide an unwanted bundled skill with ``skills.disabled``.
 """
 
 from __future__ import annotations
@@ -40,6 +46,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
 from langstage_hermes.reflection import load_prompt
+from langstage_hermes.skills.library import is_pinned
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +77,37 @@ def _hermes_home() -> Path:
     return home
 
 
+# ── skill usage stamps (gh #141) ─────────────────────────────────────
+
+
+def _last_used_key(name: str) -> str:
+    return f"skill_last_used:{name}"
+
+
+def record_skill_use(store: Any, name: str, *, now: float | None = None) -> None:
+    """Stamp ``skill_last_used:<name>`` = now. Best-effort: never breaks a tool call."""
+    try:
+        store.put(_STATE_META_NS, _last_used_key(name), {"ts": now if now is not None else _now()})
+    except Exception as exc:
+        logger.debug("curator: failed to record use of %r: %s", name, exc)
+
+
+def read_skill_last_used(store: Any, name: str) -> float | None:
+    """Return the ``skill_last_used:<name>`` UNIX timestamp, or ``None`` if never recorded."""
+    try:
+        item = store.get(_STATE_META_NS, _last_used_key(name))
+    except Exception:
+        return None
+    if item is None:
+        return None
+    value = getattr(item, "value", item)
+    if isinstance(value, dict):
+        value = value.get("ts") or value.get("value")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
 # ── skill lifecycle (pure, no LLM) ───────────────────────────────────
 
 
@@ -89,11 +127,17 @@ def mark_stale_and_archive(
     UNIX float), with a fallback to the skill file's mtime when the lookup
     returns ``None``.
 
+    Bundled skills (``skill.bundled``) are skipped entirely — they live inside
+    the installed package, which a per-home pass must never mutate (gh #154).
+    Pins are read with :func:`~langstage_hermes.skills.library.is_pinned`, the
+    same accessor ``Skill.pinned`` uses (gh #119).
+
     Args:
         library: A ``SkillLibrary``-shaped object with ``list()``,
-            ``get(name)``, ``write(skill)``, and ``delete(name)`` methods.
-            ``get`` must return an object with ``.name``, ``.metadata`` (dict),
-            and ``.path`` (``Path``).
+            ``update_frontmatter(name, frontmatter_data, *, audit_action)`` and
+            ``delete(name)`` methods. ``list`` must yield objects with
+            ``.name``, ``.metadata`` (the full frontmatter dict) and ``.path``
+            (``Path``).
         stale_days: Inactivity threshold before ``metadata.hermes.lifecycle``
             flips to ``"stale"``.
         archive_days: Inactivity threshold before the skill is archived via
@@ -118,11 +162,15 @@ def mark_stale_and_archive(
         if not name:
             continue
 
-        metadata = getattr(skill, "metadata", None) or (skill.get("metadata") if isinstance(skill, dict) else {})
-        metadata = dict(metadata or {})
-        hermes_meta = dict(metadata.get("hermes") or {})
+        if getattr(skill, "bundled", False):
+            continue
 
-        if hermes_meta.get("pinned") is True:
+        # ``metadata`` is the full frontmatter; the Hermes extensions live under
+        # its nested ``metadata.hermes`` block (SPEC §9), not a top-level ``hermes``.
+        frontmatter_data = getattr(skill, "metadata", None) or (skill.get("metadata") if isinstance(skill, dict) else {})
+        frontmatter_data = dict(frontmatter_data or {})
+
+        if is_pinned(frontmatter_data):
             skipped_pinned.append(name)
             continue
 
@@ -148,21 +196,19 @@ def mark_stale_and_archive(
             continue
 
         if last_used <= stale_cutoff:
+            nested = dict(frontmatter_data.get("metadata") or {})
+            hermes_meta = dict(nested.get("hermes") or {})
             if hermes_meta.get("lifecycle") == "stale":
                 # Already marked — nothing to do.
                 continue
             hermes_meta["lifecycle"] = "stale"
-            metadata["hermes"] = hermes_meta
+            nested["hermes"] = hermes_meta
+            frontmatter_data["metadata"] = nested
             try:
-                # The library is responsible for writing frontmatter back to
-                # SKILL.md. We pass back a shallow dict mutation since the
-                # exact Skill type isn't defined here yet.
-                if hasattr(skill, "metadata"):
-                    try:
-                        skill.metadata = metadata  # type: ignore[attr-defined]
-                    except AttributeError:
-                        pass
-                library.write(skill)
+                # In-place frontmatter rewrite through the real library API (the
+                # old ``library.write(skill)`` matched no real signature, so the
+                # TypeError was swallowed and nothing was ever marked — gh #120).
+                library.update_frontmatter(name, frontmatter_data, audit_action="curator-stale")
                 marked_stale.append(name)
             except Exception as exc:
                 logger.warning("curator: stale mark on %r failed: %s", name, exc)
@@ -405,26 +451,12 @@ class CuratorMiddleware(AgentMiddleware):
         error: str | None = None
         llm_summary: str | None = None
 
-        def _meta_get(name: str) -> float | None:
-            try:
-                item = self.store.get(_STATE_META_NS, f"skill_last_used:{name}")
-            except Exception:
-                return None
-            if item is None:
-                return None
-            value = getattr(item, "value", item)
-            if isinstance(value, dict):
-                value = value.get("ts") or value.get("value")
-            if isinstance(value, (int, float)):
-                return float(value)
-            return None
-
         try:
             lifecycle_result = mark_stale_and_archive(
                 self.library,
                 stale_days=self.stale_days,
                 archive_days=self.archive_days,
-                state_meta_get=_meta_get,
+                state_meta_get=lambda name: read_skill_last_used(self.store, name),
                 now=now,
             )
         except Exception as exc:
@@ -469,4 +501,6 @@ __all__ = [
     "CuratorMiddleware",
     "build_curator_subagent",
     "mark_stale_and_archive",
+    "read_skill_last_used",
+    "record_skill_use",
 ]

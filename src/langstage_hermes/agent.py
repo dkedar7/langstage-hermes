@@ -67,7 +67,11 @@ def _default_skill_dirs(cfg: HermesConfig) -> list[Path]:
     on PyPI installs — leaving fresh users with no bundled skills.
     """
     dirs: list[Path] = []
-    bundled = Path(__file__).resolve().parent / "_bundled_skills"
+    # One source of truth for the packaged tree, so SkillLibrary's bundled guard
+    # (gh #154) recognizes exactly the dir listed here.
+    from langstage_hermes.skills import library as _skill_library_mod
+
+    bundled = _skill_library_mod._bundled_skills_dir()
     if bundled.is_dir():
         dirs.append(bundled)
     # User-global.
@@ -239,7 +243,7 @@ def create_hermes_agent(
     )
 
     # ── tools (kept as a flat list; deepagents'/langchain's create_agent merges from middleware too) ──
-    skill_tools = make_skill_tools(library)
+    skill_tools = make_skill_tools(library, store=store)
     session_search_tool = make_session_search_tool(store, current_session_id_getter=lambda: sid)
     # FilesystemBackend tools come in via the FilesystemMiddleware (below).
     tools: list[Any] = [*skill_tools, session_search_tool]

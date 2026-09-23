@@ -341,6 +341,16 @@ class SkillAuditLog:
             )
 
         path = Path(target.skill_path)
+        from langstage_hermes.skills.library import _is_bundled_path
+
+        if _is_bundled_path(path):
+            # A row recorded before 0.4.30 can point inside the installed package
+            # (the agent used to edit bundled skills in place); never write there
+            # (gh #154).
+            raise RollbackError(
+                f"mutation #{mutation_id} targets a bundled skill inside the installed package ({path}); "
+                f"refusing to modify it — reinstall the package to restore the shipped version."
+            )
         path.parent.mkdir(parents=True, exist_ok=True)
         before_disk = path.read_bytes() if path.exists() else None
         path.write_bytes(target.before_content)
