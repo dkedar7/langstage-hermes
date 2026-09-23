@@ -499,6 +499,29 @@ class SkillLibrary:
         )
         return skill_md
 
+    def shadow_bundled(self, name: str) -> Skill | None:
+        """Copy-on-write: return an editable copy of ``name`` that is never bundled.
+
+        A bundled skill lives inside the installed package, so a content edit
+        (``skill_manage`` patch / write_file) must not touch it (gh #154). The
+        documented override model is shadowing (SPEC §10.2: project > user >
+        bundled, later wins), so the whole skill directory — scripts and assets
+        included — is copied to ``<write dir>/[<category>/]<name>/`` and the
+        caller edits that copy. A non-bundled skill is returned as-is; ``None``
+        when no such skill exists.
+        """
+        skill = self.get(name)
+        if skill is None or not skill.bundled:
+            return skill
+        base = self._default_write_dir()
+        dest = base / skill.category / skill.directory.name if skill.category else base / skill.directory.name
+        if not dest.exists():
+            shutil.copytree(skill.directory, dest)
+        shadow = self.get(name)
+        if shadow is None or shadow.bundled:  # pragma: no cover - write dir always outranks bundled
+            raise BundledSkillError(name, verb="modify")
+        return shadow
+
     def update_frontmatter(self, name: str, frontmatter_data: dict[str, Any], *, audit_action: str) -> Path:
         """Rewrite an existing skill's frontmatter in place, keeping its body.
 

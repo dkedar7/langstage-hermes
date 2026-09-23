@@ -15,7 +15,13 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
   curator could reach the same path: its lifecycle pass walked bundled skills too, so an install older than
   `archive_after_days` would have its bundled skills archived out of the package by `curator run` / the weekly
   `CuratorMiddleware`. The lifecycle now skips bundled skills entirely, and the new in-place frontmatter writer
-  (`SkillLibrary.update_frontmatter`, used by the stale marker and pin/unpin) refuses them too.
+  (`SkillLibrary.update_frontmatter`, used by the stale marker and pin/unpin) refuses them too. The agent's
+  content edits had the same flaw: `skill_manage` `patch` / `write_file` on a bundled skill rewrote its SKILL.md
+  inside the package. They now **copy-on-write** (`SkillLibrary.shadow_bundled`): the whole skill directory is
+  copied into the user skills dir and edited there, where it shadows the bundled copy per the documented
+  project > user > bundled precedence (SPEC §10.2). A patch or write that fails validation leaves no stray copy.
+  `skill_manage` `pin` / `delete` on a bundled skill return a clear tool error, and `audit rollback` refuses a
+  pre-0.4.30 row that points inside the package.
 - **The curator ages skills by real usage, not SKILL.md mtime (gh #141).** `skill_last_used:<name>` had a reader
   but no writer — and `SqliteFtsStore` silently dropped every `state_meta` put anyway — so the "30/90 days
   inactive" lifecycle was really a file-edit timer that archived skills the agent `skill_view`ed every session.

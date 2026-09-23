@@ -106,3 +106,93 @@ def test_curator_run_cli_leaves_bundled_skills_alone(tmp_hermes_home: Path, fake
     assert "obsidian" not in result.output
     assert (fake_bundled / "note-taking" / "obsidian" / "SKILL.md").is_file()
     assert not (fake_bundled / "_archived").exists()
+
+
+# ── agent skill_manage write paths (same data-loss class) ────────────
+
+
+def _manage(lib: SkillLibrary, action: str, **kw) -> dict:
+    import json
+
+    from langstage_hermes.skills.tools import _skill_manage_impl
+
+    args = dict(description="", body="", category="", old_str="", new_str="", frontmatter_data=None)
+    args.update(kw)
+    cmd = _skill_manage_impl(lib, action=action, name="obsidian", tool_call_id="", **args)
+    return json.loads(cmd.update["__content__"])
+
+
+def test_skill_manage_patch_on_bundled_copies_on_write_into_home(tmp_hermes_home: Path, fake_bundled: Path):
+    """Editing a bundled skill shadows it in the user dir (SPEC §10.2: user > bundled);
+    the packaged copy is never touched."""
+    bundled_md = fake_bundled / "note-taking" / "obsidian" / "SKILL.md"
+    (bundled_md.parent / "helper.sh").write_text("echo hi\n", encoding="utf-8")
+    before = bundled_md.read_bytes()
+
+    res = _manage(SkillLibrary(), "patch", old_str="# obsidian", new_str="# obsidian (tuned)")
+
+    assert res["success"], res
+    assert bundled_md.read_bytes() == before
+    shadow = tmp_hermes_home / "skills" / "note-taking" / "obsidian"
+    assert "# obsidian (tuned)" in (shadow / "SKILL.md").read_text(encoding="utf-8")
+    assert (shadow / "helper.sh").is_file()  # the whole skill dir is copied, not just SKILL.md
+    skill = SkillLibrary().get("obsidian")
+    assert not skill.bundled and "(tuned)" in skill.body
+
+
+def test_skill_manage_write_file_on_bundled_copies_on_write_into_home(tmp_hermes_home: Path, fake_bundled: Path):
+    bundled_md = fake_bundled / "note-taking" / "obsidian" / "SKILL.md"
+    before = bundled_md.read_bytes()
+
+    res = _manage(
+        SkillLibrary(),
+        "write_file",
+        frontmatter_data={"name": "obsidian", "description": "rewritten"},
+        body="new body",
+    )
+
+    assert res["success"], res
+    assert bundled_md.read_bytes() == before
+    assert "new body" in (tmp_hermes_home / "skills" / "note-taking" / "obsidian" / "SKILL.md").read_text(encoding="utf-8")
+
+
+def test_skill_manage_pin_and_delete_on_bundled_are_refused(tmp_hermes_home: Path, fake_bundled: Path):
+    bundled_md = fake_bundled / "note-taking" / "obsidian" / "SKILL.md"
+    before = bundled_md.read_bytes()
+
+    for action in ("pin", "delete"):
+        res = _manage(SkillLibrary(), action)
+        assert res["success"] is False and "bundled" in res["error"], res
+
+    assert bundled_md.read_bytes() == before
+    assert not (fake_bundled / "_archived").exists()
+
+
+def test_failed_patch_on_bundled_leaves_no_shadow_copy(tmp_hermes_home: Path, fake_bundled: Path):
+    res = _manage(SkillLibrary(), "patch", old_str="not in the file", new_str="x")
+
+    assert res["success"] is False
+    assert not (tmp_hermes_home / "skills" / "note-taking").exists()
+    assert SkillLibrary().get("obsidian").bundled
+
+
+def test_audit_rollback_refuses_a_legacy_row_pointing_into_the_package(tmp_hermes_home: Path, fake_bundled: Path):
+    """Rows recorded before 0.4.30 may target the bundled path; rollback must not write there."""
+    from langstage_hermes.skills.audit import RollbackError, SkillAuditLog
+
+    bundled_md = fake_bundled / "note-taking" / "obsidian" / "SKILL.md"
+    before = bundled_md.read_bytes()
+    log = SkillAuditLog(tmp_hermes_home / "state.db")
+    try:
+        row = log.record(
+            skill_name="obsidian",
+            action="patch",
+            before_content=b"old",
+            after_content=before,
+            skill_path=bundled_md,
+        )
+        with pytest.raises(RollbackError, match="bundled"):
+            log.rollback_to("obsidian", row)
+    finally:
+        log.close()
+    assert bundled_md.read_bytes() == before

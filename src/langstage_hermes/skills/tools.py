@@ -22,6 +22,7 @@ from langgraph.types import Command
 
 from langstage_hermes.skills.library import SkillLibrary
 from langstage_hermes.skills.prompt import clear_prompt_cache
+from langstage_hermes.skills.validator import validate as validate_frontmatter
 
 logger = logging.getLogger(__name__)
 
@@ -356,6 +357,11 @@ def _action_patch(library: SkillLibrary, *, name: str, old_str: str, new_str: st
         raise ValueError(f"patch: 'old_str' is ambiguous (matched {count} times) — supply more context")
     full = full.replace(old_str, new_str, 1)
     after_bytes = full.encode("utf-8")
+    if skill.bundled:
+        # Never edit the installed package: copy-on-write into the user dir, whose
+        # copy then shadows the bundled one (SPEC §10.2; gh #154). Only after the
+        # patch is known to apply, so a failed patch leaves no stray copy.
+        skill = library.shadow_bundled(name)
     skill.path.write_bytes(after_bytes)
     library._record_mutation(
         skill_name=name,
@@ -381,6 +387,13 @@ def _action_write_file(
     fm.setdefault("name", name)
     # Preserve the originating dir / category if the skill exists; else default.
     existing = library.get(name)
+    if existing is not None and existing.bundled:
+        # Copy-on-write, never into the installed package (gh #154). Validate first
+        # so a rejected write leaves no stray shadow copy behind.
+        errors = validate_frontmatter(fm, parent_dir_name=name)
+        if errors:
+            raise ValueError(f"SKILL.md frontmatter for {name!r} is invalid:\n- " + "\n- ".join(errors))
+        existing = library.shadow_bundled(name)
     category: str | None = None
     target_dir: Path | None = None
     if existing is not None:
