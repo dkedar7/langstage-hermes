@@ -491,3 +491,76 @@ class TestMalformedBoolEnv:
     def test_recognized_bool_values_still_resolve(self):
         assert HermesConfig.resolve(env={"LANGSTAGE_HERMES_MEMORY_ENABLED": "false"}, use_toml=False).memory_enabled is False
         assert HermesConfig.resolve(env={"LANGSTAGE_HERMES_MEMORY_ENABLED": "on"}, use_toml=False).memory_enabled is True
+
+
+class TestMalformedTomlValue:
+    """A type-mismatched value in langstage-hermes.toml must degrade, not crash (gh #122).
+
+    HermesConfig.resolve() re-implements the TOML-casting loop (it has to layer BOTH
+    the cross-host deepagents.toml and the hermes-specific langstage-hermes.toml), and
+    called ``_coerce()`` on each stack with no error handling — so
+    ``[memory] nudge_interval = "ten"`` in langstage-hermes.toml raised an uncaught
+    ValueError straight out of resolve() and took down every command that loads config:
+    ``--show-config``, ``verify``, ``skills list``, ``curator``, ``plugins`` — the very
+    first-run commands the README points users at.
+
+    The *identical* typo via env var already degrades cleanly
+    (gh #83 / :class:`TestMalformedNumericEnv`), and the base ``HostConfig.resolve()``
+    already guards its own TOML cast (langstage-jupyter #78). This is the TOML
+    counterpart in the Hermes override: keep the value resolved so far (a lower-layer
+    value if one is set, else the field default), leave its source intact, and emit the
+    same one-line ``note: ignoring malformed ...`` via the shared core helper so the
+    wording can't drift.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_note_dedupe(self):
+        import langstage_core.host.config as core_config
+
+        getattr(core_config, "_warned_malformed_toml_value", set()).clear()
+        yield
+        getattr(core_config, "_warned_malformed_toml_value", set()).clear()
+
+    def _write_toml(self, monkeypatch, tmp_path, literal):
+        # Isolate from any real config files / env on the host, then drop a
+        # langstage-hermes.toml whose [memory] nudge_interval is the wrong type.
+        _strip_env(monkeypatch)
+        monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "no_global"))
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "langstage-hermes.toml").write_text(f"[memory]\nnudge_interval = {literal}\n", encoding="utf-8")
+
+    def test_bad_string_toml_does_not_crash(self, monkeypatch, tmp_path):
+        self._write_toml(monkeypatch, tmp_path, '"ten"')
+        cfg = HermesConfig.resolve(toml_start=tmp_path)
+        # Kept the field default rather than crashing, and NOT attributed to the bad file.
+        assert cfg.memory_nudge_interval == HermesConfig.memory_nudge_interval
+        assert cfg.sources["memory_nudge_interval"] == "default"
+
+    def test_bad_float_toml_does_not_crash(self, monkeypatch, tmp_path):
+        # The reporter's original typo: a float where an int is expected.
+        self._write_toml(monkeypatch, tmp_path, "3.5")
+        cfg = HermesConfig.resolve(toml_start=tmp_path)
+        assert cfg.memory_nudge_interval == HermesConfig.memory_nudge_interval
+        assert cfg.sources["memory_nudge_interval"] == "default"
+
+    def test_bad_bool_toml_does_not_crash(self, monkeypatch, tmp_path):
+        # A bool supplied for a numeric field is malformed input, not 1 (raises TypeError).
+        self._write_toml(monkeypatch, tmp_path, "true")
+        cfg = HermesConfig.resolve(toml_start=tmp_path)
+        assert cfg.memory_nudge_interval == HermesConfig.memory_nudge_interval
+        assert cfg.sources["memory_nudge_interval"] == "default"
+
+    def test_bad_toml_warns_on_stderr_naming_key_and_file(self, monkeypatch, tmp_path, capsys):
+        self._write_toml(monkeypatch, tmp_path, '"ten"')
+        HermesConfig.resolve(toml_start=tmp_path)
+        err = capsys.readouterr().err
+        assert "ignoring malformed" in err
+        assert "memory.nudge_interval" in err
+        assert "langstage-hermes.toml" in err
+
+    def test_valid_toml_value_still_resolves(self, monkeypatch, tmp_path):
+        # Guard: the new try/except must not swallow a perfectly good TOML value.
+        self._write_toml(monkeypatch, tmp_path, "7")
+        cfg = HermesConfig.resolve(toml_start=tmp_path)
+        assert cfg.memory_nudge_interval == 7
+        assert "langstage-hermes.toml" in cfg.sources["memory_nudge_interval"]
