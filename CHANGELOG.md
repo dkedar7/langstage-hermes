@@ -2,6 +2,51 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.30] - 2026-09-23
+
+### Fixed
+- **`skills remove <bundled-skill>` no longer deletes the skill out of the installed package (gh #154).** A bundled
+  skill with no user shadow resolved to the packaged `_bundled_skills/` tree, and `SkillLibrary.delete` then
+  `shutil.move`d it out of `site-packages` into `<wheel>/_bundled_skills/_archived/` — a per-home command silently
+  removing the skill for every `HERMES_HOME` and every user on that interpreter (and misreporting the archive as
+  under `skills/_archived/`). `delete` now raises `BundledSkillError` for a bundled skill; `skills remove` prints
+  why and how to hide it instead (`skills.disabled` / `LANGSTAGE_HERMES_SKILLS_DISABLED`) and exits 1. Removing a
+  user skill that shadows a bundled one still archives under `HERMES_HOME` and re-exposes the bundled copy. The
+  curator could reach the same path: its lifecycle pass walked bundled skills too, so an install older than
+  `archive_after_days` would have its bundled skills archived out of the package by `curator run` / the weekly
+  `CuratorMiddleware`. The lifecycle now skips bundled skills entirely, and the new in-place frontmatter writer
+  (`SkillLibrary.update_frontmatter`, used by the stale marker and pin/unpin) refuses them too.
+- **The curator ages skills by real usage, not SKILL.md mtime (gh #141).** `skill_last_used:<name>` had a reader
+  but no writer — and `SqliteFtsStore` silently dropped every `state_meta` put anyway — so the "30/90 days
+  inactive" lifecycle was really a file-edit timer that archived skills the agent `skill_view`ed every session.
+  The agent's `skill_view` and `skill_manage` tools now stamp `skill_last_used:<name>` in `state.db`
+  (`make_skill_tools(library, store=...)`), the store persists the `state_meta` namespace, and both the in-agent
+  `CuratorMiddleware` and `curator run` read it. The mtime fallback remains for skills never used via the agent.
+- **Pinned skills are exempt from the curator again (gh #119).** The curator read `pinned` from a top-level
+  `hermes` block while the agent's `skill_manage(pin)` (and SPEC §9, the validator, `Skill.pinned`) use
+  `metadata.hermes.pinned`, so agent-pinned skills were silently archived. The curator, `curator status`, and the
+  `/curator` slash command now read pins through one accessor (`is_pinned`, also behind `Skill.pinned`), and
+  `curator pin` / `unpin` now go through the agent's pin writer, so both paths write `metadata.hermes.pinned` (with
+  an audit row). Pins written by older `curator pin` (top-level `hermes.pinned`) are still honored, and are
+  migrated to the nested key on the next pin/unpin.
+- **`curator run` actually marks skills `stale` (gh #120).** The stale transition called `library.write(skill)`,
+  which matches no real signature; the `TypeError` was swallowed, so nothing was ever marked and the command
+  still exited 0. It now rewrites the frontmatter in place via `SkillLibrary.update_frontmatter` (body and location
+  preserved, audit action `curator-stale`), putting `lifecycle: stale` under `metadata.hermes`, where `Skill` reads
+  it.
+- **`demo` no longer writes a skill and a fabricated user preference into a real `HERMES_HOME` (gh #114).** With
+  `HERMES_HOME` set (the README's "try it" flow), the demo ran the whole loop against the real home, leaving a
+  `profile-slow-python` skill in the user's library and an invented "Prefers a profiling-driven investigation…"
+  note in `USER.md` that the frozen memory snapshot then fed to every later real session. The loop now always runs
+  in a throwaway home; with `HERMES_HOME` set, only the demo *session* is copied into `<HERMES_HOME>/state.db` so
+  `search` still reads it back (gh #88). Re-running `demo` replaces its previous session instead of duplicating it,
+  and no other session is touched.
+- **A type-mismatched value in `langstage-hermes.toml` degrades with a note instead of crashing (gh #122).** e.g.
+  `[memory] nudge_interval = 3.5` or `= "ten"` crashed `--show-config`, `verify` and `skills list` with a
+  traceback, while the same typo via an env var already degraded cleanly (gh #83). The TOML layer now keeps the
+  value resolved so far and prints core's one-line `note: ignoring malformed …`. Contributed by
+  @ethanhawkes-gif in #123 — thank you!
+
 ## [0.4.29] - 2026-08-08
 
 ### Fixed

@@ -35,7 +35,7 @@ from langstage_hermes.skills.validator import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Skill", "SkillLibrary", "SkillLoadError", "format_load_error"]
+__all__ = ["BundledSkillError", "Skill", "SkillLibrary", "SkillLoadError", "format_load_error", "is_pinned"]
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +104,55 @@ def _bundled_skills_dir() -> Path:
     loaded anywhere (gh #-dogfood).
     """
     return Path(__file__).resolve().parent.parent / "_bundled_skills"
+
+
+def _is_bundled_path(path: Path) -> bool:
+    """True when ``path`` lives inside the packaged ``_bundled_skills/`` tree.
+
+    That tree is part of the *installed package* (site-packages, a shared venv, a
+    baked image) — shared by every ``HERMES_HOME`` and every user on the
+    interpreter — so no per-home operation may move or rewrite anything under it
+    (gh #154).
+    """
+    try:
+        Path(path).resolve().relative_to(_bundled_skills_dir().resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+class BundledSkillError(ValueError):
+    """Refusal to mutate a skill that ships inside the installed package (gh #154)."""
+
+    def __init__(self, name: str, verb: str = "remove") -> None:
+        super().__init__(
+            f"{name!r} is a bundled skill shipped inside the installed langstage-hermes package; "
+            f"refusing to {verb} it (that would change the install for every HERMES_HOME and user). "
+            f'To hide it, add it to `skills.disabled` (e.g. `[skills] disabled = ["{name}"]` in '
+            f"langstage-hermes.toml, or LANGSTAGE_HERMES_SKILLS_DISABLED={name})."
+        )
+        self.skill_name = name
+
+
+def _hermes_meta(frontmatter_data: dict[str, Any]) -> dict[str, Any]:
+    """The ``metadata.hermes`` block (SPEC §9) of a parsed frontmatter dict, or ``{}``."""
+    meta = frontmatter_data.get("metadata")
+    hermes = meta.get("hermes") if isinstance(meta, dict) else None
+    return hermes if isinstance(hermes, dict) else {}
+
+
+def is_pinned(frontmatter_data: dict[str, Any]) -> bool:
+    """Whether a skill's frontmatter pins it (exempt from the curator lifecycle).
+
+    The canonical location is ``metadata.hermes.pinned`` — what ``skill_manage(pin)``,
+    ``curator pin``, the validator and SPEC §9 all use. The legacy top-level
+    ``hermes.pinned`` that ``curator pin`` wrote before gh #119 is still honored so
+    a pin made with an older version keeps protecting the skill.
+    """
+    if bool(_hermes_meta(frontmatter_data).get("pinned")):
+        return True
+    legacy = frontmatter_data.get("hermes")
+    return isinstance(legacy, dict) and bool(legacy.get("pinned"))
 
 
 def _default_search_dirs() -> list[Path]:
@@ -230,13 +279,18 @@ class Skill:
 
     @property
     def pinned(self) -> bool:
-        meta = self.metadata.get("metadata")
-        if not isinstance(meta, dict):
-            return False
-        hermes = meta.get("hermes")
-        if not isinstance(hermes, dict):
-            return False
-        return bool(hermes.get("pinned"))
+        return is_pinned(self.metadata)
+
+    @property
+    def lifecycle(self) -> str | None:
+        """Curator lifecycle marker (``metadata.hermes.lifecycle``), e.g. ``"stale"``."""
+        value = _hermes_meta(self.metadata).get("lifecycle")
+        return value if isinstance(value, str) else None
+
+    @property
+    def bundled(self) -> bool:
+        """True when this skill ships inside the installed package (read-only; gh #154)."""
+        return _is_bundled_path(self.path)
 
 
 # ---------------------------------------------------------------------------
@@ -445,15 +499,50 @@ class SkillLibrary:
         )
         return skill_md
 
+    def update_frontmatter(self, name: str, frontmatter_data: dict[str, Any], *, audit_action: str) -> Path:
+        """Rewrite an existing skill's frontmatter in place, keeping its body.
+
+        Unlike :meth:`write`, the SKILL.md stays exactly where it is (no
+        ``category``/``target_dir`` re-derivation), which is what metadata-only
+        changes — pin/unpin, the curator's ``stale`` marker — need. Validates
+        first (``ValueError``), refuses bundled skills (:class:`BundledSkillError`),
+        and records an audit row under ``audit_action``.
+        """
+        skill = self.get(name)
+        if skill is None:
+            raise ValueError(f"skill {name!r} not found")
+        if skill.bundled:
+            raise BundledSkillError(name, verb="modify")
+        errors = validate_frontmatter(frontmatter_data, parent_dir_name=skill.name)
+        if errors:
+            raise ValueError(f"SKILL.md frontmatter for {name!r} is invalid:\n- " + "\n- ".join(errors))
+        before_content = skill.path.read_bytes()
+        after_bytes = frontmatter.dumps(frontmatter.Post(skill.body, **frontmatter_data)).encode("utf-8")
+        skill.path.write_bytes(after_bytes)
+        self._record_mutation(
+            skill_name=name,
+            action=audit_action,
+            skill_path=skill.path,
+            before_content=before_content,
+            after_content=after_bytes,
+        )
+        return skill.path
+
     def delete(self, name: str) -> bool:
         """Archive a skill to ``<dir>/_archived/<name>-<timestamp>/``.
 
         Returns ``True`` if the skill was found and archived, ``False`` if no
-        such skill exists.
+        such skill exists. Raises :class:`BundledSkillError` when ``name``
+        resolves to a bundled skill (no user/project shadow): that directory is
+        part of the installed package, so archiving it would delete it for every
+        ``HERMES_HOME`` on the interpreter (gh #154). Hide a bundled skill with
+        ``skills.disabled`` instead.
         """
         skill = self.get(name)
         if skill is None:
             return False
+        if skill.bundled:
+            raise BundledSkillError(name)
 
         # Snapshot the SKILL.md before moving so the audit log can record
         # the pre-delete content (recovery aid — rollback uses this).

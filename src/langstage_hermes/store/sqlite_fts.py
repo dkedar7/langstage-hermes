@@ -925,10 +925,11 @@ class SqliteFtsStore(BaseStore):
 
     # ----- kv namespace allow-list -----------------------------------
     # Generic single-segment namespaces that map to a kv table of the
-    # same name. Currently just ``curator_state``; other components can
-    # add their own table to the schema and append the name here.
-    # state_meta is a different shape and handled via dedicated helpers.
-    _KV_NAMESPACES: ClassVar[frozenset[str]] = frozenset({"curator_state"})
+    # same name: ``curator_state`` and ``state_meta`` (the curator's
+    # ``skill_last_used:<name>`` usage stamps — gh #141; before it was listed
+    # here every put was silently dropped). Other components can add their
+    # own table to the schema and append the name here.
+    _KV_NAMESPACES: ClassVar[frozenset[str]] = frozenset({"curator_state", "state_meta"})
 
     def _do_get(self, op: GetOp) -> Item | None:
         namespace = op.namespace
