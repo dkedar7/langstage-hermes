@@ -155,3 +155,53 @@ def test_failed_job_preserves_full_traceback_under_debug(
     formatted = logging.Formatter().format(rec)
     assert "Traceback (most recent call last)" in formatted
     assert "RuntimeError" in formatted
+
+
+def _clear_debug_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in ("LANGSTAGE_DEBUG", "DEEPAGENT_DEBUG"):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["env:LANGSTAGE_DEBUG", "env:DEEPAGENT_DEBUG", "toml:langstage-hermes.toml", "toml:langstage.toml"],
+)
+def test_debug_follows_the_resolved_config(
+    tmp_hermes_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+):
+    """The cron traceback switch is the resolved ``debug``, not a raw LANGSTAGE_DEBUG read.
+
+    The legacy ``DEEPAGENT_DEBUG`` and a TOML ``debug = true`` (hermes or cross-host
+    file) set ``HostConfig.debug`` but were ignored by the scheduler, which read only
+    ``LANGSTAGE_DEBUG`` from the environment.
+    """
+    _clear_debug_env(monkeypatch)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    monkeypatch.chdir(proj)
+    monkeypatch.setenv("LANGSTAGE_CONFIG_HOME", str(tmp_path / "core_global"))
+    assert scheduler._debug_enabled() is False
+
+    kind, where = source.split(":", 1)
+    if kind == "env":
+        monkeypatch.setenv(where, "1")
+    else:
+        (proj / where).write_text("debug = true\n", encoding="utf-8")
+    assert scheduler._debug_enabled() is True
+
+
+def test_debug_lookup_failure_falls_back_to_the_env_switch(tmp_hermes_home: Path, monkeypatch: pytest.MonkeyPatch):
+    """A config-resolution error must never mask the job failure being logged."""
+    from langstage_hermes.config import HermesConfig
+
+    def boom(*a, **k):
+        raise RuntimeError("config exploded")
+
+    _clear_debug_env(monkeypatch)
+    monkeypatch.setattr(HermesConfig, "resolve", classmethod(boom))
+    assert scheduler._debug_enabled() is False
+    monkeypatch.setenv("LANGSTAGE_DEBUG", "1")
+    assert scheduler._debug_enabled() is True

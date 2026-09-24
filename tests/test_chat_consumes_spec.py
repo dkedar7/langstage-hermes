@@ -108,19 +108,25 @@ def test_resolve_agent_returns_error_for_missing_attr(monkeypatch):
     assert err and "NoSuchAttr" in err
 
 
-def test_resolve_agent_returns_error_for_non_invokable_target(monkeypatch):
+@pytest.mark.parametrize("attr", ["_NOT_A_GRAPH", "_NOT_A_GRAPH_INT"])
+def test_resolve_agent_returns_error_for_non_invokable_target(monkeypatch, attr):
     """Pointing the spec at a string / module / int — anything without
     .invoke and not callable — surfaces a clean error rather than
-    crashing inside the REPL on the first turn."""
-    monkeypatch.setenv("DEEPAGENT_AGENT_SPEC", f"{__name__}:_NOT_A_GRAPH")
+    crashing inside the REPL on the first turn.
+
+    Since langstage-core 1.0.36 a ``str`` attribute is rejected by core's loader
+    itself ("resolved to a str ..., not an agent", core cli#149); an int still
+    reaches hermes' own invokable check."""
+    monkeypatch.setenv("DEEPAGENT_AGENT_SPEC", f"{__name__}:{attr}")
     target, source, err = _resolve_agent()
     assert source == "spec"
     assert target is None
     assert err is not None
-    assert "invokable" in err.lower() or "callable" in err.lower()
+    assert any(s in err.lower() for s in ("invokable", "callable", "not an agent"))
 
 
 _NOT_A_GRAPH = "just a string"  # for the test above
+_NOT_A_GRAPH_INT = 42  # for the test above
 
 
 # ── _instantiate_factory ───────────────────────────────────────────
