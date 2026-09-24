@@ -52,6 +52,14 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
 ### Changed
 - New dependency: `filelock>=3.0` (see gh #136 above).
 
+### Tests
+- **The test suite can no longer touch a developer's real hermes home.** Some suites (`test_cli_subcommands.py`,
+  `test_rename_shim.py`) wrote `state.db` into whatever `HERMES_HOME` the shell exported. `tests/conftest.py` now
+  points `HERMES_HOME`, `LANGSTAGE_HERMES_HOME`, `DEEPAGENT_HERMES_HOME` and `HOME` / `USERPROFILE` at a session
+  temp dir when it is imported, and at a fresh per-test dir through an autouse fixture. A test that sets its own
+  home with monkeypatch still wins. `test_home_sandbox_guard.py` runs a suite file in a child pytest with every
+  home variable pointed at a "real" directory and asserts that directory is left untouched.
+
 ## [0.4.32] - 2026-09-24
 
 ### Security
