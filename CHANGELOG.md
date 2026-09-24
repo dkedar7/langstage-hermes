@@ -2,6 +2,22 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.32] - 2026-09-24
+
+### Security
+- **`skills install` copies only the skill, never its parent directory (gh #159).** Installing from a FILE
+  (`skills install ./SKILL.md`, or a differently-named draft) ran `shutil.copytree` on the file's whole parent
+  directory, so installing from a repo root or `~/Downloads` copied `.env` secrets, `.git/`, `node_modules/` and
+  unrelated binaries into `<HERMES_HOME>/skills/<name>/`, which feeds the agent's context. The rule is now:
+  - **File install:** only the named file is installed, as `SKILL.md`. Nothing next to it is copied. To include
+    support files (`references/`, `templates/`, `assets/`, `scripts/`), install the skill's directory instead.
+  - **Directory install:** the skill directory's contents are copied, except hidden entries (`.git`, `.env*`,
+    `.venv`, `.DS_Store`, ...), symlinks (which could point outside the skill, e.g. at `~/.ssh`),
+    `node_modules`, `__pycache__`, `venv`, any directory holding a `pyvenv.cfg`, `*.egg-info` and `*.pyc`/`*.pyo`.
+    Skipped paths are listed after the `Installed ...` line.
+  The `skills install` help no longer tells you to "point this at any working directory". The install audit row
+  still records the installed `SKILL.md`, which is now exactly the file that was validated.
+
 ## [0.4.31] - 2026-09-24
 
 ### Fixed
