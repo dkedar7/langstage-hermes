@@ -56,14 +56,22 @@ _CRON_ALWAYS_STRIPPED = ("cronjob", "messaging", "clarify")
 def _debug_enabled() -> bool:
     """True when full tracebacks are wanted on the console.
 
-    Gated on ``LANGSTAGE_DEBUG`` — the family-wide debug switch
-    (:attr:`langstage_core.host.config.HostConfig.debug`). Off by default so the
-    automation surfaces (``cron run-due`` and the long-running daemon) stay
-    quiet. Read directly (a lenient flag read, like the config module's other
-    ``LANGSTAGE_*`` switches) so a bad tick never has to stand up full config
-    resolution just to decide how loudly to complain.
+    Follows the resolved ``debug`` setting
+    (:attr:`langstage_core.host.config.HostConfig.debug`) through the whole config chain:
+    ``LANGSTAGE_DEBUG``, the legacy ``DEEPAGENT_DEBUG``, and ``debug = true`` in a TOML
+    file, the same way langstage-core resolves it for error-frame tracebacks (core
+    1.0.36, #137). Reading only ``LANGSTAGE_DEBUG`` ignored the other two. Off by default
+    so the automation surfaces (``cron run-due`` and the long-running daemon) stay quiet.
+    Resolved per call, and only on the failure path, so a healthy tick never pays for it.
+    If resolution itself fails, it falls back to the env switch alone rather than
+    masking the original failure.
     """
-    return _env_bool(os.getenv("LANGSTAGE_DEBUG"))
+    try:
+        from langstage_hermes.config import HermesConfig
+
+        return bool(HermesConfig.resolve().debug)
+    except Exception:  # never let the debug lookup hide the real error
+        return _env_bool(os.getenv("LANGSTAGE_DEBUG"))
 
 
 def _log_cron_failure(msg: str, *args: Any, exc: BaseException) -> None:

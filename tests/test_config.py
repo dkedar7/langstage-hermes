@@ -329,6 +329,85 @@ def test_malformed_hermes_toml_not_listed_as_read_and_warns_once(monkeypatch, tm
     assert capsys.readouterr().err.count("ignoring malformed config") == 1
 
 
+# ── gh #151: a present-but-malformed file is MALFORMED, not "no config found" ──
+
+_MALFORMED_151 = '[model]\ndefault = "openai:my-intended-model"\nthis line is not valid toml\n'
+
+
+def _malformed_setup(monkeypatch, tmp_path, where):
+    _strip_env(monkeypatch)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(home))
+    monkeypatch.setenv("LANGSTAGE_CONFIG_HOME", str(tmp_path / "core_global"))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    monkeypatch.chdir(proj)
+    target = (home / "config.toml") if where == "global" else (proj / "langstage-hermes.toml")
+    target.write_text(_MALFORMED_151, encoding="utf-8")
+    return proj, target
+
+
+@pytest.mark.parametrize("where", ["project", "global"])
+def test_show_config_reports_malformed_hermes_toml_as_malformed(monkeypatch, tmp_path, where):
+    """gh #151: the footer named the file absent ("no config found") while stderr said
+    it was ignored as malformed. It must name the file as MALFORMED, with the error."""
+    proj, target = _malformed_setup(monkeypatch, tmp_path, where)
+
+    cfg = HermesConfig.resolve(toml_start=proj)
+    desc = cfg.describe()
+
+    assert "no config found" not in desc
+    assert f"TOML: {target} is MALFORMED" in desc
+    assert "TOMLDecodeError" in desc
+    # The file applied nothing.
+    assert cfg.model_default == "anthropic:claude-sonnet-4-6"
+    assert cfg.sources["model_default"] == "default"
+
+
+def test_malformed_hermes_toml_is_reported_as_data(monkeypatch, tmp_path):
+    """gh #151: the same fact reaches core's machine-readable APIs."""
+    proj, target = _malformed_setup(monkeypatch, tmp_path, "project")
+
+    cfg = HermesConfig.resolve(toml_start=proj)
+
+    assert [m["path"] for m in cfg.malformed_toml()] == [str(target)]
+    toml_block = cfg.config_dict()["toml"]
+    assert toml_block["found"] is True and toml_block["malformed"] is True
+    assert toml_block["path"] == str(target)
+    assert any(i["kind"] == "malformed_toml" for i in cfg.config_issues())
+
+
+def test_absent_hermes_toml_still_reports_no_config_found(monkeypatch, tmp_path):
+    """Genuine absence keeps the hermes 'no config found (looked for ...)' footer."""
+    _strip_env(monkeypatch)
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("LANGSTAGE_CONFIG_HOME", str(tmp_path / "core_global"))
+    monkeypatch.chdir(tmp_path)
+
+    cfg = HermesConfig.resolve(toml_start=tmp_path)
+
+    assert "TOML: no config found (looked for" in cfg.describe()
+    assert cfg.malformed_toml() == []
+    assert cfg.config_dict()["toml"]["found"] is False
+
+
+def test_malformed_hermes_value_is_a_config_issue(monkeypatch, tmp_path):
+    """A type-mismatched hermes TOML value degrades with a note AND is listed by
+    config_issues(), which the base resolve() records but hermes' own resolve didn't."""
+    _strip_env(monkeypatch)
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("LANGSTAGE_CONFIG_HOME", str(tmp_path / "core_global"))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "langstage-hermes.toml").write_text('[cron]\ntick_seconds = "soon"\n', encoding="utf-8")
+
+    cfg = HermesConfig.resolve(toml_start=tmp_path)
+
+    assert cfg.cron_tick_seconds == 60
+    issues = [i for i in cfg.config_issues() if i["kind"] == "malformed_value"]
+    assert [i["field"] for i in issues] == ["cron_tick_seconds"]
+
+
 def test_env_beats_toml(monkeypatch, tmp_path):
     monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "no_global"))
     monkeypatch.setenv("DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL", "99")

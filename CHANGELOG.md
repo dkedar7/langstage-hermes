@@ -2,6 +2,28 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.31] - 2026-09-24
+
+### Fixed
+- **`--show-config` reports a present-but-malformed config file as MALFORMED, not "no config found" (gh #151).**
+  When `langstage-hermes.toml` or `$HERMES_HOME/config.toml` existed but failed to parse, stderr said
+  `note: ignoring malformed config <path>` while the footer said `TOML: no config found (looked for ...)`, which
+  sent users looking for a misplaced file instead of a syntax error. `HermesConfig.resolve` now loads both TOML
+  stacks the way langstage-core 1.0.36 does (core's `_load_toml_layers` for `langstage.toml`, and a hermes twin for
+  the hermes files) and hands core the found-but-rejected files. The footer now reads
+  `TOML: <path> is MALFORMED and was ignored entirely (<error>)`. `HermesConfig.malformed_toml()`,
+  `config_dict()["toml"]` (`found` / `malformed` / `malformed_files`) and `config_issues()` report the same thing,
+  and `config_issues()` also lists values that hermes' own resolve had to degrade. A missing file still shows the
+  hermes `no config found (looked for ...)` line.
+- **Cron failure tracebacks follow the resolved `debug` setting.** `cron/scheduler.py` read `LANGSTAGE_DEBUG`
+  straight from the environment, so the legacy `DEEPAGENT_DEBUG` and `debug = true` in a TOML file were ignored.
+  It now uses `HermesConfig.resolve().debug`, resolved only when a failure is being logged, and falls back to the
+  env switch if resolution itself fails.
+
+### Changed
+- Requires `langstage-core>=1.0.36`. With it, an agent spec that names a `str` attribute is rejected by core's
+  loader ("resolved to a str ..., not an agent") before hermes' own invokable check runs.
+
 ## [0.4.30] - 2026-09-23
 
 ### Fixed

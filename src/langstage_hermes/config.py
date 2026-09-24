@@ -43,12 +43,14 @@ from langstage_core.host.config import (
     _env_bool_strict,
     _env_pair,
     _get_dotted,
+    _load_toml_layers,
     _malformed_toml,
+    _malformed_toml_errors,
     _read_toml,
+    _value_issue,
     _warn_legacy_env,
     _warn_malformed_env_value,
     _warn_malformed_toml_value,
-    load_toml_config,
 )
 
 # ── Hermes TOML locations ────────────────────────────────────────────
@@ -103,44 +105,51 @@ def _find_hermes_project_toml(start: Path | None = None) -> Path | None:
     return None
 
 
+def _load_hermes_toml_layers(
+    start: Path | None = None,
+) -> tuple[dict, list[Path], list[tuple[Path, dict]], list[tuple[Path, str]]]:
+    """Load the global ``$HERMES_HOME/config.toml`` and project ``langstage-hermes.toml``.
+
+    The Hermes-file twin of langstage-core's ``_load_toml_layers``, with the same return
+    shape: ``(merged, sources, per_file, malformed)``. ``per_file`` keeps each parsed
+    file's own dict in ascending precedence, so a value can be attributed to the file it
+    actually came from (gh #55). ``malformed`` lists each file that exists but failed to
+    parse, as ``(path, "<ExcType>: <message>")``, computed from THIS read. Core's
+    ``describe()`` / ``config_dict()`` / ``config_issues()`` read it back, so
+    ``--show-config`` says the file is MALFORMED instead of "no config found" (gh #151).
+    """
+    sources: list[Path] = []
+    per_file: list[tuple[Path, dict]] = []
+    malformed: list[tuple[Path, str]] = []
+    merged: dict = {}
+    candidates: list[Path] = []
+    gpath = _hermes_global_toml_path()
+    if gpath.is_file():
+        candidates.append(gpath)
+    ppath = _find_hermes_project_toml(start)
+    if ppath is not None:
+        candidates.append(ppath)
+    for path in candidates:
+        data = _read_toml(path)
+        # _read_toml catches the parse error, returns {} and records the path, so an
+        # ignored file is never listed as read (gh #61) but IS reported as malformed.
+        if str(path) in _malformed_toml:
+            malformed.append((path, _malformed_toml_errors.get(str(path), "unparseable")))
+            continue
+        merged = _deep_merge(merged, data)
+        sources.append(path)
+        per_file.append((path, data))
+    return merged, sources, per_file, malformed
+
+
 def load_hermes_toml_config(start: Path | None = None) -> tuple[dict, list[Path]]:
     """Load + deep-merge the global and project ``langstage-hermes.toml`` files.
 
-    Project wins on conflicts. Returns ``(merged_config, sources_used)`` —
-    ``({}, [])`` if no TOML reader is available.
+    Project wins on conflicts. Returns ``(merged_config, sources_used)``; a
+    malformed file is skipped and not listed.
     """
-    sources: list[Path] = []
-    merged: dict = {}
-    gpath = _hermes_global_toml_path()
-    if gpath.is_file():
-        merged = _deep_merge(merged, _read_toml(gpath))
-        # _read_toml catches a TOMLDecodeError, returns {}, and records the path as
-        # malformed — so don't list an ignored file as read (the gh #61 mislabel).
-        if str(gpath) not in _malformed_toml:
-            sources.append(gpath)
-    ppath = _find_hermes_project_toml(start)
-    if ppath is not None:
-        merged = _deep_merge(merged, _read_toml(ppath))
-        if str(ppath) not in _malformed_toml:
-            sources.append(ppath)
+    merged, sources, _, _ = _load_hermes_toml_layers(start)
     return merged, sources
-
-
-def _parse_toml_files(paths: list[Path]) -> list[tuple[Path, dict]]:
-    """Parse each TOML path once, keeping per-file dicts (ascending precedence).
-
-    ``load_*_toml_config`` deep-merge the stack into one dict, which loses which
-    file supplied which key — so a value that lives only in the global
-    ``config.toml`` can't be told apart from a project override. Keeping the
-    per-file dicts lets ``--show-config`` attribute a value to its real origin. (gh #55)
-    """
-    parsed: list[tuple[Path, dict]] = []
-    for p in paths:
-        try:
-            parsed.append((p, _read_toml(p)))
-        except Exception:  # pragma: no cover - loader already skipped malformed files
-            continue
-    return parsed
 
 
 def _toml_source_label(parsed: list[tuple[Path, dict]], tkey: str) -> str:
@@ -607,14 +616,17 @@ class HermesConfig(HostConfig):
         overrides = {k: v for k, v in (overrides or {}).items() if v is not None}
         env = os.environ if env is None else env
 
-        # Layer 2: cross-host TOML (deepagents.toml) — same as base.
-        base_toml_data, base_toml_paths = load_toml_config(toml_start) if use_toml else ({}, [])
-        # Layer 3: hermes-specific TOML.
-        hermes_toml_data, hermes_toml_paths = load_hermes_toml_config(toml_start) if use_toml else ({}, [])
-        # Per-file parses so a field's source names the file it actually came from,
-        # not just the last file read across a layered global+project stack (gh #55).
-        base_toml_parsed = _parse_toml_files(base_toml_paths)
-        hermes_toml_parsed = _parse_toml_files(hermes_toml_paths)
+        # Layer 2: cross-host TOML (langstage.toml / deepagents.toml), through core's
+        # loader. Layer 3: the hermes files, through its twin. Both return the per-file
+        # dicts (so a field's source names the file it actually came from, gh #55) and
+        # the found-but-malformed files (so --show-config can say so, gh #151).
+        empty: tuple = ({}, [], [], [])
+        base_toml_data, base_toml_paths, base_toml_parsed, base_malformed = _load_toml_layers(toml_start) if use_toml else empty
+        hermes_toml_data, hermes_toml_paths, hermes_toml_parsed, hermes_malformed = (
+            _load_hermes_toml_layers(toml_start) if use_toml else empty
+        )
+        # Every value this resolve had to drop, as data for core's config_issues().
+        value_issues: list[dict] = []
 
         env_map = cls._env_map()
         toml_map = cls._toml_map()
@@ -650,6 +662,7 @@ class HermesConfig(HostConfig):
                         # resolved so far and emit the same one-line note via the
                         # shared core helper so the wording can't drift.
                         _warn_malformed_toml_value(tkey, tv, exc, val, base_toml_paths)
+                        value_issues.append(_value_issue("malformed_value", name, f"toml:{tkey}", tv, exc, val))
                     else:
                         src = _toml_source_label(base_toml_parsed, tkey)
                 tv2 = _get_dotted(hermes_toml_data, tkey)
@@ -658,6 +671,7 @@ class HermesConfig(HostConfig):
                         val = _coerce(f, tv2)
                     except (ValueError, TypeError) as exc:
                         _warn_malformed_toml_value(tkey, tv2, exc, val, hermes_toml_paths)
+                        value_issues.append(_value_issue("malformed_value", name, f"toml:{tkey}", tv2, exc, val))
                     else:
                         src = _toml_source_label(hermes_toml_parsed, tkey)
 
@@ -691,6 +705,7 @@ class HermesConfig(HostConfig):
                         # default), leave its source intact, and emit the same one-line
                         # note. Same core helper so the wording can't drift.
                         _warn_malformed_env_value(used, ev, exc, val, src)
+                        value_issues.append(_value_issue("malformed_value", name, f"env:{used}", ev, exc, val))
 
             if name in overrides:
                 val = overrides[name]
@@ -702,6 +717,12 @@ class HermesConfig(HostConfig):
         obj = cls(**values)
         obj._sources = sources  # type: ignore[attr-defined]
         obj._toml_paths = base_toml_paths + hermes_toml_paths  # type: ignore[attr-defined]
+        # The attributes core's describe() / config_dict() / malformed_toml() /
+        # config_issues() read, so a present-but-malformed file is reported as MALFORMED,
+        # not "no config found" (gh #151).
+        obj._toml_files = base_toml_parsed + hermes_toml_parsed  # type: ignore[attr-defined]
+        obj._toml_malformed = base_malformed + hermes_malformed  # type: ignore[attr-defined]
+        obj._value_issues = value_issues  # type: ignore[attr-defined]
         # Warn (never fail) on unrecognized keys in the hermes TOML files — the
         # last silent config-failure path. Uses the already-parsed per-file dicts,
         # so it costs a dict walk, not a re-read, and covers BOTH the global
