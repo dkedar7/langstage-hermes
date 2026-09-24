@@ -1734,17 +1734,75 @@ def skills_show(name: str) -> None:
     click.echo(skill.body)
 
 
+# Entries a DIRECTORY install never copies into the skill library (gh #159).
+# The library feeds the agent's context and is meant to be shareable, so secrets,
+# VCS metadata and build/env junk must never ride along with a skill.
+_INSTALL_SKIP_DIR_NAMES = frozenset({"node_modules", "__pycache__", "venv", "site-packages"})
+_INSTALL_SKIP_FILE_SUFFIXES = (".pyc", ".pyo")
+
+
+def _install_skip_reason(entry: Path) -> str | None:
+    """Why ``entry`` (inside a skill dir being installed) is excluded, or ``None``.
+
+    Rule: skip symlinks (they can point anywhere, e.g. ``~/.ssh``), every hidden
+    name (``.git``, ``.env*``, ``.venv``, ``.DS_Store``, ...), dependency / cache /
+    virtualenv directories (``node_modules``, ``__pycache__``, ``venv``, any dir
+    holding a ``pyvenv.cfg``, ``*.egg-info``) and compiled Python files.
+    Everything else — ``references/``, ``templates/``, ``assets/``, ``scripts/``
+    and top-level support files — is part of the skill and is copied.
+    """
+    name = entry.name
+    if entry.is_symlink():
+        return "symlink"
+    if name.startswith("."):
+        return "hidden"
+    if entry.is_dir():
+        if name in _INSTALL_SKIP_DIR_NAMES or name.endswith(".egg-info") or (entry / "pyvenv.cfg").exists():
+            return "dependency/cache dir"
+        return None
+    if name.endswith(_INSTALL_SKIP_FILE_SUFFIXES):
+        return "compiled file"
+    return None
+
+
+def _copy_skill_dir(src: Path, dst: Path, *, rel: str = "") -> list[str]:
+    """Copy a skill directory's contents minus excluded entries; return skipped paths."""
+    skipped: list[str] = []
+    dst.mkdir(parents=True, exist_ok=True)
+    for entry in sorted(src.iterdir()):
+        shown = f"{rel}{entry.name}"
+        if not rel and entry.name == "SKILL.md":
+            continue  # copied explicitly by the caller
+        if _install_skip_reason(entry) is not None:
+            skipped.append(shown + ("/" if entry.is_dir() and not entry.is_symlink() else ""))
+            continue
+        if entry.is_dir():
+            skipped.extend(_copy_skill_dir(entry, dst / entry.name, rel=shown + "/"))
+        elif entry.is_file():
+            shutil.copy2(entry, dst / entry.name)
+        else:
+            skipped.append(shown)  # sockets, FIFOs, devices
+    return skipped
+
+
 @skills.command("install")
 @click.argument("path", type=click.Path(exists=True, path_type=Path))
 def skills_install(path: Path) -> None:
-    """Install a skill directory into ``<HERMES_HOME>/skills/<name>/``.
+    """Install one skill into ``<HERMES_HOME>/skills/<name>/``.
 
-    PATH may be either a SKILL.md file or a directory containing one. It is
-    installed under the skill's frontmatter ``name`` regardless of the source
-    directory's name, so you can point this at any working directory.
+    PATH may be a skill FILE or a skill DIRECTORY; either way the skill is
+    installed under its frontmatter ``name``, not the source's name.
+
+    \b
+    - A FILE (``SKILL.md`` or a differently-named draft) installs ONLY that file,
+      as ``SKILL.md``. Nothing next to it is copied — to ship support files
+      (``references/``, ``templates/``, ``assets/``, ``scripts/``), install the
+      skill's directory instead.
+    - A DIRECTORY (holding ``SKILL.md``) installs the skill's contents, but never
+      hidden entries (``.git``, ``.env*``, ``.venv``, ...), symlinks,
+      ``node_modules``, ``__pycache__``, virtualenvs, ``*.egg-info`` or
+      ``*.pyc``. Anything skipped is listed in the output.
     """
-    import shutil
-
     from langstage_hermes.config import hermes_home
     from langstage_hermes.skills.validator import validate as validate_frontmatter
 
@@ -1784,13 +1842,16 @@ def skills_install(path: Path) -> None:
         click.echo(click.style(f"Already installed at {target} — won't overwrite.", fg="yellow"))
         sys.exit(1)
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(src_dir, target)
-    # If the user named a non-SKILL.md file (validated above), make THAT file the
-    # installed skill's SKILL.md — so the copied tree loads under the content the
-    # user pointed at, never a stale sibling SKILL.md that copytree also copied
-    # over (gh #107).
-    if skill_md.name != "SKILL.md":
-        shutil.copy2(skill_md, target / "SKILL.md")
+    # A FILE installs only itself (gh #159): its parent is an arbitrary working
+    # dir (a repo root, ~/Downloads), so copying siblings would drag .env
+    # secrets, .git/ and unrelated binaries into the library. The named file
+    # always becomes SKILL.md, so what's installed is what was validated (gh #107).
+    skipped: list[str] = []
+    if path.is_dir():
+        skipped = _copy_skill_dir(src_dir, target)
+    else:
+        target.mkdir()
+    shutil.copy2(skill_md, target / "SKILL.md")
     # Land an audit row so `audit log` shows the install and `audit rollback`
     # behaves like any other create — honoring the `audit` group's promise that
     # "every CLI skill mutation appends a row." Best-effort: never fail an
@@ -1802,6 +1863,18 @@ def skills_install(path: Path) -> None:
     except Exception:
         pass  # audit logging is non-critical; never fail the install over it
     click.echo(click.style(f"Installed {install_name} → {target}", fg="green"))
+    if skipped:
+        click.echo(
+            click.style(
+                f"Skipped {len(skipped)} path(s) that are not part of a skill "
+                "(hidden/VCS/secrets, symlinks, dependency or cache dirs):",
+                fg="yellow",
+            )
+        )
+        for rel in skipped[:20]:
+            click.echo(f"  - {rel}")
+        if len(skipped) > 20:
+            click.echo(f"  ... and {len(skipped) - 20} more")
 
 
 def _skills_remove(name: str) -> None:
