@@ -339,7 +339,13 @@ def _action_create(
     if not body:
         raise ValueError("create: 'body' is required")
     fm = {"name": name, "description": description}
-    return library.write(name, fm, body, category=category or None, audit_action="create")
+    # No audit_action override: library.write labels a genuinely new skill
+    # "create" and a re-create over an existing SKILL.md "write_file". Forcing
+    # "create" made an overwrite (the reflection loop re-authoring a skill it made
+    # in an earlier session, SPEC §9's "update currently-loaded skill") look like
+    # a first-time create in `audit log` (gh #148). Overwriting stays allowed:
+    # refining existing skills is the loop's normal case.
+    return library.write(name, fm, body, category=category or None)
 
 
 def _action_patch(library: SkillLibrary, *, name: str, old_str: str, new_str: str) -> Path:

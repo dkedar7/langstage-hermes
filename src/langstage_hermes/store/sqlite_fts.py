@@ -245,8 +245,8 @@ END;
 def resolve_hermes_home() -> Path:
     """Resolve the langstage-hermes home directory.
 
-    Precedence: ``DEEPAGENT_HERMES_HOME`` > ``HERMES_HOME`` >
-    ``~/.langstage-hermes/``. Directory is created if missing.
+    Delegates to :func:`langstage_hermes.config.hermes_home`. Directory is
+    created if missing.
     """
     from langstage_hermes.config import hermes_home
 

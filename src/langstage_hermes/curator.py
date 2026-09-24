@@ -66,8 +66,7 @@ def _now() -> float:
 def _hermes_home() -> Path:
     """Resolve ``<HERMES_HOME>`` with the same precedence Hermes uses.
 
-    ``DEEPAGENT_HERMES_HOME`` wins, then ``HERMES_HOME``, then the bundled
-    default of ``~/.langstage-hermes``. Created on demand.
+    Delegates to :func:`langstage_hermes.config.hermes_home`. Created on demand.
     """
 
     from langstage_hermes.config import hermes_home

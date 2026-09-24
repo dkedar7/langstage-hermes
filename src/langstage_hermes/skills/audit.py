@@ -35,10 +35,34 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["MutationRow", "RollbackError", "SkillAuditLog"]
+__all__ = ["MutationRow", "RollbackError", "SkillAuditLog", "render_unified_diff"]
 
 
 VALID_ACTIONS: frozenset[str] = frozenset({"create", "patch", "write_file", "delete", "pin", "unpin", "rollback"})
+
+
+_NO_NEWLINE_MARKER = "\\ No newline at end of file\n"
+
+
+def render_unified_diff(before: bytes, after: bytes, *, fromfile: str, tofile: str) -> str:
+    """A unified diff of two SKILL.md snapshots that stays readable without trailing newlines.
+
+    ``difflib.unified_diff`` over ``splitlines(keepends=True)`` emits the last line of a
+    file that doesn't end in a newline with no line break, so it ran straight into the
+    next ``+`` line and the diff was illegible (gh #153). Such a line now gets a newline
+    plus git's ``\\ No newline at end of file`` marker.
+    """
+    import difflib
+
+    before_lines = before.decode("utf-8", errors="replace").splitlines(keepends=True)
+    after_lines = after.decode("utf-8", errors="replace").splitlines(keepends=True)
+    out: list[str] = []
+    for line in difflib.unified_diff(before_lines, after_lines, fromfile=fromfile, tofile=tofile):
+        if line.endswith("\n"):
+            out.append(line)
+        else:
+            out.append(line + "\n" + _NO_NEWLINE_MARKER)
+    return "".join(out)
 
 
 class RollbackError(RuntimeError):
@@ -281,7 +305,6 @@ class SkillAuditLog:
 
         Use this to answer "what has changed since this revision?"
         """
-        import difflib
 
         row = self.get(mutation_id)
         if row is None or row.skill_name != skill_name:
@@ -293,15 +316,12 @@ class SkillAuditLog:
         target = row.after_content or b""
         if current == target:
             return ""
-        current_text = current.decode("utf-8", errors="replace").splitlines(keepends=True)
-        target_text = target.decode("utf-8", errors="replace").splitlines(keepends=True)
-        diff = difflib.unified_diff(
-            target_text,
-            current_text,
+        return render_unified_diff(
+            target,
+            current,
             fromfile=f"{skill_name}@mutation-{mutation_id}",
             tofile=f"{skill_name}@disk",
         )
-        return "".join(diff)
 
     def rollback_to(
         self,

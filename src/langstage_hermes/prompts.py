@@ -32,7 +32,6 @@ N+1 within a session.
 
 from __future__ import annotations
 
-import os
 import platform as _platform_mod
 import sys
 from collections.abc import Awaitable, Callable
@@ -116,10 +115,12 @@ _TOOLSET_GUIDANCE_FILES: dict[str, str] = {
 def _resolve_hermes_home() -> Path | None:
     """Return ``<HERMES_HOME>`` if set in the environment, else ``None``.
 
-    Respects both ``DEEPAGENT_HERMES_HOME`` (our convention) and ``HERMES_HOME``
-    (Hermes-native). The first set wins.
+    Same env precedence as :func:`langstage_hermes.config.hermes_home`
+    (``LANGSTAGE_HERMES_HOME`` > ``HERMES_HOME`` > legacy ``DEEPAGENT_HERMES_HOME``).
     """
-    raw = os.environ.get("LANGSTAGE_HERMES_HOME") or os.environ.get("DEEPAGENT_HERMES_HOME") or os.environ.get("HERMES_HOME")
+    from langstage_hermes.config import hermes_home_override
+
+    raw = hermes_home_override()
     if not raw:
         return None
     return Path(raw).expanduser()

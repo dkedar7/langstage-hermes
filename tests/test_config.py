@@ -207,7 +207,7 @@ def test_project_toml_overrides_defaults(monkeypatch, tmp_path):
     """A ``langstage-hermes.toml`` in the toml_start dir wins over defaults."""
     # Isolate from any real config files / env on the host.
     _strip_env(monkeypatch)
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "no_global"))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(tmp_path / "no_global"))
     monkeypatch.chdir(tmp_path)
 
     (tmp_path / "langstage-hermes.toml").write_text(
@@ -231,7 +231,7 @@ def test_show_config_attributes_value_to_the_file_it_came_from(monkeypatch, tmp_
     _strip_env(monkeypatch)
     global_home = tmp_path / "home" / ".langstage-hermes"
     global_home.mkdir(parents=True)
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(global_home))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(global_home))
     # model.default lives ONLY in the global config.toml:
     (global_home / "config.toml").write_text('[model]\ndefault = "openai:FROM_GLOBAL_CONFIG"\n', encoding="utf-8")
     # the project TOML exists but sets a DIFFERENT key (model.aux_model):
@@ -259,7 +259,7 @@ def test_show_config_names_the_resolved_global_path_under_custom_hermes_home(mon
     _strip_env(monkeypatch)
     hermes_home = tmp_path / "custom_home"
     hermes_home.mkdir()
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(hermes_home))
     proj = tmp_path / "proj"
     proj.mkdir()
     monkeypatch.chdir(proj)  # no project or global config -> "no config found" line
@@ -278,7 +278,7 @@ def test_no_config_line_lists_every_honored_project_toml(monkeypatch, tmp_path):
     _strip_env(monkeypatch)
     hermes_home = tmp_path / "custom_home"
     hermes_home.mkdir()
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(hermes_home))
     proj = tmp_path / "proj"
     proj.mkdir()
     monkeypatch.chdir(proj)
@@ -296,7 +296,7 @@ def test_global_config_at_hermes_home_is_honored(monkeypatch, tmp_path):
     hermes_home = tmp_path / "custom_home"
     hermes_home.mkdir()
     (hermes_home / "config.toml").write_text('[model]\ndefault = "openai:FROM-CUSTOM-HOME"\n', encoding="utf-8")
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(hermes_home))
     proj = tmp_path / "proj"
     proj.mkdir()
     monkeypatch.chdir(proj)
@@ -312,7 +312,7 @@ def test_malformed_hermes_toml_not_listed_as_read_and_warns_once(monkeypatch, tm
     import langstage_core.host.config as core_config
 
     _strip_env(monkeypatch)
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "no_home"))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(tmp_path / "no_home"))
     p = tmp_path / "langstage-hermes.toml"
     p.write_text('[model]\ndefault = "openai:x"\n[oops\n', encoding="utf-8")  # malformed line 3
     core_config._malformed_toml.discard(str(p))
@@ -409,7 +409,7 @@ def test_malformed_hermes_value_is_a_config_issue(monkeypatch, tmp_path):
 
 
 def test_env_beats_toml(monkeypatch, tmp_path):
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "no_global"))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(tmp_path / "no_global"))
     monkeypatch.setenv("DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL", "99")
     monkeypatch.chdir(tmp_path)
 
@@ -459,25 +459,52 @@ def test_describe_includes_env_var_hint_for_hermes_fields(monkeypatch):
 
 
 def test_hermes_home_default(monkeypatch):
-    monkeypatch.delenv("DEEPAGENT_HERMES_HOME", raising=False)
-    monkeypatch.delenv("HERMES_HOME", raising=False)
+    for var in ("LANGSTAGE_HERMES_HOME", "DEEPAGENT_HERMES_HOME", "HERMES_HOME"):
+        monkeypatch.delenv(var, raising=False)
     assert hermes_home() == Path.home() / ".langstage-hermes"
 
 
-def test_hermes_home_from_deepagent_env(monkeypatch, tmp_path):
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "deephome"))
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "legacyhome"))
-    assert hermes_home() == tmp_path / "deephome"
+def test_hermes_home_canonical_env_wins(monkeypatch, tmp_path):
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(tmp_path / "canon"))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "plain"))
+    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "legacy"))
+    assert hermes_home() == tmp_path / "canon"
 
 
-def test_hermes_home_falls_back_to_legacy(monkeypatch, tmp_path):
-    monkeypatch.delenv("DEEPAGENT_HERMES_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "legacyhome"))
-    assert hermes_home() == tmp_path / "legacyhome"
+def test_hermes_home_documented_env_beats_legacy(monkeypatch, tmp_path):
+    """gh #145: a stale legacy DEEPAGENT_HERMES_HOME must not silently outrank the
+    documented HERMES_HOME (it used to, redirecting every write elsewhere)."""
+    monkeypatch.delenv("LANGSTAGE_HERMES_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "plain"))
+    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "legacy"))
+    assert hermes_home() == tmp_path / "plain"
+
+
+def test_hermes_home_legacy_env_alone_is_honored_with_notice(monkeypatch, tmp_path):
+    """gh #145: the legacy alias still works on its own, but warns like every other
+    legacy DEEPAGENT_* variable (through core's _warn_legacy_env)."""
+    import langstage_core.host.config as core_config
+
+    for var in ("LANGSTAGE_HERMES_HOME", "HERMES_HOME", "LANGSTAGE_SUPPRESS_LEGACY_NOTICE"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "legacy"))
+    core_config._warned_legacy_env.discard("DEEPAGENT_HERMES_HOME")
+    with pytest.warns(DeprecationWarning, match="DEEPAGENT_HERMES_HOME is deprecated"):
+        assert hermes_home() == tmp_path / "legacy"
+
+
+def test_hermes_home_no_notice_when_legacy_is_shadowed(monkeypatch, tmp_path, recwarn):
+    import langstage_core.host.config as core_config
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "plain"))
+    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "legacy"))
+    core_config._warned_legacy_env.discard("DEEPAGENT_HERMES_HOME")
+    hermes_home()
+    assert not [w for w in recwarn if "DEEPAGENT_HERMES_HOME" in str(w.message)]
 
 
 def test_hermes_home_exposed_via_config(monkeypatch, tmp_path):
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "deephome"))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(tmp_path / "deephome"))
     cfg = HermesConfig.resolve(use_toml=False)
     assert cfg.hermes_home == tmp_path / "deephome"
 
@@ -604,7 +631,7 @@ class TestMalformedTomlValue:
         # Isolate from any real config files / env on the host, then drop a
         # langstage-hermes.toml whose [memory] nudge_interval is the wrong type.
         _strip_env(monkeypatch)
-        monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path / "no_global"))
+        monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(tmp_path / "no_global"))
         monkeypatch.chdir(tmp_path)
         (tmp_path / "langstage-hermes.toml").write_text(f"[memory]\nnudge_interval = {literal}\n", encoding="utf-8")
 

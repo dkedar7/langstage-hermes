@@ -486,7 +486,13 @@ class SkillLibrary:
 
         before_content = skill_md.read_bytes() if skill_md.exists() else None
         post = frontmatter.Post(body, **frontmatter_data)
-        after_bytes = frontmatter.dumps(post).encode("utf-8")
+        text = frontmatter.dumps(post)
+        # POSIX text file: end with a newline. frontmatter.dumps() doesn't, so every
+        # agent-written SKILL.md lacked one and `audit diff` ran the last removed
+        # line into the next added one (gh #153).
+        if not text.endswith("\n"):
+            text += "\n"
+        after_bytes = text.encode("utf-8")
         skill_md.write_bytes(after_bytes)
 
         action = audit_action or ("create" if before_content is None else "write_file")

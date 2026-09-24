@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langstage-hermes"
-version = "0.4.32"
+version = "0.4.33"
 description = "Closed-loop reflection / skill creation agent on LangGraph + deepagents. Faithful reproduction of Nous Research's Hermes Agent."
 readme = "README.md"
 license = { text = "MIT" }
@@ -36,6 +36,10 @@ dependencies = [
     "langgraph>=1.0",
     "langgraph-checkpoint-sqlite>=2.0",
     "croniter>=2.0",
+    # The cron daemon's tick lock. An OS-level lock the kernel releases when the
+    # process dies, so a SIGTERM / OOM kill can't strand it and wedge the next
+    # start (gh #136). The O_EXCL fallback only runs if this is somehow missing.
+    "filelock>=3.0",
     "python-frontmatter>=1.0",
     "pyyaml>=6.0",
     "click>=8.1",

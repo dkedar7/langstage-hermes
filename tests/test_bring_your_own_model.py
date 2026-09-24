@@ -25,7 +25,7 @@ from langstage_hermes.config import HermesConfig
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Per-test HERMES_HOME so state.db / skills / memories are isolated."""
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(tmp_path))
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     return tmp_path
 

@@ -46,6 +46,7 @@ from langstage_core.host.config import (
     _load_toml_layers,
     _malformed_toml,
     _malformed_toml_errors,
+    _normalize_path_value,
     _read_toml,
     _value_issue,
     _warn_legacy_env,
@@ -66,17 +67,40 @@ LEGACY_HERMES_HOME = Path.home() / ".deepagent-hermes"
 LEGACY_HERMES_PROJECT_TOML = "deepagent-hermes.toml"
 
 
+def hermes_home_override() -> str | None:
+    """The home directory the user set via env, or ``None`` when none is set.
+
+    Order: ``LANGSTAGE_HERMES_HOME`` > ``HERMES_HOME`` > legacy
+    ``DEEPAGENT_HERMES_HOME``. The legacy alias ranks LAST, so a stale value left
+    over from the old ``deepagent-hermes`` package can no longer silently redirect
+    every skill / memory / ``state.db`` write away from the documented
+    ``HERMES_HOME``; when it is the one that resolves, it gets the same one-time
+    deprecation notice as every other legacy ``DEEPAGENT_*`` variable, through
+    core's ``_warn_legacy_env`` (so ``LANGSTAGE_SUPPRESS_LEGACY_NOTICE`` silences it
+    too) (gh #145). This is the single place the env precedence lives; every
+    home resolver in the package goes through it.
+    """
+    canonical = os.getenv("LANGSTAGE_HERMES_HOME") or os.getenv("HERMES_HOME")
+    if canonical:
+        return canonical
+    legacy = os.getenv("DEEPAGENT_HERMES_HOME")
+    if legacy:
+        _warn_legacy_env("DEEPAGENT_HERMES_HOME", "HERMES_HOME (or LANGSTAGE_HERMES_HOME)")
+        return legacy
+    return None
+
+
 def hermes_home() -> Path:
     """Resolve ``HERMES_HOME`` with the documented precedence.
 
-    Order: ``LANGSTAGE_HERMES_HOME`` > legacy ``DEEPAGENT_HERMES_HOME`` >
-    ``HERMES_HOME`` env > existing ``~/.langstage-hermes`` > existing legacy
-    ``~/.deepagent-hermes`` (so pre-rename installs keep their skills and
-    memories) > default ``~/.langstage-hermes``. The result is not created —
-    that's the caller's job (`tests/conftest.py::tmp_hermes_home` already
-    does this).
+    Order: the env override (``LANGSTAGE_HERMES_HOME`` > ``HERMES_HOME`` > legacy
+    ``DEEPAGENT_HERMES_HOME``, see :func:`hermes_home_override`) > existing
+    ``~/.langstage-hermes`` > existing legacy ``~/.deepagent-hermes`` (so
+    pre-rename installs keep their skills and memories) > default
+    ``~/.langstage-hermes``. The result is not created — that's the caller's
+    job (`tests/conftest.py::tmp_hermes_home` already does this).
     """
-    override = os.getenv("LANGSTAGE_HERMES_HOME") or os.getenv("DEEPAGENT_HERMES_HOME") or os.getenv("HERMES_HOME")
+    override = hermes_home_override()
     if override:
         return Path(override)
     new_home = Path.home() / ".langstage-hermes"
@@ -150,6 +174,15 @@ def load_hermes_toml_config(start: Path | None = None) -> tuple[dict, list[Path]
     """
     merged, sources, _, _ = _load_hermes_toml_layers(start)
     return merged, sources
+
+
+def _toml_winner(parsed: list[tuple[Path, dict]], tkey: str) -> Path | None:
+    """The highest-precedence parsed file that sets ``tkey`` (``None`` if none does)."""
+    winner: Path | None = None
+    for p, data in parsed:
+        if _get_dotted(data, tkey) is not None:
+            winner = p
+    return winner
 
 
 def _toml_source_label(parsed: list[tuple[Path, dict]], tkey: str) -> str:
@@ -537,6 +570,15 @@ class HermesConfig(HostConfig):
         "plugins_disabled": "plugins.disabled",
     }
 
+    # field -> path kind for values that name files/directories. Merged with core's
+    # map (agent_spec: "spec", workspace_root: "path") across the MRO. A relative path
+    # from a TOML file resolves against THAT FILE's directory, like core 1.0.36; env /
+    # override values stay cwd-relative; ``~`` is expanded from every source. A list
+    # field (skills.external_dirs) normalizes each entry. (gh #162)
+    _TOML_PATHS: ClassVar[dict[str, str]] = {
+        "skills_external_dirs": "path",
+    }
+
     # ── convenience property ──
 
     @property
@@ -630,9 +672,11 @@ class HermesConfig(HostConfig):
 
         env_map = cls._env_map()
         toml_map = cls._toml_map()
+        path_kinds = cls._toml_paths_map()
 
         values: dict[str, Any] = {}
         sources: dict[str, str] = {}
+        toml_dirs: dict[str, Path] = {}
         for f in fields(cls):
             name = f.name
             # default
@@ -643,6 +687,7 @@ class HermesConfig(HostConfig):
             else:
                 val = None
             src = "default"
+            toml_dir: Path | None = None
 
             tkey = toml_map.get(name)
             if tkey is not None:
@@ -665,6 +710,8 @@ class HermesConfig(HostConfig):
                         value_issues.append(_value_issue("malformed_value", name, f"toml:{tkey}", tv, exc, val))
                     else:
                         src = _toml_source_label(base_toml_parsed, tkey)
+                        winner = _toml_winner(base_toml_parsed, tkey)
+                        toml_dir = winner.parent if winner is not None else None
                 tv2 = _get_dotted(hermes_toml_data, tkey)
                 if tv2 is not None:
                     try:
@@ -674,6 +721,8 @@ class HermesConfig(HostConfig):
                         value_issues.append(_value_issue("malformed_value", name, f"toml:{tkey}", tv2, exc, val))
                     else:
                         src = _toml_source_label(hermes_toml_parsed, tkey)
+                        winner = _toml_winner(hermes_toml_parsed, tkey)
+                        toml_dir = winner.parent if winner is not None else None
 
             if name in env_map:
                 var, caster = env_map[name]
@@ -711,6 +760,20 @@ class HermesConfig(HostConfig):
                 val = overrides[name]
                 src = "override"
 
+            # Path-valued fields follow core's rule (gh #162): a relative path from a
+            # TOML file resolves against that file's directory, not the cwd, so running
+            # from another directory can't silently point somewhere else.
+            kind = path_kinds.get(name)
+            if kind is not None and val is not None:
+                base = toml_dir if src.startswith("toml") else None
+                if isinstance(val, list):
+                    # Keep list[str] (it is printed / JSON-dumped as-is).
+                    val = [str(_normalize_path_value(kind, v, base)) for v in val]
+                else:
+                    val = _normalize_path_value(kind, val, base)
+                if base is not None:
+                    toml_dirs[name] = base
+
             values[name] = val
             sources[name] = src
 
@@ -723,6 +786,7 @@ class HermesConfig(HostConfig):
         obj._toml_files = base_toml_parsed + hermes_toml_parsed  # type: ignore[attr-defined]
         obj._toml_malformed = base_malformed + hermes_malformed  # type: ignore[attr-defined]
         obj._value_issues = value_issues  # type: ignore[attr-defined]
+        obj._toml_dirs = toml_dirs  # type: ignore[attr-defined]  # for toml_dir_for() (gh #162)
         # Warn (never fail) on unrecognized keys in the hermes TOML files — the
         # last silent config-failure path. Uses the already-parsed per-file dicts,
         # so it costs a dict walk, not a re-read, and covers BOTH the global
@@ -775,6 +839,7 @@ __all__ = [
     "HERMES_PROJECT_TOML",
     "HermesConfig",
     "hermes_home",
+    "hermes_home_override",
     "hermes_unknown_toml_keys",
     "load_hermes_toml_config",
 ]

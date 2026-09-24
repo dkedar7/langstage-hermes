@@ -110,8 +110,8 @@ class MemoryStateExt(AgentState):
 def _hermes_home() -> Path:
     """Resolve ``HERMES_HOME`` from env. Tests use the ``tmp_hermes_home`` fixture.
 
-    Resolution order (matches ``config.hermes_home``): ``DEEPAGENT_HERMES_HOME``
-    → ``HERMES_HOME`` → ``~/.langstage-hermes``.
+    Delegates to ``config.hermes_home`` (``LANGSTAGE_HERMES_HOME`` →
+    ``HERMES_HOME`` → legacy ``DEEPAGENT_HERMES_HOME`` → ``~/.langstage-hermes``).
     """
     from langstage_hermes.config import hermes_home
 
