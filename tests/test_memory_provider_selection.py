@@ -21,7 +21,7 @@ from langstage_hermes.memory.provider import available_providers, ensure_builtin
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(tmp_path))
     return tmp_path
 
 

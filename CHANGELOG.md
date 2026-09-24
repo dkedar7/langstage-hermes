@@ -2,6 +2,56 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.33] - 2026-09-24
+
+### Fixed
+- **The cron daemon recovers from a stale `.tick.lock` (gh #136).** After a SIGTERM, OOM kill or reboot, the
+  fallback `O_EXCL` lockfile was left behind and every later `cron daemon` start failed with "Stale or active
+  lockfile ... Remove it". `filelock` is now a declared dependency, so the default lock is an OS lock that the
+  kernel releases when the process dies. If `filelock` is ever missing, the fallback reads the PID it recorded:
+  a dead PID, or an empty or garbage file, is reclaimed once. Only a lock held by a live process refuses the start.
+- **A failed one-shot cron job is kept, with its error (gh #137).** A `once at` job (or any repeat-limited job)
+  whose final run failed was deleted exactly like a successful one, taking `last_status` / `last_error` with it.
+  It now stays in `cron list` as a disabled job with `state: "error"` and its `last_error`. `cron delete` removes
+  it. A successful final run is still removed.
+- **Legacy `DEEPAGENT_HERMES_HOME` no longer outranks `HERMES_HOME`, and it warns (gh #145).** The home precedence
+  is now `LANGSTAGE_HERMES_HOME` > `HERMES_HOME` > legacy `DEEPAGENT_HERMES_HOME`. A stale legacy value left over
+  from the old package used to silently redirect every skill, memory and `state.db` write. When the legacy
+  variable is the one used, it prints the same one-time deprecation note as every other `DEEPAGENT_*` variable
+  (core's `_warn_legacy_env`, silenced by `LANGSTAGE_SUPPRESS_LEGACY_NOTICE=1`). Every home resolver in the
+  package now goes through `config.hermes_home_override()`, and `demo` redirects its throwaway home through
+  `LANGSTAGE_HERMES_HOME` + `HERMES_HOME` instead of the legacy variable.
+- **Relative paths in `langstage-hermes.toml` / `deepagents.toml` resolve against the TOML file's directory
+  (gh #162).** `HermesConfig.resolve()` re-implements TOML layering and bypassed langstage-core 1.0.36's rule, so
+  `[workspace] root`, a file-path `[agent] spec` and `[skills] external_dirs` resolved against the cwd. They now
+  follow core: a relative value from a TOML file is rebased onto that file's directory, `~` is expanded from every
+  source, and env / CLI values stay cwd-relative. `toml_dir_for()` works for hermes configs, and `chat` passes it
+  to `load_agent_spec` so a dotted `module:attr` spec from TOML imports relative to its file.
+- **`search --session <id> --around <missing message>` and `tools --toolset <unknown>` exit 1 (gh #134).** Both
+  printed a not-found message and exited 0. They now match the CLI's named-target-not-found norm. The `tools`
+  help no longer advertises a `filesystem` toolset (the real name is `file`).
+- **`search` rejects `--session` or `--around` given alone (gh #135).** Outside SCROLL mode they were silently
+  dropped, so `search "q" --session <id>` returned unscoped results, even for a session id that doesn't exist,
+  with exit 0. Given without its partner, each is now a usage error (exit 2) that names the missing flag.
+- **`verify --json` no longer reports `round_trip: "skipped — no key"` when only the aux key is missing
+  (gh #146).** "no key" is now reserved for a missing primary key. With the primary key present and the aux key
+  missing, it says `skipped — preflight failed (aux model key missing; see model_key_aux)`.
+- **`doctor` checks the aux model's provider package (gh #158).** It only probed the main model's package, so an
+  `anthropic:*` main + `openai:*` aux config without the `[openai]` extra passed `doctor` and crashed the
+  reflection subagent at runtime. When the aux model uses a different provider, `doctor` now reports its package
+  (`provider_pkg_aux` in `--json`) and a missing one exits 2 with the `pip install "langstage-hermes[openai]"` hint.
+- **`skill_manage(create)` over an existing skill is logged as `write_file` (gh #148).** It forced
+  `action="create"`, so an overwrite looked like a first-time create in `audit log`. `library.write` now picks the
+  label (`create` for a new skill, `write_file` when it replaces one). Overwriting is still allowed: the reflection
+  loop refining a skill it wrote earlier is the normal case (SPEC §9).
+- **`audit diff` / `audit show --diff` are readable for agent-authored skills (gh #153).** `library.write` now
+  ends every SKILL.md with a newline, and the diff renderer emits git's `\ No newline at end of file` marker
+  instead of running the last removed line into the next added one. This also fixes rows recorded before this
+  release.
+
+### Changed
+- New dependency: `filelock>=3.0` (see gh #136 above).
+
 ## [0.4.32] - 2026-09-24
 
 ### Security

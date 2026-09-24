@@ -95,13 +95,21 @@ def test_scroll_json_marks_anchor(populated_home):
     assert anchors[0]["message_id"] == ids["mid_a"]
 
 
-def test_scroll_missing_message_is_clean_error(populated_home):
-    # Session EXISTS, only the anchor id is out of range → still exit 0 (the
-    # session lookup succeeded; nothing was "not found"). Contrast the missing-
-    # *session* case below (gh #99).
+def test_scroll_missing_message_exits_1_human(populated_home):
+    # gh #134: the session EXISTS but the named anchor message doesn't. That is a
+    # named-target-not-found lookup like the missing-session case below (gh #99),
+    # so it exits 1 too; the message is unchanged.
     res = CliRunner().invoke(cli, ["search", "--session", "sess-a", "--around", "999999"])
-    assert res.exit_code == 0, res.output
+    assert res.exit_code == 1, res.output
     assert "not in session" in res.output
+
+
+def test_scroll_missing_message_exits_1_json(populated_home):
+    res = CliRunner().invoke(cli, ["search", "--session", "sess-a", "--around", "999999", "--json"])
+    assert res.exit_code == 1, res.output
+    data = json.loads(res.output)
+    assert data["mode"] == "scroll"
+    assert "not in session" in data["error"]
 
 
 def test_scroll_missing_session_exits_1_human(populated_home):

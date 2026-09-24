@@ -511,9 +511,11 @@ def mark_job_run(
 ) -> None:
     """Record a completed run: timestamp + status + repeat-count bookkeeping.
 
-    Auto-deletes one-shot jobs at their repeat limit; recurring jobs that
-    fail to compute a next run are marked ``state="error"`` (not silently
-    disabled).
+    Auto-deletes one-shot jobs at their repeat limit when that last run
+    succeeded; if it failed, the job is kept disabled with ``state="error"``
+    and its ``last_error`` so the failure stays visible (gh #137). Recurring
+    jobs that fail to compute a next run are marked ``state="error"`` (not
+    silently disabled).
     """
     with _jobs_lock:
         jobs = _load()
@@ -530,7 +532,19 @@ def mark_job_run(
                 job["repeat"]["completed"] = job["repeat"].get("completed", 0) + 1
                 times = job["repeat"].get("times")
                 if times is not None and times > 0 and job["repeat"]["completed"] >= times:
-                    jobs.pop(i)
+                    if success:
+                        jobs.pop(i)
+                        _save(jobs)
+                        return
+                    # A repeat-limited (e.g. one-shot `once at`) job whose FINAL run
+                    # failed used to be popped exactly like a successful one, taking its
+                    # last_status / last_error with it, so an unattended failure left no
+                    # trace (gh #137). Keep it as a disabled terminal `error` record that
+                    # `cron list` still shows. `cron delete` removes it.
+                    job["enabled"] = False
+                    job["state"] = "error"
+                    job["next_run_at"] = None
+                    jobs[i] = job
                     _save(jobs)
                     return
 

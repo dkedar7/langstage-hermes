@@ -47,7 +47,7 @@ def test_real_reflection_cycle_runs_and_persists_state(tmp_path: Path):
 
     home = tmp_path / "hermes-home"
     home.mkdir()
-    os.environ["DEEPAGENT_HERMES_HOME"] = str(home)
+    os.environ["LANGSTAGE_HERMES_HOME"] = str(home)
     os.environ["HERMES_HOME"] = str(home)
     # Aggressive trigger so the reflection machinery fires inside one run.
     os.environ["DEEPAGENT_HERMES_SKILLS_CREATION_NUDGE_INTERVAL"] = "2"

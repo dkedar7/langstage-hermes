@@ -65,7 +65,7 @@ def test_tools_filter_by_name():
 def test_tools_unknown_toolset():
     runner = CliRunner()
     result = runner.invoke(cli, ["tools", "--toolset", "does-not-exist"])
-    assert result.exit_code == 0
+    assert result.exit_code == 1  # named-target-not-found (gh #134)
     assert "No toolset named" in result.output
 
 
@@ -332,7 +332,7 @@ def test_subcommand_help_works(group: str):
 
 def _home(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(tmp_path))
 
 
 def test_skills_remove_archives_and_records_rollbackable_delete(monkeypatch, tmp_path):

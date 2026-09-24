@@ -235,16 +235,17 @@ def _load_config() -> Any:
 def _configured_hermes_home() -> Path | None:
     """The ``HERMES_HOME`` the user *explicitly* set via env, or ``None``.
 
-    Mirrors the override arm of :func:`config.hermes_home` — the canonical
-    ``LANGSTAGE_HERMES_HOME``, then legacy ``DEEPAGENT_HERMES_HOME``, then plain
-    ``HERMES_HOME``. Returns ``None`` when none is set, i.e. when
+    The override arm of :func:`config.hermes_home` (``LANGSTAGE_HERMES_HOME``,
+    then ``HERMES_HOME``, then legacy ``DEEPAGENT_HERMES_HOME``; gh #145). Returns ``None`` when none is set, i.e. when
     ``hermes_home()`` would fall back to the implicit default
     (``~/.langstage-hermes``). ``demo`` uses this to decide whether to record
     into the user's real store (they signalled a persistent home) or a throwaway
     (a bare ``demo`` must not litter the default home) — the gh #88 fix that makes
     the documented ``demo`` -> ``search`` loop actually close.
     """
-    override = os.getenv("LANGSTAGE_HERMES_HOME") or os.getenv("DEEPAGENT_HERMES_HOME") or os.getenv("HERMES_HOME")
+    from langstage_hermes.config import hermes_home_override
+
+    override = hermes_home_override()
     return Path(override) if override else None
 
 
@@ -470,7 +471,11 @@ def _effective_agent_spec(cli_spec: str | None, config_spec: str | None = None) 
     return cli_spec or os.environ.get("LANGSTAGE_AGENT_SPEC") or os.environ.get("DEEPAGENT_AGENT_SPEC") or config_spec
 
 
-def _resolve_agent(spec: str | None = None, config_spec: str | None = None) -> tuple[Any | None, str, str | None]:
+def _resolve_agent(
+    spec: str | None = None,
+    config_spec: str | None = None,
+    config_spec_dir: Path | None = None,
+) -> tuple[Any | None, str, str | None]:
     """Resolve the chat agent source — flag / env var / TOML or built-in factory.
 
     ``spec`` (the ``-a/--agent`` CLI flag) wins; otherwise the
@@ -516,8 +521,12 @@ def _resolve_agent(spec: str | None = None, config_spec: str | None = None) -> t
                 "spec",
                 (f"agent spec {spec!r} is set but langstage-core is not installed (or load_agent_spec is missing): {e}"),
             )
+        # A dotted `module:attr` spec from a TOML file imports relative to that file's
+        # directory, like every other langstage surface (core's toml_dir_for; gh #162).
+        # A flag / env spec stays cwd-relative.
+        base_dir = config_spec_dir if (config_spec_dir is not None and spec == config_spec) else None
         try:
-            target = load_agent_spec(spec)
+            target = load_agent_spec(spec, base_dir=base_dir) if base_dir is not None else load_agent_spec(spec)
         except Exception as e:
             return None, "spec", f"agent spec {spec!r} failed to load: {e}"
         if not (hasattr(target, "invoke") or callable(target)):
@@ -611,7 +620,7 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
     # Precedence: -a flag > LANGSTAGE_AGENT_SPEC env > [agent] spec TOML
     # (cfg.agent_spec) > built-in. Mirrors langstage-agui, which passes --agent as
     # an override and then loads cfg.agent_spec.
-    target, source, err = _resolve_agent(agent_spec, config_spec=cfg.agent_spec)
+    target, source, err = _resolve_agent(agent_spec, config_spec=cfg.agent_spec, config_spec_dir=cfg.toml_dir_for("agent_spec"))
     if err:
         click.echo(click.style(err, fg="red" if source == "spec" else "yellow"), err=True)
         if source == "builtin":
@@ -1137,20 +1146,17 @@ def _run_agent_turn(agent: Any, user_text: str, state: dict[str, Any]) -> None:
 # ── search ─────────────────────────────────────────────────────────
 
 
-def _scroll_names_missing_session(result: dict[str, Any]) -> bool:
-    """True when a SCROLL result failed because the *named session* doesn't exist.
+def _scroll_target_not_found(result: dict[str, Any]) -> bool:
+    """True when a SCROLL result failed because a *named target* doesn't exist.
 
-    ``search --session <id> --around N`` names a specific session; if it isn't in
-    the store that's a lookup failure exactly like ``skills show <missing>`` /
-    ``audit show <missing>``, both of which exit 1. This must exit 1 too (gh #99).
-
-    It is NOT the same as a missing *message* inside an existing session
-    (``--around 999999``): there the session was found and only the anchor id is
-    out of range, which stays exit 0. ``search_sessions_structured`` sets
-    ``anchor_message_id`` on the result only after the session lookup succeeds, so
-    an errored scroll that lacks that key is precisely the missing-session case.
+    ``search --session <id> --around N`` names a specific session AND a specific
+    message. If either is missing that's a lookup failure exactly like
+    ``skills show <missing>`` / ``audit show <missing>``, both of which exit 1.
+    The missing-session case was fixed in gh #99; the out-of-range anchor
+    (``--around 999999`` in a session that exists) carries the same ``error`` key
+    in the same result dict and must exit 1 too (gh #134).
     """
-    return result.get("mode") == "scroll" and bool(result.get("error")) and "anchor_message_id" not in result
+    return result.get("mode") == "scroll" and bool(result.get("error"))
 
 
 def _render_search_human(result: dict[str, Any]) -> None:
@@ -1246,6 +1252,18 @@ def search(
 
     from langstage_hermes.config import hermes_home
     from langstage_hermes.search.session_search import search_sessions_structured
+
+    # --session / --around only mean something together (SCROLL). Given alone they
+    # used to be silently dropped, so `search "q" --session <id>` returned unscoped
+    # hits (even for a session id that doesn't exist) with exit 0. Reject the
+    # half-specified combination up front instead of pretending it was applied
+    # (gh #135). Exit 2, like any other bad-usage error.
+    if (session_id is None) != (around_message_id is None):
+        given, missing = ("--session", "--around") if session_id is not None else ("--around", "--session")
+        raise click.UsageError(
+            f"{given} requires {missing} (SCROLL mode: --session <sid> --around <msg_id>). "
+            "To find a session, run a DISCOVERY search first; each hit prints its session id and message id."
+        )
     from langstage_hermes.store.sqlite_fts import SqliteFtsStore
 
     db_path = hermes_home() / "state.db"
@@ -1296,11 +1314,11 @@ def search(
         click.echo(_json.dumps(result, default=str))
     else:
         _render_search_human(result)
-    # A named session that doesn't exist is a lookup failure — exit 1 on both the
-    # human and --json render paths, matching skills/audit not-found (gh #99). The
-    # correct message / JSON `error` was already emitted above; only the exit code
-    # was wrong.
-    if _scroll_names_missing_session(result):
+    # A named session or anchor message that doesn't exist is a lookup failure —
+    # exit 1 on both the human and --json render paths, matching skills/audit
+    # not-found (gh #99, #134). The correct message / JSON `error` was already
+    # emitted above; only the exit code was wrong.
+    if _scroll_target_not_found(result):
         sys.exit(1)
 
 
@@ -1533,7 +1551,7 @@ def tools(toolset_filter: str | None, implemented_only: bool) -> None:
     """List declared toolsets and the tool names each ships.
 
     Shows the toolset taxonomy from SPEC §11 — both implemented sets
-    (filesystem, skills, memory, etc.) and stubbed-but-declared sets
+    (file, skills, memory, etc.) and stubbed-but-declared sets
     (homeassistant, spotify, etc.). For live check-status info, run
     ``langstage-hermes doctor``.
     """
@@ -1558,8 +1576,13 @@ def tools(toolset_filter: str | None, implemented_only: bool) -> None:
             click.echo(click.style(f"      · {name}", fg="bright_black"))
         shown += 1
     if shown == 0:
-        if toolset_filter:
+        if toolset_filter and toolset_filter not in TOOLSETS:
+            # A named toolset that doesn't exist is a lookup failure — exit 1, like
+            # `skills show <missing>` (gh #134).
             click.echo(f"No toolset named {toolset_filter!r}. Try `langstage-hermes tools` for all.")
+            sys.exit(1)
+        if toolset_filter:
+            click.echo(f"Toolset {toolset_filter!r} is declared but not implemented (hidden by --implemented-only).")
         else:
             click.echo("No toolsets declared.")
         return
@@ -2136,7 +2159,6 @@ def audit_log_cmd(skill_name: str | None, limit: int, full: bool, as_json: bool)
 @click.option("--diff", "show_diff", is_flag=True, help="Show unified diff of before vs after.")
 def audit_show_cmd(mutation_id: int, show_diff: bool) -> None:
     """Show full content (or diff) of a single mutation."""
-    import difflib
 
     log = _audit_log()
     row = log.get(mutation_id)
@@ -2146,15 +2168,13 @@ def audit_show_cmd(mutation_id: int, show_diff: bool) -> None:
     click.echo(_format_mutation_row(row, full=True))
     click.echo("")
     if show_diff:
-        before_text = (row.before_content or b"").decode("utf-8", errors="replace").splitlines(keepends=True)
-        after_text = (row.after_content or b"").decode("utf-8", errors="replace").splitlines(keepends=True)
-        diff = "".join(
-            difflib.unified_diff(
-                before_text,
-                after_text,
-                fromfile=f"{row.skill_name}@before",
-                tofile=f"{row.skill_name}@after",
-            )
+        from langstage_hermes.skills.audit import render_unified_diff
+
+        diff = render_unified_diff(
+            row.before_content or b"",
+            row.after_content or b"",
+            fromfile=f"{row.skill_name}@before",
+            tofile=f"{row.skill_name}@after",
         )
         click.echo(diff if diff else "(no textual change)")
         return
@@ -2763,7 +2783,16 @@ def _verify_json(*, model_id: str | None, keep_workspace: bool) -> NoReturn:
     if not offline_ok:
         # Skip (not fail) on a missing key so a keyless CI readiness check never
         # triggers a paid call; distinguish that from a genuine preflight failure.
-        _add("round_trip", False, "skipped — no key" if not key_ok else "skipped — preflight failed")
+        # "no key" only when the run's own (primary) key is missing: with the primary
+        # key present and only the aux key missing, "no key" contradicted the
+        # model_key check right above it (gh #146).
+        if main_key_detail is not None:
+            skip_detail = "skipped — no key"
+        elif not key_ok:
+            skip_detail = "skipped — preflight failed (aux model key missing; see model_key_aux)"
+        else:
+            skip_detail = "skipped — preflight failed"
+        _add("round_trip", False, skip_detail)
     else:
         workspace = Path(tempfile.mkdtemp(prefix="dah-verify-"))
         try:
@@ -3298,6 +3327,27 @@ def doctor(as_json: bool) -> None:
         else:
             _emit(f"  provider package: {_entry.module} installed")
             checks.append({"name": "provider_pkg", "ok": True, "detail": f"{_entry.module} installed"})
+    # The aux model's provider package too — the reflection review subagent runs on
+    # it, so a missing one crashes that subagent at runtime after a green doctor.
+    # Same new-provider-scheme rule as the aux key above (gh #158, the package twin
+    # of gh #96 / #104). A miss feeds the same exit gate.
+    if aux_model and _model_scheme(aux_model) != _model_scheme(model_for_run):
+        _aux_entry = _provider_package(aux_model)
+        if _aux_entry is not None:
+            if importlib.util.find_spec(_aux_entry.module) is None:
+                _emit(f"  ✗ provider package '{_aux_entry.module}' not importable for {aux_model} (aux) — {_aux_entry.install}")
+                provider_pkg_missing = True
+                checks.append(
+                    {
+                        "name": "provider_pkg_aux",
+                        "ok": False,
+                        "detail": f"'{_aux_entry.module}' not importable for {aux_model} (aux)",
+                        "hint": _aux_entry.install,
+                    }
+                )
+            else:
+                _emit(f"  provider package (aux): {_aux_entry.module} installed")
+                checks.append({"name": "provider_pkg_aux", "ok": True, "detail": f"{_aux_entry.module} installed"})
 
     home = hermes_home()
     try:

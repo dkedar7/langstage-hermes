@@ -261,9 +261,12 @@ def run_demo(
     # store / library (which read it lazily during .invoke()). Set it for the
     # duration of the run and restore the prior environment afterwards so a
     # library caller (or the test suite) sees no lasting mutation.
-    prev_env = {k: os.environ.get(k) for k in ("HERMES_HOME", "DEEPAGENT_HERMES_HOME")}
+    # LANGSTAGE_HERMES_HOME outranks HERMES_HOME, so set both (a user's own
+    # LANGSTAGE_HERMES_HOME must not win over the throwaway). Never the legacy
+    # DEEPAGENT_HERMES_HOME: it ranks last and would print a deprecation notice (gh #145).
+    prev_env = {k: os.environ.get(k) for k in ("HERMES_HOME", "LANGSTAGE_HERMES_HOME")}
     os.environ["HERMES_HOME"] = str(home)
-    os.environ["DEEPAGENT_HERMES_HOME"] = str(home)
+    os.environ["LANGSTAGE_HERMES_HOME"] = str(home)
     agent = None
     try:
         from langstage_hermes import HermesConfig, create_hermes_agent

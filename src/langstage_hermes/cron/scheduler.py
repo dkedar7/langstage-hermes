@@ -5,9 +5,10 @@ langstage_hermes.cron``) sweeps ``<HERMES_HOME>/cron/jobs.json`` every
 ``cfg.cron_tick_seconds`` seconds, runs each due job, and writes output.
 
 A file lock at ``<HERMES_HOME>/cron/.tick.lock`` prevents two daemon
-processes from double-firing. We try ``filelock`` first (robust, cross-
-platform), then fall back to an ``O_CREAT | O_EXCL`` open so the daemon
-still starts when ``filelock`` isn't installed.
+processes from double-firing. ``filelock`` (a declared dependency) holds an OS
+lock the kernel releases when the process dies, so a crash never strands it.
+If ``filelock`` is somehow missing we fall back to an ``O_CREAT | O_EXCL``
+lockfile that records the owner's PID and is reclaimed when that PID is dead.
 
 Job execution paths:
 
@@ -94,21 +95,84 @@ def _log_cron_failure(msg: str, *args: Any, exc: BaseException) -> None:
 # ── tick lock ──────────────────────────────────────────────────────
 
 
+def _pid_alive(pid: int) -> bool:
+    """True if process ``pid`` is (probably) still running.
+
+    Errs on the side of "alive": only a definite "no such process" answer lets the
+    caller reclaim a lockfile, so a live daemon is never stolen from.
+    """
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        # os.kill(pid, 0) on Windows TERMINATES the process, so ask the kernel instead.
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        process_query_limited_information = 0x1000
+        still_active = 259
+        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+        if not handle:
+            # ERROR_ACCESS_DENIED (5): the process exists but belongs to someone else.
+            return kernel32.GetLastError() == 5
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == still_active
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by another user
+    except OSError:
+        return True
+    return True
+
+
+def _lockfile_is_stale(lock_path: Path) -> bool:
+    """True when ``lock_path`` was left behind by a daemon that is no longer running.
+
+    The fallback lock records its owner's PID. An empty or unparseable file (a crash
+    between create and write) is stale too, as is a dead PID.
+    """
+    try:
+        raw = lock_path.read_text(encoding="utf-8", errors="replace").strip()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    try:
+        pid = int(raw)
+    except ValueError:
+        return True
+    if pid == os.getpid():
+        return False
+    return not _pid_alive(pid)
+
+
 @contextmanager
 def _tick_lock() -> Iterator[None]:
     """Acquire the cross-process tick lock; yield + release on exit.
 
-    Try ``filelock`` first; on ImportError fall back to an atomic
-    ``O_CREAT | O_EXCL`` lockfile (POSIX-style; works on Windows too).
-    Best-effort: if a stale lockfile exists from a crashed daemon, the
-    next start will fail loudly so the operator can remove it.
+    ``filelock`` first: its OS-level lock is released by the kernel when the
+    process dies, so a SIGTERM / OOM kill / reboot can't wedge the next start.
+    On ImportError fall back to an atomic ``O_CREAT | O_EXCL`` lockfile holding
+    the owner's PID. A lockfile whose PID is dead (or that is empty) is stale:
+    it is reclaimed once instead of blocking the daemon forever (gh #136). Only a
+    lock held by a live process refuses the start.
     """
     lock_path = cron_jobs.tick_lock_path()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         from filelock import FileLock, Timeout
+    except ImportError:
+        FileLock = None  # type: ignore[assignment,misc]
 
+    if FileLock is not None:
         lock = FileLock(str(lock_path) + ".flock", timeout=0)
         try:
             lock.acquire()
@@ -122,14 +186,31 @@ def _tick_lock() -> Iterator[None]:
             except Exception:  # pragma: no cover
                 pass
         return
-    except ImportError:
-        pass
 
-    # Fallback: O_CREAT | O_EXCL lockfile.
-    try:
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError as e:  # pragma: no cover - integration path
-        raise RuntimeError(f"Stale or active lockfile at {lock_path}. Remove it if no daemon is running.") from e
+    with _pid_lockfile(lock_path):
+        yield
+
+
+@contextmanager
+def _pid_lockfile(lock_path: Path) -> Iterator[None]:
+    """The ``O_CREAT | O_EXCL`` fallback lock, with stale-PID recovery (gh #136)."""
+    fd: int | None = None
+    for attempt in range(2):
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except FileExistsError as e:
+            if attempt == 0 and _lockfile_is_stale(lock_path):
+                logger.warning("Reclaiming stale cron lockfile %s (owner process is gone)", lock_path)
+                try:
+                    os.unlink(lock_path)
+                except FileNotFoundError:
+                    pass
+                except OSError as unlink_err:
+                    raise RuntimeError(f"Stale lockfile at {lock_path} could not be removed: {unlink_err}") from e
+                continue
+            raise RuntimeError(f"Another cron daemon (PID in {lock_path}) is running.") from e
+    assert fd is not None
     try:
         os.write(fd, str(os.getpid()).encode())
         os.close(fd)

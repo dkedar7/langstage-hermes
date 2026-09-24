@@ -9,7 +9,7 @@ import pytest
 
 @pytest.fixture
 def tmp_hermes_home(monkeypatch, tmp_path: Path) -> Path:
-    """Isolated HERMES_HOME / DEEPAGENT_HERMES_HOME pointing at a tmp dir.
+    """Isolated HERMES_HOME / LANGSTAGE_HERMES_HOME pointing at a tmp dir.
 
     Use this in any test that touches the on-disk skill/memory/cron/state layout.
     """
@@ -19,7 +19,8 @@ def tmp_hermes_home(monkeypatch, tmp_path: Path) -> Path:
     (home / "memories").mkdir()
     (home / "cron").mkdir()
     (home / "logs").mkdir()
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(home))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(home))
+    monkeypatch.delenv("DEEPAGENT_HERMES_HOME", raising=False)
     monkeypatch.setenv("HERMES_HOME", str(home))
     return home
 

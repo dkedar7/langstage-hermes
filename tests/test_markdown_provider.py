@@ -179,7 +179,7 @@ def test_provider_teardown_is_noop(notes_dir: Path):
 
 
 def test_provider_uses_hermes_home_when_notes_dir_unset(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("DEEPAGENT_HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(tmp_path))
     notes = tmp_path / "memories" / "notes"
     notes.mkdir(parents=True)
     _write(notes, "x.md", "## X\nglasswing data\n")
