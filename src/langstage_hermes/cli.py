@@ -558,21 +558,39 @@ def _resolve_agent(
     help="Print the resolved HermesConfig (defaults < TOML < env < CLI) and exit.",
 )
 @click.option(
+    "--json",
+    "show_config_json",
+    is_flag=True,
+    help="With --show-config: print the resolved config as one JSON object.",
+)
+@click.option(
     "--version",
     is_flag=True,
     help="Print the langstage-hermes version and exit.",
 )
 @click.pass_context
-def cli(ctx: click.Context, show_config: bool, version: bool) -> None:
+def cli(ctx: click.Context, show_config: bool, show_config_json: bool, version: bool) -> None:
     """langstage-hermes — Hermes-style reflection / skill-creation agent."""
     if version:
         from langstage_hermes import __version__
 
         click.echo(f"langstage-hermes {__version__}")
         ctx.exit(0)
+    if show_config_json and not show_config:
+        # Subcommands take their own `--json` after the subcommand name; a bare
+        # top-level `--json` only means something next to --show-config.
+        raise click.UsageError("--json here requires --show-config (e.g. `langstage-hermes --show-config --json`).")
     if show_config:
         cfg = _load_config()
-        click.echo(cfg.describe())
+        if show_config_json:
+            # The structured twin of describe(): core's config_dict() carries the
+            # same fields and source labels as the human table, so CI can assert on
+            # the resolved value AND where it came from (gh #117).
+            import json as _json
+
+            click.echo(_json.dumps(cfg.config_dict(), default=str))
+        else:
+            click.echo(cfg.describe())
         ctx.exit(0)
     if ctx.invoked_subcommand is None:
         _print_banner()
@@ -1509,7 +1527,12 @@ def memory_show(only_user: bool, only_session: bool, as_json: bool) -> None:
             over = chars > limit
             budget = click.style(f"{chars:,} / {limit:,} chars", fg="yellow" if over else "bright_black")
             if over:
-                budget += click.style("  (over budget — will be truncated)", fg="yellow")
+                # The runtime never truncates: the whole layer is injected, and the
+                # memory tool rejects further adds until it's trimmed (gh #130).
+                budget += click.style(
+                    "  (over budget — injected in full; the memory tool rejects new entries until it is trimmed)",
+                    fg="yellow",
+                )
             click.echo(click.style(f"{fname}  ", fg="cyan", bold=True) + budget)
             click.echo(click.style(f"  {path}", fg="bright_black"))
             click.echo(text.rstrip("\n"))
@@ -1853,9 +1876,9 @@ def skills_install(path: Path) -> None:
     # (gh #-dogfood)
     raw_name = fm.get("name")
     install_name = raw_name if isinstance(raw_name, str) and raw_name else src_dir.name
-    errs = validate_frontmatter(fm, parent_dir_name=install_name)
+    errs = validate_frontmatter(fm, parent_dir_name=install_name, body=post.content)
     if errs:
-        click.echo(click.style("SKILL.md frontmatter is invalid:", fg="red"))
+        click.echo(click.style("SKILL.md is invalid:", fg="red"))
         for e in errs:
             click.echo(f"  - {e}")
         sys.exit(2)
@@ -1913,12 +1936,14 @@ def _skills_remove(name: str) -> None:
         click.echo(click.style(str(exc), fg="yellow"))
         sys.exit(1)
     if removed:
-        click.echo(
-            click.style(
-                f"Removed {name} — archived under skills/_archived/; restore with `audit rollback`.",
-                fg="green",
-            )
-        )
+        # Print the exact, runnable restore command: `audit rollback` needs the
+        # delete's mutation id, which the bare hint never gave (gh #157).
+        mutation_id = lib.last_mutation_id
+        if mutation_id is not None:
+            restore = f"restore with `langstage-hermes audit rollback {name} {mutation_id}`"
+        else:
+            restore = "the audit log was unavailable, so restore it by moving it back from skills/_archived/"
+        click.echo(click.style(f"Removed {name} — archived under skills/_archived/; {restore}.", fg="green"))
     else:
         click.echo(click.style(f"No installed skill named {name!r}.", fg="yellow"))
         sys.exit(1)
@@ -2035,7 +2060,7 @@ def skills_validate(path: Path, as_json: bool) -> None:
         if as_json:
             click.echo(_json.dumps({"path": str(skill_md), "name": name, "valid": False, "errors": errors}))
         else:
-            click.echo(click.style("SKILL.md frontmatter is invalid:", fg="red"))
+            click.echo(click.style("SKILL.md is invalid:", fg="red"))
             for e in errors:
                 click.echo(f"  - {e}")
         sys.exit(1)
@@ -2060,7 +2085,7 @@ def skills_validate(path: Path, as_json: bool) -> None:
     # `name` (falling back to the source dir), and validates the name against that.
     raw_name = fm.get("name")
     install_name = raw_name if isinstance(raw_name, str) and raw_name else skill_md.parent.name
-    errs = validate_frontmatter(fm, parent_dir_name=install_name)
+    errs = validate_frontmatter(fm, parent_dir_name=install_name, body=post.content)
     display_name = raw_name if isinstance(raw_name, str) and raw_name else None
     if errs:
         _fail(errs, name=display_name)
@@ -2315,7 +2340,12 @@ def cron_list(as_json: bool) -> None:
 
 @cron.command("create")
 @click.option("--prompt", "prompt", required=True, help="Prompt to run on schedule.")
-@click.option("--schedule", "schedule_expr", required=True, help="Schedule expression.")
+@click.option(
+    "--schedule",
+    "schedule_expr",
+    required=True,
+    help="Schedule: '30m' / 'every 2h', a cron expression ('0 9 * * MON-FRI', '@daily') or 'once at 2026-06-15T09:00'.",
+)
 @click.option("--name", default=None, help="Friendly name (defaults to first 50 chars of prompt).")
 @click.option("--model", default=None, help="Per-job model override.")
 @click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
@@ -2697,6 +2727,30 @@ def plugins_disable(name: str) -> None:
 # ── verify ─────────────────────────────────────────────────────────
 
 
+def _fts5_store_probe(home: Path) -> tuple[bool, str]:
+    """Open ``<home>/state.db`` through the real store init and check FTS5 is on.
+
+    Keyless and offline: the same ``SqliteFtsStore`` init that ``search``,
+    ``memory`` and ``demo`` use, so ``verify`` catches "FTS5 init failing" on a
+    fresh install BEFORE any key is configured, as its docstring and the README
+    promise (gh #128). Returns ``(ok, detail)``.
+    """
+    from langstage_hermes.store.sqlite_fts import SqliteFtsStore
+
+    db = home / "state.db"
+    try:
+        store = SqliteFtsStore(db_path=str(db))
+    except Exception as exc:
+        return False, f"FTS5 store failed to open ({db}): {type(exc).__name__}: {exc}"
+    try:
+        fts_ok = bool(getattr(store, "_fts_enabled", False))
+    finally:
+        store.close()
+    if not fts_ok:
+        return False, f"SQLite FTS5 unavailable in this Python build; session search is disabled ({db})"
+    return True, f"FTS5 store initializes ({db})"
+
+
 def _verify_json(*, model_id: str | None, keep_workspace: bool) -> NoReturn:
     """``verify --json``: the human path's readiness checks as one JSON object.
 
@@ -2761,6 +2815,10 @@ def _verify_json(*, model_id: str | None, keep_workspace: bool) -> NoReturn:
         _add("hermes_home", True, f"writable ({home})", writable=True)
     except OSError as e:
         _add("hermes_home", False, f"not writable ({home}): {e}", writable=False)
+
+    # ── (2b) FTS5 store opens — keyless, no model call (gh #128) ─────────
+    fts_ok, fts_detail = _fts5_store_probe(home)
+    _add("fts5_init", fts_ok, fts_detail)
 
     # ── (3) model + aux key preflight (pure — no exit) ───────────────────
     cfg = HermesConfig.resolve()
@@ -2967,6 +3025,13 @@ def verify(model_id: str | None, keep_workspace: bool, as_json: bool) -> None:
     except OSError as e:
         click.echo(click.style(f"  ✗ HERMES_HOME not writable ({home}): {e}", fg="red"))
         sys.exit(2)
+
+    # ── (2b) FTS5 store opens — keyless, before any key check (gh #128) ──
+    fts_ok, fts_detail = _fts5_store_probe(home)
+    if not fts_ok:
+        click.echo(click.style(f"  ✗ {fts_detail}", fg="red"))
+        sys.exit(2)
+    click.echo(click.style(f"  ✓ {fts_detail}", fg="green"))
 
     # ── (3) model API key sanity ─────────────────────────────────────────
     cfg = HermesConfig.resolve()

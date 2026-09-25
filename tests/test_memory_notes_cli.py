@@ -79,7 +79,8 @@ def test_notes_json_shape(home_with_deploy_note: Path):
     # File is cleanly parsed out of the `_From <file>:_` prefix; section + full
     # snippet are both present.
     assert hit["file"] == "deploy.md"
-    assert hit["section"].startswith("## Rollback")
+    # The section carries its ancestor heading for context (gh #121).
+    assert hit["section"].startswith("# Deploy runbook\n## Rollback")
     assert hit["snippet"].startswith("_From deploy.md:_")
     assert "kubectl rollout undo" in hit["snippet"]
 

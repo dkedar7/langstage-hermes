@@ -28,6 +28,7 @@ import frontmatter
 from langstage_hermes.skills.validator import (
     MAX_DESCRIPTION_LENGTH,
     MAX_NAME_LENGTH,
+    signal_errors,
 )
 from langstage_hermes.skills.validator import (
     validate as validate_frontmatter,
@@ -198,7 +199,11 @@ def _parse_failure(exc: BaseException) -> str:
 
 @dataclass(frozen=True)
 class SkillLoadError:
-    """A SKILL.md that could not be parsed, and is therefore absent from ``list()``.
+    """A SKILL.md that was skipped, and is therefore absent from ``list()``.
+
+    Either its YAML frontmatter would not parse (gh #81), or it parsed but has no
+    ``description`` or no body, so the agent could neither judge nor load it
+    (gh #132). The same file fails ``skills validate`` / ``skills audit``.
 
     Collected on :attr:`SkillLibrary.load_errors` by every scan so callers can
     surface the omission on their own channel (``click.echo(err=True)`` for the
@@ -207,9 +212,10 @@ class SkillLoadError:
     Attributes:
         path: Absolute path to the offending SKILL.md.
         parent_name: Name of the directory containing it.
-        message: ``"parse failure: <exception>"`` — identical to the string
-            ``validate_all()`` records, so ``skills audit`` and the warning
-            agree verbatim.
+        message: ``"parse failure: <exception>"`` or the validator's own
+            ``"description: ..."`` / ``"body: ..."`` error — identical to the
+            string ``validate_all()`` records, so ``skills audit`` and the
+            warning agree verbatim.
     """
 
     path: Path
@@ -233,8 +239,9 @@ def format_load_error(err: SkillLoadError) -> str:
     glyph raises ``UnicodeEncodeError``.
     """
     detail = " ".join(err.message.split())
+    kind = "unparseable" if err.message.startswith("parse failure:") else "invalid"
     return (
-        f"skipping unparseable skill '{err.parent_name}' at {err.path}: {detail} "
+        f"skipping {kind} skill '{err.parent_name}' at {err.path}: {detail} "
         f"-- it is absent from `skills list` and from the agent; "
         f"run `langstage-hermes skills audit` for the full report ({err.key})"
     )
@@ -341,6 +348,9 @@ class SkillLibrary:
         # ``list()``; read by the CLI and the agent factory to warn about the
         # omission (gh #81). Empty until the first scan.
         self.load_errors: list[SkillLoadError] = []
+        # Audit id of the most recent mutation (``None`` if it wasn't logged), so
+        # `skills remove` can print the exact `audit rollback <name> <id>` (gh #157).
+        self.last_mutation_id: int | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -424,15 +434,19 @@ class SkillLibrary:
         skill_path: Path | None,
         before_content: bytes | None,
         after_content: bytes | None,
-    ) -> None:
+    ) -> int | None:
         """Best-effort write to the audit log. Failure is logged but never
         raised — the actual file mutation already succeeded by the time
         this is called, and breaking the caller because we can't write to
-        the log would be worse than a missing audit row."""
+        the log would be worse than a missing audit row.
+
+        Returns the new mutation id (also kept on :attr:`last_mutation_id`), or
+        ``None`` when there is no audit log or the write failed."""
+        self.last_mutation_id = None
         if self.audit_log is None:
-            return
+            return None
         try:
-            self.audit_log.record(
+            self.last_mutation_id = self.audit_log.record(
                 skill_name=skill_name,
                 action=action,
                 before_content=before_content,
@@ -444,6 +458,7 @@ class SkillLibrary:
             )
         except Exception:
             logger.warning("Failed to record %s mutation for skill %s", action, skill_name, exc_info=True)
+        return self.last_mutation_id
 
     def write(
         self,
@@ -475,7 +490,7 @@ class SkillLibrary:
         if frontmatter_data.get("name") != name:
             raise ValueError(f"frontmatter name {frontmatter_data.get('name')!r} does not match supplied name {name!r}")
 
-        errors = validate_frontmatter(frontmatter_data, parent_dir_name=name)
+        errors = validate_frontmatter(frontmatter_data, parent_dir_name=name, body=body)
         if errors:
             raise ValueError(f"SKILL.md frontmatter for {name!r} is invalid:\n- " + "\n- ".join(errors))
 
@@ -638,7 +653,7 @@ class SkillLibrary:
                 except Exception as exc:
                     results[_error_key(parent_name)] = [_parse_failure(exc)]
                     continue
-                errors = validate_frontmatter(meta, parent_dir_name=parent_name)
+                errors = validate_frontmatter(meta, parent_dir_name=parent_name, body=post.content)
                 key = meta.get("name") or _error_key(parent_name)
                 results[key] = errors
         return results
@@ -692,8 +707,20 @@ class SkillLibrary:
                 )
                 logger.debug("skipping unparseable skill at %s: %s", skill_md, exc)
                 continue
-            if skill is not None:
-                yield skill
+            if skill is None:
+                continue
+            # A skill with no description (nothing for the boot index to match on)
+            # or no body (nothing for skill_view to load) is rejected by `skills
+            # validate` / `audit` / `install`; the loader agrees and skips it with a
+            # note instead of advertising a signal-less entry (gh #129, #132).
+            problems = signal_errors(skill.metadata, skill.body)
+            if problems:
+                self.load_errors.append(
+                    SkillLoadError(path=skill_md, parent_name=skill_md.parent.name, message="; ".join(problems))
+                )
+                logger.debug("skipping invalid skill at %s: %s", skill_md, problems)
+                continue
+            yield skill
 
     @staticmethod
     def _iter_skill_md_files(directory: Path) -> Iterator[Path]:

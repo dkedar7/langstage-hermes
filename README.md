@@ -102,7 +102,7 @@ so the reflection subagent uses the same cheap model.
 langstage-hermes verify
 ```
 
-does one live round-trip against the configured model and confirms the prompts, bundled skills, and FTS5 store all wire up correctly. Run this first on any fresh install — if it passes, `chat` will work.
+does one live round-trip against the configured model and confirms the prompts, bundled skills, and FTS5 store all wire up correctly. Run this first on any fresh install — if it passes, `chat` will work. The offline checks (bundled prompts and skills, a writable `HERMES_HOME`, and that the FTS5 store opens) run before the key check, so even a keyless run tells you the install itself is sound.
 
 Both `verify` and `doctor` accept `--json` for scripting/CI — a top-level `ok` plus a per-check list, with `.ok` equal to `exit code == 0` (so `langstage-hermes doctor --json | jq -e .ok` is a one-liner readiness gate). `verify --json` reports the live round-trip as `skipped` when no key is set, so a keyless CI check never triggers a paid call.
 
@@ -143,7 +143,7 @@ langstage-hermes search --session sess-1a2b3c --around 8 --window 5
 langstage-hermes search --browse --limit 20
 ```
 
-`--json` emits structured output for scripting/CI. The same flag is honored by `skills list`, `skills audit`, `audit log`, `memory show` / `memory notes`, the readiness checks `doctor` / `verify`, and the `cron` subcommands (`list`, `create`, `run-due`, `delete`, `pause`, `resume`) — so the skill inventory, mutation log, setup diagnostics, and scheduler are all scriptable too (each prints one JSON object with stable keys). FTS5 syntax works: multi-word queries default to AND, and `OR`, quoted `"phrases"`, and prefix `wildcards*` are all honored.
+`--json` emits structured output for scripting/CI. The same flag is honored by `skills list`, `skills audit`, `audit log`, `memory show` / `memory notes`, the readiness checks `doctor` / `verify`, `--show-config`, and the `cron` subcommands (`list`, `create`, `run-due`, `delete`, `pause`, `resume`) — so the skill inventory, mutation log, setup diagnostics, and scheduler are all scriptable too (each prints one JSON object with stable keys). FTS5 syntax works: multi-word queries default to AND, and `OR`, quoted `"phrases"`, and prefix `wildcards*` are all honored.
 
 Want a store to try it against, keyless? Point `HERMES_HOME` at a directory and run `langstage-hermes demo` — with `HERMES_HOME` set the demo copies its session (and only its session) into that same `<HERMES_HOME>/state.db`, so `search` reads it straight back:
 
@@ -177,7 +177,7 @@ langstage-hermes memory show --session       # just MEMORY.md
 langstage-hermes memory show --json          # {"user": {...}, "memory": {...}} for scripting / CI
 ```
 
-Each layer prints its char count against the configured truncation budget (`memory_char_limit` = 2200, `memory_user_char_limit` = 1375) so you can see when a snapshot is near or over budget. A missing/empty layer prints a clear one-line message, never a traceback (`memory dump` is an alias for `memory show`).
+Each layer prints its char count against the configured char budget (`memory_char_limit` = 2200, `memory_user_char_limit` = 1375) so you can see when a snapshot is near or over budget. Nothing is truncated: an over-budget layer (e.g. a hand-edited `USER.md`) is still injected in full every turn, and the agent's `memory` tool rejects new entries for it until it is trimmed back under budget. A missing/empty layer prints a clear one-line message, never a traceback (`memory dump` is an alias for `memory show`).
 
 ## Load into an existing host
 
@@ -194,7 +194,7 @@ langstage-jupyter
 
 ## Configuration
 
-`langstage-hermes.toml` (project) or `$HERMES_HOME/config.toml` (global — default `~/.langstage-hermes/config.toml`, and it moves with a custom `HERMES_HOME`). Layered resolution: `defaults < TOML < LANGSTAGE_HERMES_* env < CLI overrides`. See [SPEC §2](./SPEC.md#2-configuration) for every field; `langstage-hermes --show-config` prints the resolved value + source of each.
+`langstage-hermes.toml` (project) or `$HERMES_HOME/config.toml` (global — default `~/.langstage-hermes/config.toml`, and it moves with a custom `HERMES_HOME`). Layered resolution: `defaults < TOML < LANGSTAGE_HERMES_* env < CLI overrides`. See [SPEC §2](./SPEC.md#2-configuration) for every field; `langstage-hermes --show-config` prints the resolved value + source of each, and `langstage-hermes --show-config --json` prints the same thing as one JSON object (`{"config": {<field>: {value, source, env, legacy_env, toml}}, "toml": {...}, "issues": [...]}`) for CI. The legacy project filename `deepagent-hermes.toml` is still read, with a one-time deprecation note on stderr (silence it with `LANGSTAGE_SUPPRESS_LEGACY_NOTICE=1`).
 
 ## Architecture
 

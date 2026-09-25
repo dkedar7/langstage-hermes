@@ -2,6 +2,61 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.34] - 2026-09-25
+
+### Fixed
+- **`verify` checks the FTS5 store on the keyless path (gh #128).** The store check used to run only after a paid
+  model round-trip, so a fresh install's first `verify`, with no key yet, never opened `state.db`, even though the
+  README and the docstring say it catches "FTS5 init failing". Both the human and `--json` paths now open
+  `<HERMES_HOME>/state.db` through the real store init before the key check, and fail if it won't open or SQLite
+  has no FTS5. It is a new `fts5_init` check in `--json`. The live `fts5_store` check (session and message rows
+  recorded) is unchanged.
+- **`skills validate` / `install` / `audit` reject a SKILL.md with an empty body (gh #129).** The validator only
+  looked at the frontmatter, so a frontmatter-only skill passed the advertised CI gate, installed, and was listed
+  to the model with nothing for `skill_view` to load. The bundled authoring skill and `skill_manage(create)` both
+  already required a body. `validate()` takes an optional `body=` and every write and validation path passes it,
+  so `SkillLibrary.write` refuses an empty body too. The CLI error header is now `SKILL.md is invalid:`.
+- **The skill loader skips a skill that the validator rejects, with a note (gh #132).** A SKILL.md with no
+  `description` (or, per #129, no body) failed `validate`, `audit` and `install`, but `SkillLibrary.list()` loaded
+  it silently, and it showed up in the agent's boot index as a bare name with nothing to match on. The loader
+  now skips it and records it on `load_errors` with the validator's own message. `skills list` prints it as a
+  `skipping invalid skill ...` warning and lists it under `load_errors` in `--json`, and the agent logs it once.
+  The other skills still load and the agent still starts.
+- **`memory show` no longer says an over-budget layer "will be truncated" (gh #130).** The runtime never truncates
+  memory: the whole layer is injected, and the `memory` tool rejects new entries while it's over budget. The label
+  now says `(over budget — injected in full; the memory tool rejects new entries until it is trimmed)`, and the
+  README no longer calls the limit a "truncation budget".
+- **Cron accepts standard cron syntax (gh #147).** A numeric-only pre-filter rejected `0 9 * * MON-FRI`,
+  `0 0 1 JAN *` and `@daily` / `@hourly` / `@weekly` / `@monthly` / `@yearly` / `@annually` / `@midnight`, even
+  though croniter, the engine that runs them, accepts all of them. The pre-filter now only tells a cron expression
+  apart from the other schedule forms, and croniter decides whether it's valid (`0 9 * * FUNDAY` is still an
+  error).
+- **The MarkdownProvider keeps ancestor headings with nested sections (gh #121).** Notes are split at every
+  H1 / H2 / H3, as the tests pin, but a recalled `###` section used to arrive with no parent heading, so two
+  `### Rolling back a release` sections under different services couldn't be told apart. Each section now starts
+  with its ancestor headings (`# Payments service` / `## Operations` / `### Rolling back a release` / body). The
+  module docstring, which claimed an H2-only split, now describes what the code does.
+- **The legacy `deepagent-hermes.toml` filename prints a deprecation note (gh #125).** It was honored silently,
+  while the legacy `DEEPAGENT_HERMES_*` env vars already warned. Reading it now prints one stderr `note:` asking
+  you to rename it to `langstage-hermes.toml`, plus a `DeprecationWarning`, using the same once-per-file dedupe
+  and `LANGSTAGE_SUPPRESS_LEGACY_NOTICE=1` opt-out as core's legacy-TOML notice. The file is still read. The
+  repo's example config is renamed to `langstage-hermes.toml` to match.
+- **`skills remove` prints the exact restore command (gh #157).** The hint said "restore with `audit rollback`",
+  but that command needs the mutation id and fails without it. It now prints the
+  full command, `langstage-hermes audit rollback <name> <id>`, which works if you run it as shown.
+  `SkillLibrary` exposes the id as `last_mutation_id`.
+- **The `langstage_hermes.extractors` docstring example runs (gh #156).** It imported the retired `StreamParser`
+  (an `ImportError`), said "three" extractors and "until upstreamed". It now shows the real wiring,
+  `iter_event_frames(..., extractors=[cls() for cls in ALL_EXTRACTORS])`, and a test executes it.
+
+### Added
+- **`--show-config --json` (gh #117).** Prints the resolved config as one JSON object: core's `config_dict()`,
+  with the same fields and source labels as the human table
+  (`{"config": {<field>: {value, source, env, legacy_env, toml}}, "toml": {...}, "issues": [...]}`), so CI
+  can assert on a value and where it came from without parsing the table. A top-level `--json` without
+  `--show-config` is a usage error.
+- `cron create --schedule` help lists the accepted forms.
+
 ## [0.4.33] - 2026-09-24
 
 ### Fixed
