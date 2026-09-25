@@ -20,10 +20,13 @@ Why markdown + a Python function instead of a service:
 Notes file format
 -----------------
 
-Each ``.md`` file is split into sections at every ``\\n## `` boundary
-(or ``\\n# `` if no H2s). The leading heading is kept with its section
-for context. ``recall(query)`` returns sections whose lowered text
-contains any query token of length ≥ 3.
+Each ``.md`` file is split into sections at every H1 / H2 / H3 heading
+(``#``, ``##``, ``###``); text before the first heading is its own section.
+Each section starts with its **ancestor headings**, then its own heading and
+body, so a nested ``### Rolling back`` under ``# Payments`` / ``## Operations``
+comes back as ``# Payments`` / ``## Operations`` / ``### Rolling back`` / body
+and the recall result carries its own context (gh #121). ``recall(query)``
+returns sections whose lowered text contains any query token of length ≥ 3.
 
 This is deliberately dumb — keyword overlap is robust, debuggable, and
 fast. Anyone wanting BM25 / vector / dialectic recall can write their
@@ -60,8 +63,12 @@ _SECTION_HEAD = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
 
 
 def _split_into_sections(text: str) -> list[str]:
-    """Split a markdown file at H1 / H2 / H3 boundaries. Heading lines stay
-    with their section so the recall result carries its own context."""
+    """Split a markdown file at H1 / H2 / H3 boundaries.
+
+    Each section keeps its own heading and is prefixed with the headings of its
+    ancestors (the enclosing ``#`` / ``##``), so a recalled ``###`` chunk says
+    which project/service it belongs to instead of arriving context-less (gh #121).
+    """
     if not text.strip():
         return []
     matches = list(_SECTION_HEAD.finditer(text))
@@ -73,12 +80,19 @@ def _split_into_sections(text: str) -> list[str]:
     preamble = text[: matches[0].start()].strip()
     if preamble:
         sections.append(preamble)
+    # Heading stack: (level, heading line) for the current ancestor path.
+    stack: list[tuple[int, str]] = []
     for i, m in enumerate(matches):
+        level = len(m.group(1))
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+        ancestors = [line for _lvl, line in stack]
+        stack.append((level, m.group(0).strip()))
         start = m.start()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         chunk = text[start:end].strip()
         if chunk:
-            sections.append(chunk)
+            sections.append("\n".join([*ancestors, chunk]))
     return sections
 
 

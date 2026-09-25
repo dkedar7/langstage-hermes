@@ -192,3 +192,45 @@ def test_provider_uses_hermes_home_when_notes_dir_unset(tmp_path: Path, monkeypa
 def test_provider_is_registered_as_markdown():
     cls = get_provider("markdown")
     assert cls is MarkdownProvider
+
+
+# --- gh #121: nested sections carry their ancestor headings ---------------------
+
+
+def test_split_nested_section_carries_ancestor_headings():
+    body = (
+        "# Payments service\n## Operations\n### Rolling back a release\nRun the playbook.\n\n"
+        "# Billing service\n## Operations\n### Rolling back a release\nRun the playbook.\n"
+    )
+    sections = _split_into_sections(body)
+    rollbacks = [s for s in sections if "Run the playbook." in s]
+    assert rollbacks == [
+        "# Payments service\n## Operations\n### Rolling back a release\nRun the playbook.",
+        "# Billing service\n## Operations\n### Rolling back a release\nRun the playbook.",
+    ]
+
+
+def test_split_sibling_heading_resets_breadcrumb():
+    body = "# Top\nalpha\n## A\nbeta\n## B\ngamma\n### B1\ndelta\n# Other\nepsilon"
+    sections = _split_into_sections(body)
+    assert sections == [
+        "# Top\nalpha",
+        "# Top\n## A\nbeta",
+        "# Top\n## B\ngamma",
+        "# Top\n## B\n### B1\ndelta",
+        "# Other\nepsilon",
+    ]
+
+
+def test_recall_disambiguates_nested_sections(tmp_path):
+    notes_dir = tmp_path / "notes"
+    notes_dir.mkdir()
+    (notes_dir / "services.md").write_text(
+        "# Payments service\n## Operations\n### Rolling back a release\nRun the playbook.\n\n"
+        "# Billing service\n## Operations\n### Rolling back a release\nRun the playbook.\n",
+        encoding="utf-8",
+    )
+    results = search_notes("rolling back release", notes_dir)
+    assert len(results) == 2
+    assert any("# Payments service" in r for r in results)
+    assert any("# Billing service" in r for r in results)

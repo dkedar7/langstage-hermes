@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-__all__ = ["ValidationError", "is_valid", "validate"]
+__all__ = ["ValidationError", "is_valid", "signal_errors", "validate"]
 
 
 # agentskills.io constants
@@ -172,10 +172,35 @@ def _validate_version(value: Any, *, errors: list[str]) -> None:
         _err(errors, f"version: must be a string, got {type(value).__name__}")
 
 
+def _validate_body(body: str, *, errors: list[str]) -> None:
+    """A SKILL.md must carry instructions after its frontmatter (gh #129).
+
+    The bundled authoring skill lists a non-empty body as a hard requirement and
+    ``skill_manage(create)`` refuses one, so every validator agrees with them.
+    """
+    if not isinstance(body, str) or not body.strip():
+        _err(errors, "body: must be non-empty (write the skill's instructions after the closing ---)")
+
+
+def signal_errors(frontmatter: dict[str, Any], body: str) -> list[str]:
+    """The subset of ``validate()`` that makes a skill useless to the agent.
+
+    A skill with no ``description`` gives the boot index nothing to match on, and
+    one with no body gives ``skill_view`` nothing to load. The runtime loader skips
+    such a skill (with a note) using exactly these messages, so ``skills list``,
+    the agent and ``skills validate`` / ``audit`` agree on the same file (gh #132).
+    """
+    errors: list[str] = []
+    _validate_description(frontmatter.get("description"), errors=errors)
+    _validate_body(body, errors=errors)
+    return errors
+
+
 def validate(
     frontmatter: dict[str, Any] | None,
     *,
     parent_dir_name: str | None = None,
+    body: str | None = None,
 ) -> list[str]:
     """Validate a parsed SKILL.md frontmatter dict.
 
@@ -184,6 +209,8 @@ def validate(
             ``frontmatter.loads(content).metadata``).
         parent_dir_name: If provided, ``name`` must equal this. agentskills.io
             requires ``name`` to match the parent directory name.
+        body: The SKILL.md body (everything after the frontmatter). When given,
+            it must be non-empty (gh #129). ``None`` checks the frontmatter only.
 
     Returns:
         A list of error strings. Empty list means the frontmatter is valid.
@@ -218,6 +245,9 @@ def validate(
     if "prerequisites" in frontmatter:
         _validate_prerequisites(frontmatter["prerequisites"], errors=errors)
 
+    if body is not None:
+        _validate_body(body, errors=errors)
+
     return errors
 
 
@@ -225,6 +255,7 @@ def is_valid(
     frontmatter: dict[str, Any] | None,
     *,
     parent_dir_name: str | None = None,
+    body: str | None = None,
 ) -> bool:
     """True iff ``validate()`` returns no errors."""
-    return not validate(frontmatter, parent_dir_name=parent_dir_name)
+    return not validate(frontmatter, parent_dir_name=parent_dir_name, body=body)

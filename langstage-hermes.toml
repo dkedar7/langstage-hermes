@@ -1,6 +1,8 @@
-# deepagent-hermes example configuration.
-# Place this at the project root or copy to ~/.deepagent-hermes/config.toml for global.
-# Resolution: defaults < this TOML < DEEPAGENT_HERMES_* env vars < CLI overrides.
+# langstage-hermes example configuration.
+# Place this at the project root, or copy it to $HERMES_HOME/config.toml
+# (default ~/.langstage-hermes/config.toml) for a global config.
+# Resolution: defaults < this TOML < LANGSTAGE_HERMES_* env vars < CLI overrides.
+# (The legacy name deepagent-hermes.toml is still read, with a deprecation note.)
 
 [model]
 default = "anthropic:claude-sonnet-4-6"

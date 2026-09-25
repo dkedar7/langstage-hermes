@@ -121,6 +121,13 @@ def parse_duration(expr: str) -> int:
     return value * multipliers[unit]
 
 
+# The @-shortcuts croniter understands (``@reboot`` has no next run, so it's not one).
+_CRON_SHORTCUTS = frozenset({"@yearly", "@annually", "@monthly", "@weekly", "@daily", "@midnight", "@hourly"})
+# One cron field: digits, names (MON, JAN), ranges, lists, steps and croniter's
+# ``?`` / ``L`` / ``W`` / ``#`` extensions.
+_CRON_FIELD_RE = re.compile(r"^[0-9A-Za-z*?,/#\-]+$")
+
+
 def parse_schedule(expr: str) -> dict[str, Any]:
     """Parse a schedule expression into a structured ``{"kind": ..., ...}`` dict.
 
@@ -158,9 +165,18 @@ def parse_schedule(expr: str) -> dict[str, Any]:
             "display": f"once at {dt.strftime('%Y-%m-%d %H:%M')}",
         }
 
-    # 5/6-field cron expression
+    # 5/6-field cron expression, or an @-shortcut (@daily, @hourly, ...). Fields may
+    # use names (MON-FRI, JAN) and croniter's extensions (?, L, W, #): croniter is
+    # the engine, so it decides validity. The pre-filter only tells a cron
+    # expression apart from the other schedule forms (gh #147).
     parts = original.split()
-    if len(parts) in (5, 6) and all(re.match(r"^[\d\*\-,/]+$", p) for p in parts[:5]):
+    is_shortcut = len(parts) == 1 and text in _CRON_SHORTCUTS
+    looks_cron = (
+        len(parts) in (5, 6)
+        and all(_CRON_FIELD_RE.match(p) for p in parts[:5])
+        and any(re.search(r"[\d*?]", p) for p in parts[:5])
+    )
+    if is_shortcut or looks_cron:
         if not _HAS_CRONITER:
             raise ValueError("Cron expressions require the 'croniter' package (pip install croniter).")
         try:
@@ -202,7 +218,9 @@ def parse_schedule(expr: str) -> dict[str, Any]:
             "display": f"every {seconds // 60}m" if seconds >= 60 else f"every {seconds}s",
         }
 
-    raise ValueError(f"Invalid schedule {expr!r}. Try '30m' / 'every 2h' / '0 9 * * *' / 'once at 2026-06-15T09:00'.")
+    raise ValueError(
+        f"Invalid schedule {expr!r}. Try '30m' / 'every 2h' / '0 9 * * MON-FRI' / '@daily' / 'once at 2026-06-15T09:00'."
+    )
 
 
 # ── time helpers ────────────────────────────────────────────────────

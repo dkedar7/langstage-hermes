@@ -1,23 +1,31 @@
-"""Tool-result extractors for ``langstage-core``.
+"""Tool-result extractors for ``langstage-core``'s AG-UI frame stream.
 
-These three extractors surface langstage-hermes runtime events as typed
-``ToolExtractedEvent``s in any host UI built on the parser. They follow the
-``langstage_core.extractors.base.ToolExtractor`` protocol verbatim
-so they can be upstreamed to the parser's built-in extractor set (target PR
-to dkedar7/langstage-core).
+The four extractors in :data:`ALL_EXTRACTORS` (``SkillManageExtractor``,
+``SkillViewExtractor``, ``CompressionExtractor``, ``MemoryExtractor``) turn
+langstage-hermes tool results (skill writes and views, context compression,
+memory updates) into typed ``{"type": "extraction", ...}`` frames that any host
+UI built on ``langstage-core`` can render. They follow the
+``langstage_core.extractors.base.ToolExtractor`` protocol (``tool_name`` /
+``extracted_type`` / ``extract(content)``). ``langstage-core`` also ships
+equivalents among its built-in extractors; hermes wires these copies so the
+payloads stay in step with its own tools.
 
-Until upstreamed, hosts can register them manually::
+Register them by passing instances to ``iter_event_frames``, exactly as
+``langstage_hermes.agui_stream`` does (``graph`` is a compiled hermes agent,
+e.g. from ``create_hermes_agent``)::
 
-    from langstage_core import StreamParser
-    from langstage_hermes.extractors import (
-        SkillManageExtractor, CompressionExtractor, MemoryExtractor,
-    )
+    from langstage_core.agui import build_agent, iter_event_frames
 
-    parser = StreamParser(extractors=[
-        SkillManageExtractor(),
-        CompressionExtractor(),
-        MemoryExtractor(),
-    ])
+    from langstage_hermes.extractors import ALL_EXTRACTORS
+
+    extractors = [cls() for cls in ALL_EXTRACTORS]
+
+
+    async def stream(graph, message, thread_id):
+        agent = build_agent(graph)
+        async for frame in iter_event_frames(agent, message, thread_id, extractors=extractors):
+            if frame["type"] == "extraction":
+                print(frame["extracted_type"], frame["data"])
 """
 
 from __future__ import annotations

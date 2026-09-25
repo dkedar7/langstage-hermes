@@ -30,6 +30,7 @@ from __future__ import annotations
 import difflib
 import os
 import sys
+import warnings
 from collections.abc import Callable
 from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
@@ -52,6 +53,7 @@ from langstage_core.host.config import (
     _warn_legacy_env,
     _warn_malformed_env_value,
     _warn_malformed_toml_value,
+    _warned_legacy_toml,
 )
 
 # ── Hermes TOML locations ────────────────────────────────────────────
@@ -129,6 +131,38 @@ def _find_hermes_project_toml(start: Path | None = None) -> Path | None:
     return None
 
 
+def _warn_legacy_hermes_toml(path: Path) -> None:
+    """One-time deprecation notice when the legacy ``deepagent-hermes.toml`` is read.
+
+    The legacy ``DEEPAGENT_HERMES_*`` env vars already warn, but the legacy project
+    filename was honored silently, so a user whose config lives in it would get no
+    migration signal before support is removed (gh #125). This is core's
+    ``_warn_legacy_toml`` mechanism (same once-per-file dedupe set, same
+    ``DeprecationWarning`` + one stderr ``note:``, same
+    ``LANGSTAGE_SUPPRESS_LEGACY_NOTICE`` opt-out, silent under pytest), with the
+    filename Hermes actually deprecates in the text instead of ``deepagents.toml``.
+    """
+    key = str(path)
+    if key in _warned_legacy_toml:
+        return
+    _warned_legacy_toml.add(key)
+    if _env_bool(os.getenv("LANGSTAGE_SUPPRESS_LEGACY_NOTICE")):
+        return
+    warnings.warn(
+        f"{path} is deprecated; rename it to {HERMES_PROJECT_TOML}.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return
+    print(
+        f"note: config file {path} uses the legacy name; rename it to {HERMES_PROJECT_TOML}. "
+        f"(Legacy {LEGACY_HERMES_PROJECT_TOML} support will be removed in a future release; "
+        "set LANGSTAGE_SUPPRESS_LEGACY_NOTICE=1 to silence.)",
+        file=sys.stderr,
+    )
+
+
 def _load_hermes_toml_layers(
     start: Path | None = None,
 ) -> tuple[dict, list[Path], list[tuple[Path, dict]], list[tuple[Path, str]]]:
@@ -153,6 +187,8 @@ def _load_hermes_toml_layers(
     ppath = _find_hermes_project_toml(start)
     if ppath is not None:
         candidates.append(ppath)
+        if ppath.name == LEGACY_HERMES_PROJECT_TOML:
+            _warn_legacy_hermes_toml(ppath)
     for path in candidates:
         data = _read_toml(path)
         # _read_toml catches the parse error, returns {} and records the path, so an
