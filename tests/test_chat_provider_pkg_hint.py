@@ -76,7 +76,7 @@ def test_chat_missing_openai_pkg_names_the_hermes_extra(monkeypatch, tmp_path):
 
     r = CliRunner().invoke(cli, ["chat"], input="hi\n/quit\n")
 
-    assert r.exit_code == 2, r.output  # shape preserved: exit 2, no crash
+    assert r.exit_code == 1, r.output  # shape preserved: exit 1, no crash
     assert "Failed to build agent" in r.output  # still reports the failure
     # The fix: verify/doctor's gold-standard hint, naming the documented extra.
     assert 'pip install "langstage-hermes[openai]"' in r.output
@@ -97,7 +97,7 @@ def test_chat_missing_anthropic_pkg_hint_is_not_openai_only(monkeypatch, tmp_pat
 
     r = CliRunner().invoke(cli, ["chat"], input="hi\n/quit\n")
 
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "for Anthropic models install: pip install langchain-anthropic" in r.output
     # Must not misattribute to the openai extra.
     assert "langstage-hermes[openai]" not in r.output
@@ -113,7 +113,7 @@ def test_chat_unrelated_build_failure_gets_no_install_hint(monkeypatch, tmp_path
 
     r = CliRunner().invoke(cli, ["chat"], input="hi\n/quit\n")
 
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "checkpointer database is locked" in r.output
     assert "langstage-hermes[openai]" not in r.output
     assert "install:" not in r.output
@@ -139,7 +139,7 @@ def test_verify_reads_the_same_table(monkeypatch, tmp_path):
 
     r = CliRunner().invoke(cli, ["verify"])
 
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert 'for OpenAI-compatible models install: pip install "langstage-hermes[openai]"' in r.output
 
 
@@ -152,7 +152,7 @@ def test_doctor_reads_the_same_table(monkeypatch, tmp_path):
 
     r = CliRunner().invoke(cli, ["doctor"])
 
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "provider package 'langchain_openai' not importable" in r.output
     assert _PROVIDER_PACKAGES["openai:"].install in r.output
 

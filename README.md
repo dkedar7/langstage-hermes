@@ -106,6 +106,17 @@ does one live round-trip against the configured model and confirms the prompts, 
 
 Both `verify` and `doctor` accept `--json` for scripting/CI — a top-level `ok` plus a per-check list, with `.ok` equal to `exit code == 0` (so `langstage-hermes doctor --json | jq -e .ok` is a one-liner readiness gate). `verify --json` reports the live round-trip as `skipped` when no key is set, so a keyless CI check never triggers a paid call.
 
+### Exit codes
+
+Every `langstage-hermes` command (and the deprecated `deepagent-hermes` alias, and `python -m langstage_hermes.cron`) uses the LangStage family exit codes ([core ADR 0007](https://github.com/dkedar7/langstage-core/blob/main/docs/adr/0007-family-exit-codes.md)):
+
+| Code | Meaning |
+|---|---|
+| `0` | success |
+| `1` | failure: `verify` / `doctor` not ready (missing key or provider package, a failed check or round-trip), `chat` can't start (missing key, bad `--agent`, agent build failed), a skill that won't install, an item not found, the cron daemon can't start |
+| `2` | paused on a human-in-the-loop interrupt (reserved; no hermes command exits 2 today) |
+| `64` | usage error: an unknown command or flag, a bad option value, conflicting options (`search --session` without `--around`, `--json` without `--show-config`), an invalid `cron create --schedule` |
+
 ## Quick start
 
 ```bash

@@ -54,7 +54,7 @@ def _keyless(monkeypatch, tmp_path: Path) -> Path:
 def test_verify_json_keyless_checks_fts5_store(monkeypatch, tmp_path):
     home = _keyless(monkeypatch, tmp_path)
     r = CliRunner().invoke(cli, ["verify", "--json"])
-    assert r.exit_code == 2, r.output  # still no key
+    assert r.exit_code == 1, r.output  # still no key
     checks = {c["name"]: c for c in json.loads(r.output)["checks"]}
     assert checks["fts5_init"]["ok"] is True, checks["fts5_init"]
     assert "FTS5" in checks["fts5_init"]["detail"]
@@ -112,7 +112,7 @@ def test_skills_validate_install_audit_reject_empty_body(tmp_hermes_home: Path, 
     assert "body" in v.output
 
     i = runner.invoke(cli, ["skills", "install", str(src)])
-    assert i.exit_code == 2, i.output
+    assert i.exit_code == 1, i.output
     assert not (tmp_hermes_home / "skills" / "no-body").exists()
 
     # A hand-placed one is flagged by audit.
@@ -316,7 +316,7 @@ def test_show_config_json_key_set_matches_human(monkeypatch, tmp_path: Path):
 
 def test_json_without_show_config_is_a_usage_error():
     r = CliRunner().invoke(cli, ["--json"])
-    assert r.exit_code == 2
+    assert r.exit_code == 64  # usage error (ADR 0007)
     assert "--show-config" in r.output
 
 

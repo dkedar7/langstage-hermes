@@ -77,9 +77,9 @@ def test_cron_create_json_shape(tmp_hermes_home: Path):
     assert any(j["id"] == data["id"] for j in listed["jobs"])
 
 
-def test_cron_create_json_invalid_schedule_exits_2(tmp_hermes_home: Path):
+def test_cron_create_json_invalid_schedule_exits_64(tmp_hermes_home: Path):
     r = CliRunner().invoke(cli, ["cron", "create", "--prompt", "x", "--schedule", "not-a-schedule", "--json"])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 64, r.output
     assert "error" in json.loads(r.output)
 
 

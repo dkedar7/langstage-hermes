@@ -139,7 +139,7 @@ def test_skills_install_rejects_invalid_frontmatter(tmp_hermes_home: Path, tmp_p
     (src / "SKILL.md").write_text(frontmatter.dumps(post), encoding="utf-8")
     runner = CliRunner()
     result = runner.invoke(cli, ["skills", "install", str(src)])
-    assert result.exit_code == 2
+    assert result.exit_code == 1
     assert "invalid" in result.output.lower()
 
 
@@ -307,7 +307,7 @@ def test_doctor_runs_clean(monkeypatch):
     # doctor now exits non-zero when the configured model's required key is missing
     # (gh #104); this test is about doctor producing its full report and exiting
     # clean when properly configured, so set the default model's key deterministically
-    # (mirroring key-unset CI, which would otherwise make a bare `doctor` exit 2).
+    # (mirroring key-unset CI, which would otherwise make a bare `doctor` exit 1).
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-dummy")
     runner = CliRunner()
     result = runner.invoke(cli, ["doctor"])

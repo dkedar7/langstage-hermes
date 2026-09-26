@@ -42,7 +42,7 @@ def test_doctor_flags_openai_key_for_openai_model(monkeypatch, tmp_path):
     r = CliRunner().invoke(cli, ["doctor"])
     # The required openai/openrouter key is missing → non-zero exit (gh #104), and
     # the report still names the RIGHT missing key (the original #35 concern).
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "openai:openai/gpt-4o-mini" in r.output  # reports the configured model
     assert "OPENAI_API_KEY / OPENROUTER_API_KEY: not set" in r.output  # the right missing key
     # The MAIN model line must not wrongly cite anthropic (the original #35 bug).
@@ -56,7 +56,7 @@ def test_doctor_checks_anthropic_for_default_model(monkeypatch, tmp_path):
 
     r = CliRunner().invoke(cli, ["doctor"])
     # Default anthropic:* model with no ANTHROPIC_API_KEY → non-zero exit (gh #104).
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "ANTHROPIC_API_KEY: not set (required for the configured anthropic:* model)" in r.output
 
 
@@ -70,7 +70,7 @@ def test_doctor_fails_when_openai_provider_pkg_missing(monkeypatch, tmp_path):
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
 
     r = CliRunner().invoke(cli, ["doctor"])
-    assert r.exit_code == 2, r.output  # matches verify, no longer a clean bill
+    assert r.exit_code == 1, r.output  # matches verify, no longer a clean bill
     assert "provider package 'langchain_openai' not importable" in r.output
     assert 'pip install "langstage-hermes[openai]"' in r.output  # verify's gold-standard hint
 
@@ -102,7 +102,7 @@ def test_doctor_surfaces_mixed_provider_aux_model(monkeypatch, tmp_path):
     r = CliRunner().invoke(cli, ["doctor"])
     # The aux anthropic:* key is missing → non-zero exit (gh #104), and the report
     # surfaces the AUX model row + its distinct key requirement (the #96 concern).
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "model (aux):" in r.output  # the aux row exists
     assert "anthropic:claude-haiku" in r.output  # names the default aux model
     assert "aux anthropic:* model" in r.output  # and its distinct key requirement
@@ -128,7 +128,7 @@ def test_doctor_exits_nonzero_when_required_key_missing(monkeypatch, tmp_path):
     """gh #104: doctor printed the required-key failure but still exited 0, so it
     disagreed with verify (exit 2) and with its OWN missing-provider-package path
     (exit 2), and couldn't be used as a scripted/CI health gate. On the default
-    anthropic:* config with no ANTHROPIC_API_KEY it must now exit 2 — a visible ✗
+    anthropic:* config with no ANTHROPIC_API_KEY it must now exit 1 — a visible ✗
     can't coexist with a clean bill of health."""
     _isolate(monkeypatch, tmp_path)
     # langchain_anthropic is a base dep, so the provider-package check passes; hold
@@ -136,7 +136,7 @@ def test_doctor_exits_nonzero_when_required_key_missing(monkeypatch, tmp_path):
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
 
     r = CliRunner().invoke(cli, ["doctor"])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "ANTHROPIC_API_KEY: not set (required for the configured anthropic:* model)" in r.output
 
 

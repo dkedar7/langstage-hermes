@@ -39,7 +39,7 @@ def main() -> int:
         return 0
     except RuntimeError as e:
         print(f"langstage-hermes cron failed to start: {e}", file=sys.stderr)
-        return 2
+        return 1  # can't start is a failure (family exit codes, core ADR 0007)
     return 0
 
 

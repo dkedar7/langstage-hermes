@@ -51,7 +51,7 @@ def test_session_or_around_alone_is_rejected_not_ignored(search_home, args):
     query returned unscoped hits (even for a bogus session id) with exit 0. Given
     alone they are now a usage error naming the missing flag."""
     res = CliRunner().invoke(cli, args)
-    assert res.exit_code == 2, res.output
+    assert res.exit_code == 64, res.output
     assert "requires" in res.output
     assert "BM25" not in res.output  # no DISCOVERY results were printed
     assert "Recent sessions" not in res.output  # nor a BROWSE listing
@@ -212,7 +212,7 @@ def test_verify_json_round_trip_not_no_key_when_only_aux_key_missing(monkeypatch
     monkeypatch.setenv("OPENAI_API_KEY", "sk-dummy-not-real")
 
     r = CliRunner().invoke(cli, ["verify", "--json"])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     checks = {c["name"]: c for c in json.loads(r.output)["checks"]}
     assert checks["model_key"]["ok"] is True
     assert checks["model_key_aux"]["ok"] is False
@@ -223,7 +223,7 @@ def test_verify_json_round_trip_not_no_key_when_only_aux_key_missing(monkeypatch
 def test_verify_json_round_trip_says_no_key_when_primary_key_missing(monkeypatch, tmp_path):
     _isolate_models(monkeypatch, tmp_path)
     r = CliRunner().invoke(cli, ["verify", "--json"])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     checks = {c["name"]: c for c in json.loads(r.output)["checks"]}
     assert checks["model_key"]["ok"] is False
     assert checks["round_trip"]["detail"] == "skipped — no key"
@@ -247,12 +247,12 @@ def test_doctor_fails_when_aux_provider_pkg_missing(monkeypatch, tmp_path):
     )
 
     r = CliRunner().invoke(cli, ["doctor"])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "provider package 'langchain_openai' not importable for openai:openai/gpt-4o-mini (aux)" in r.output
     assert 'pip install "langstage-hermes[openai]"' in r.output
 
     r = CliRunner().invoke(cli, ["doctor", "--json"])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     data = json.loads(r.output)
     assert data["ok"] is False
     aux = next(c for c in data["checks"] if c["name"] == "provider_pkg_aux")
