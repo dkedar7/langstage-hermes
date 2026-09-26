@@ -367,6 +367,32 @@ def _discover(
 # retrieval logic) and honour a caller-supplied ``limit``.
 
 
+# Control characters as FTS5 highlight markers for the structured (CLI / --json)
+# path: unlike ``>>>``/``<<<`` they can't collide with real message text, so they
+# can be stripped into clean text + match offsets (gh #140).
+_HL_OPEN = "\x02"
+_HL_CLOSE = "\x03"
+
+
+def _split_highlights(marked: str) -> tuple[str, list[list[int]]]:
+    """Strip the highlight markers; return ``(plain_text, [[start, end], ...])``."""
+    out: list[str] = []
+    ranges: list[list[int]] = []
+    pos = 0
+    start: int | None = None
+    for ch in marked:
+        if ch == _HL_OPEN:
+            start = pos
+        elif ch == _HL_CLOSE:
+            if start is not None:
+                ranges.append([start, pos])
+            start = None
+        else:
+            out.append(ch)
+            pos += 1
+    return "".join(out), ranges
+
+
 def search_sessions_structured(
     store: SqliteFtsStore,
     *,
@@ -465,6 +491,7 @@ def _discover_structured(
         query,
         limit=50,
         exclude_sources=exclude_sources,
+        highlight=(_HL_OPEN, _HL_CLOSE),
     )
     current_root = store.resolve_to_lineage_root(current_session_id) if current_session_id else ""
 
@@ -481,13 +508,15 @@ def _discover_structured(
     results: list[dict[str, Any]] = []
     for root, hit in seen.items():
         meta = store.get_session(root) or {}
+        snippet, match_ranges = _split_highlights(hit.get("snippet") or "")
         results.append(
             {
                 "session_id": hit["session_id"],
                 "lineage_root": root,
                 "message_id": hit["id"],
                 "role": hit.get("role") or "",
-                "snippet": hit.get("snippet") or "",
+                "snippet": snippet,
+                "match_ranges": match_ranges,
                 "title": meta.get("title") or hit.get("title") or "",
                 "source": meta.get("source") or hit.get("source") or "",
                 "model": meta.get("model") or hit.get("model") or "",

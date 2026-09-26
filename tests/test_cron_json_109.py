@@ -69,8 +69,8 @@ def test_cron_create_json_shape(tmp_hermes_home: Path):
     data = json.loads(r.output)
     assert set(data) == {"id", "name", "schedule", "next_run"}
     assert data["name"] == "summarize inbox"
-    # `schedule` is the canonical display form (interval normalized to minutes).
-    assert data["schedule"] == "every 120m"
+    # `schedule` is the canonical display form (exact, largest whole unit; gh #149).
+    assert data["schedule"] == "every 2h"
     assert data["next_run"]
     # it really persisted — list sees it
     listed = json.loads(CliRunner().invoke(cli, ["cron", "list", "--json"]).output)

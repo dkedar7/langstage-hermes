@@ -828,11 +828,13 @@ class SqliteFtsStore(BaseStore):
         limit: int = 50,
         exclude_sources: Iterable[str] | None = None,
         role_filter: Iterable[str] | None = None,
+        highlight: tuple[str, str] = (">>>", "<<<"),
     ) -> list[dict[str, Any]]:
         """BM25 search across messages.
 
         Picks ``messages_fts_trigram`` when the query contains CJK so
-        we don't tokenize 大别山 into ``大 AND 别 AND 山``.
+        we don't tokenize 大别山 into ``大 AND 别 AND 山``. ``highlight`` is the
+        (open, close) pair FTS5 wraps matched terms with in ``snippet``.
         """
         if not self._fts_enabled or not query.strip():
             return []
@@ -862,7 +864,8 @@ class SqliteFtsStore(BaseStore):
             snippet_table = "messages_fts"
 
         where = [f"{fts_table} MATCH ?", "m.active = 1"]
-        params: list[Any] = [match_query]
+        # The two snippet() markers are bound first: they precede MATCH in the SQL.
+        params: list[Any] = [highlight[0], highlight[1], match_query]
         if excl:
             placeholders = ",".join("?" for _ in excl)
             where.append(f"COALESCE(s.source,'') NOT IN ({placeholders})")
@@ -875,7 +878,7 @@ class SqliteFtsStore(BaseStore):
         sql = f"""
             SELECT
                 m.id, m.session_id, m.role, m.timestamp, m.tool_name,
-                snippet({snippet_table}, 0, '>>>', '<<<', '...', 40) AS snippet,
+                snippet({snippet_table}, 0, ?, ?, '...', 40) AS snippet,
                 s.source, s.model, s.title, s.parent_session_id,
                 s.started_at AS session_started
             FROM {fts_table}
