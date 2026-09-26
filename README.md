@@ -10,7 +10,7 @@
 
 A faithful reproduction of [Nous Research's Hermes Agent](https://github.com/nousresearch/hermes-agent) on top of LangGraph + [`deepagents`](https://github.com/langchain-ai/deepagents) + [`langstage-core`](https://github.com/dkedar7/langstage-core).
 
-**Status: live on PyPI** (renamed from `deepagent-hermes` — the old name now just installs this one, and the `deepagent-hermes` command still works). Spec at [SPEC.md](./SPEC.md). Release notes in [CHANGELOG.md](./CHANGELOG.md). The runtime is verified end-to-end against a real Anthropic model — both the memory loop and the skill-creation loop close autonomously; see [`examples/dogfood.py`](./examples/dogfood.py) and [`examples/dogfood_procedural.py`](./examples/dogfood_procedural.py) for the traces.
+**Status: live on PyPI** (renamed from `deepagent-hermes` — the old name now just installs this one, and the `deepagent-hermes` command still works, with a deprecation notice). Spec at [SPEC.md](./SPEC.md). Release notes in [CHANGELOG.md](./CHANGELOG.md). The runtime is verified end-to-end against a real Anthropic model — both the memory loop and the skill-creation loop close autonomously; see [`examples/dogfood.py`](./examples/dogfood.py) and [`examples/dogfood_procedural.py`](./examples/dogfood_procedural.py) for the traces.
 
 ## What it is
 

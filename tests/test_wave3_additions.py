@@ -68,7 +68,7 @@ def test_full_scroll_still_works(search_home):
 def test_failed_one_shot_is_kept_with_its_error(tmp_hermes_home: Path):
     """A one-shot job whose only run FAILED was popped exactly like a successful
     one, taking last_status / last_error with it. It must stay visible."""
-    job = cron_jobs.create_job("summarize inbox", "once at 2020-01-01T00:00", name="daily")
+    job = cron_jobs.create_job("summarize inbox", "once at 2099-01-01T00:00", name="daily")
     cron_jobs.mark_job_run(job["id"], success=False, error="no API key")
 
     after = cron_jobs.get_job(job["id"])
@@ -83,7 +83,7 @@ def test_failed_one_shot_is_kept_with_its_error(tmp_hermes_home: Path):
 
 
 def test_failed_one_shot_shows_in_cron_list_json(tmp_hermes_home: Path):
-    job = cron_jobs.create_job("summarize inbox", "once at 2020-01-01T00:00", name="daily")
+    job = cron_jobs.create_job("summarize inbox", "once at 2099-01-01T00:00", name="daily")
     cron_jobs.mark_job_run(job["id"], success=False, error="boom")
     res = CliRunner().invoke(cli, ["cron", "list", "--json"])
     assert res.exit_code == 0, res.output
@@ -91,7 +91,7 @@ def test_failed_one_shot_shows_in_cron_list_json(tmp_hermes_home: Path):
 
 
 def test_successful_one_shot_is_still_removed(tmp_hermes_home: Path):
-    job = cron_jobs.create_job("summarize inbox", "once at 2020-01-01T00:00", name="daily")
+    job = cron_jobs.create_job("summarize inbox", "once at 2099-01-01T00:00", name="daily")
     cron_jobs.mark_job_run(job["id"], success=True)
     assert cron_jobs.get_job(job["id"]) is None
 

@@ -2,6 +2,26 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.35] - 2026-09-25
+
+### Fixed
+- **`search --json` snippets are clean text (gh #140).** The DISCOVERY `snippet` carried FTS5's raw `>>>`/`<<<`
+  highlight markers, which can't be told apart from real content (a Python REPL prompt, a merge-conflict marker).
+  The structured search path now uses control characters internally, strips them, and reports each match as
+  `match_ranges: [[start, end], ...]` offsets into `snippet`. The human render bolds the matches (plain text when
+  piped). The in-chat `session_search` tool is unchanged.
+- **`cron create` refuses a one-shot time in the past (gh #144).** `once at <ts>` or a bare ISO timestamp that had
+  already passed was accepted, was immediately due, and fired as an unattended run on the next tick. It now exits 2
+  with `... is in the past; use a future time.`, like Unix `at`. There is one minute of grace for the current
+  minute. The agent's `cronjob` tool gets the same error.
+- **Interval schedules report their exact cadence (gh #149).** The display used `seconds // 60`, so `every 90s`
+  showed as `every 1m` in `cron list` and in the `schedule` key of `cron list --json`. It now uses the largest unit
+  that divides the interval exactly (`every 90s`, `every 2h`, `every 1d`), which round-trips into `cron create`.
+  Whole-hour intervals previously shown in minutes (`every 120m`) now show in hours.
+- **The deprecated `deepagent-hermes` command says so (gh #155).** It now prints a one-line `note:` on stderr per
+  run, silenced by `LANGSTAGE_SUPPRESS_LEGACY_NOTICE=1` like the legacy env-var and TOML notices, and its
+  `--version` / usage text name `deepagent-hermes` rather than the new name.
+
 ## [0.4.34] - 2026-09-25
 
 ### Fixed

@@ -128,6 +128,32 @@ _CRON_SHORTCUTS = frozenset({"@yearly", "@annually", "@monthly", "@weekly", "@da
 _CRON_FIELD_RE = re.compile(r"^[0-9A-Za-z*?,/#\-]+$")
 
 
+def _interval_display(seconds: int) -> str:
+    """``every <n><unit>`` in the largest unit that divides ``seconds`` exactly.
+
+    Exact, so the reported cadence never contradicts ``next_run`` (``every 90s``
+    used to show as ``every 1m``, gh #149), and it round-trips through
+    :func:`parse_duration`.
+    """
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds >= size and seconds % size == 0:
+            return f"every {seconds // size}{unit}"
+    return f"every {seconds}s"
+
+
+def _reject_past_one_shot(parsed: dict[str, Any]) -> None:
+    """Refuse a one-shot whose time has already passed (gh #144), like Unix ``at``.
+
+    Otherwise a date/time typo is immediately due and fires as an unattended run
+    on the next tick. A minute of grace lets ``once at <the current minute>`` through.
+    """
+    if parsed["kind"] != "once":
+        return
+    run_at = _ensure_aware(datetime.fromisoformat(parsed["run_at"]))
+    if run_at < _now() - timedelta(minutes=1):
+        raise ValueError(f"{parsed['display']} is in the past; use a future time.")
+
+
 def parse_schedule(expr: str) -> dict[str, Any]:
     """Parse a schedule expression into a structured ``{"kind": ..., ...}`` dict.
 
@@ -146,7 +172,7 @@ def parse_schedule(expr: str) -> dict[str, Any]:
             "kind": "interval",
             "seconds": seconds,
             "expr": original,
-            "display": f"every {seconds // 60}m" if seconds >= 60 else f"every {seconds}s",
+            "display": _interval_display(seconds),
         }
 
     # "once at TIMESTAMP" → one-shot
@@ -215,7 +241,7 @@ def parse_schedule(expr: str) -> dict[str, Any]:
             "kind": "interval",
             "seconds": seconds,
             "expr": original,
-            "display": f"every {seconds // 60}m" if seconds >= 60 else f"every {seconds}s",
+            "display": _interval_display(seconds),
         }
 
     raise ValueError(
@@ -377,6 +403,7 @@ def create_job(
     SPEC §14 / Hermes verbatim so existing tooling reads our jobs unchanged.
     """
     parsed = parse_schedule(schedule)
+    _reject_past_one_shot(parsed)
     normalized_skills = _normalize_skill_list(skill, skills)
 
     if no_agent and not script:

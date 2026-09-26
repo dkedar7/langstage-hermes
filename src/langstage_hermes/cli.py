@@ -574,7 +574,10 @@ def cli(ctx: click.Context, show_config: bool, show_config_json: bool, version: 
     if version:
         from langstage_hermes import __version__
 
-        click.echo(f"langstage-hermes {__version__}")
+        # Name the command the user actually typed (gh #155): the deprecated
+        # `deepagent-hermes` alias identifies as itself, not the new name.
+        prog = LEGACY_PROG_NAME if ctx.find_root().info_name == LEGACY_PROG_NAME else "langstage-hermes"
+        click.echo(f"{prog} {__version__}")
         ctx.exit(0)
     if show_config_json and not show_config:
         # Subcommands take their own `--json` after the subcommand name; a bare
@@ -1191,7 +1194,14 @@ def _render_search_human(result: dict[str, Any]) -> None:
             title = r["title"] or "(no title)"
             click.echo(f"  {r['session_id']}  #{r['message_id']}  {r['role']:<9}  {title}")
             if r["snippet"]:
-                click.echo(click.style(f"      {r['snippet']}", fg="bright_black"))
+                # Matches are bold via match_ranges (gh #140); plain text when piped.
+                text, pieces, pos = r["snippet"], [], 0
+                for a, b in r.get("match_ranges", []):
+                    pieces.append(click.style(text[pos:a], fg="bright_black"))
+                    pieces.append(click.style(text[a:b], bold=True))
+                    pos = b
+                pieces.append(click.style(text[pos:], fg="bright_black"))
+                click.echo("      " + "".join(pieces))
         click.echo(
             click.style(
                 "\n  Scroll a hit: `langstage-hermes search --session <id> --around <msg_id> --window 10`",
@@ -3470,7 +3480,44 @@ def main() -> None:
                 reconfigure(encoding="utf-8", errors="replace")
             except (OSError, ValueError):
                 pass
-    cli(prog_name="langstage-hermes")
+    prog_name = _invoked_prog_name(sys.argv[0] if sys.argv else "")
+    if prog_name == LEGACY_PROG_NAME:
+        _warn_legacy_command()
+    cli(prog_name=prog_name)
+
+
+LEGACY_PROG_NAME = "deepagent-hermes"
+
+
+def _invoked_prog_name(argv0: str) -> str:
+    """``deepagent-hermes`` when invoked through the deprecated alias, else the canonical name.
+
+    Handles POSIX and Windows launcher paths (``deepagent-hermes.exe``,
+    ``deepagent-hermes-script.py``) regardless of the host OS.
+    """
+    base = re.split(r"[\\/]", argv0)[-1].lower()
+    for suffix in (".exe", "-script.py", ".py"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+    return LEGACY_PROG_NAME if base == LEGACY_PROG_NAME else "langstage-hermes"
+
+
+def _warn_legacy_command() -> None:
+    """One stderr notice per run for the deprecated console script (gh #155).
+
+    Same wording and ``LANGSTAGE_SUPPRESS_LEGACY_NOTICE`` opt-out as the legacy
+    ``DEEPAGENT_*`` env vars and ``deepagent-hermes.toml`` notices (gh #125).
+    """
+    from langstage_hermes.config import _env_bool
+
+    if _env_bool(os.getenv("LANGSTAGE_SUPPRESS_LEGACY_NOTICE")):
+        return
+    print(
+        f"note: the `{LEGACY_PROG_NAME}` command is deprecated; use `langstage-hermes`. "
+        "(Legacy support will be removed in a future release; "
+        "set LANGSTAGE_SUPPRESS_LEGACY_NOTICE=1 to silence.)",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":
