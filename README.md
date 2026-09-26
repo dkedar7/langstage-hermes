@@ -8,6 +8,12 @@
 [![Python](https://img.shields.io/pypi/pyversions/langstage-hermes.svg)](https://pypi.org/project/langstage-hermes/)
 [![License](https://img.shields.io/pypi/l/langstage-hermes.svg)](./LICENSE)
 
+<p align="center">
+  <img src="https://dkedar7.github.io/langstage-docs/assets/demos/hermes.gif" alt="Animated demo: langstage-hermes demo closes the reflection-to-skill loop with no API key, then search finds the session and skills list shows the library" width="800" />
+</p>
+
+<p align="center"><sub><code>langstage-hermes demo</code>, <code>search</code> and <code>skills list</code>, keyless, recorded by CI against the latest release. <a href="https://dkedar7.github.io/langstage-docs/stages/hermes/">Docs for langstage-hermes</a></sub></p>
+
 A faithful reproduction of [Nous Research's Hermes Agent](https://github.com/nousresearch/hermes-agent) on top of LangGraph + [`deepagents`](https://github.com/langchain-ai/deepagents) + [`langstage-core`](https://github.com/dkedar7/langstage-core).
 
 **Status: live on PyPI** (renamed from `deepagent-hermes` — the old name now just installs this one, and the `deepagent-hermes` command still works, with a deprecation notice). Spec at [SPEC.md](./SPEC.md). Release notes in [CHANGELOG.md](./CHANGELOG.md). The runtime is verified end-to-end against a real Anthropic model — both the memory loop and the skill-creation loop close autonomously; see [`examples/dogfood.py`](./examples/dogfood.py) and [`examples/dogfood_procedural.py`](./examples/dogfood_procedural.py) for the traces.
@@ -36,7 +42,7 @@ langstage-hermes is the reference agent of the **LangStage family**: write your 
 | Terminal | [langstage-cli](https://github.com/dkedar7/langstage-cli) | `langstage-cli -a langstage_hermes.agent:graph` |
 | VS Code | [langstage-vscode](https://github.com/dkedar7/langstage-vscode) | chat participant + stdio sidecar |
 | Reference agent | langstage-hermes | **you are here** |
-| Shared core | [langstage-core](https://github.com/dkedar7/langstage-core) | typed events + config resolver behind every stage |
+| Shared core | [langstage-core](https://github.com/dkedar7/langstage-core) | AG-UI streaming bridge + config resolver behind every stage |
 
 ### Serve over AG-UI
 
