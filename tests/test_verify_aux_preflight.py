@@ -6,7 +6,7 @@ model + the default ``anthropic:*`` aux — a user who sets only the main model 
 ``OPENAI_API_KEY`` used to sail through ``verify`` green, then hit an Anthropic
 auth error at the first reflection (~iteration 10). ``verify`` now runs the same
 provider-aware key preflight against the aux model too, so the misconfig fails at
-preflight (exit 2) *before* the agent is ever built — which is exactly what
+preflight (exit 1) *before* the agent is ever built — which is exactly what
 ``verify`` exists to catch.
 """
 
@@ -46,7 +46,7 @@ def test_verify_flags_unauthenticated_aux_model(monkeypatch, tmp_path):
 
     r = CliRunner().invoke(cli, ["verify"])
 
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     # Surfaced the aux model row and the specific missing key...
     assert "model (aux)" in r.output
     assert "ANTHROPIC_API_KEY" in r.output
@@ -70,7 +70,7 @@ def test_verify_aux_preflight_message_names_aux(monkeypatch, tmp_path):
 
     r = CliRunner().invoke(cli, ["verify"])
 
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     # The failure line explicitly qualifies the model as `aux`.
     assert "aux model is anthropic:* but ANTHROPIC_API_KEY not set" in r.output
     # And it does NOT read as the un-qualified main-model failure (the #103 bug):

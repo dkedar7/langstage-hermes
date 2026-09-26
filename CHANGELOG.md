@@ -2,6 +2,20 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.36] - 2026-09-25
+
+### Changed (breaking for scripts that matched the old codes)
+- **Family exit codes** ([core ADR 0007](https://github.com/dkedar7/langstage-core/blob/main/docs/adr/0007-family-exit-codes.md)):
+  `0` success, `1` failure, `2` paused on a HITL interrupt, `64` usage error. `2` now means only "paused",
+  so a script can't read a broken setup as a benign pause.
+  - `verify`, `doctor`, the `chat` key/build preflight, `skills install` rejections and `demo` failures exit
+    **`1`** (were `2`).
+  - `python -m langstage_hermes.cron` / `cron daemon` exit **`1`** when the daemon can't start (was `2`).
+  - Usage errors exit **`64`** (click's default was `2`): an unknown command or flag, a bad option value, a
+    missing argument, `search --session` without `--around`, `--json` without `--show-config`, and an invalid
+    `cron create --schedule` (incl. a one-shot time in the past).
+- README "Exit codes" section.
+
 ## [0.4.35] - 2026-09-25
 
 ### Fixed

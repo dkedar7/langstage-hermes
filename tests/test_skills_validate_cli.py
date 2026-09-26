@@ -127,13 +127,13 @@ def test_install_named_file_is_acted_on_not_sibling_skill_md(tmp_hermes_home: Pa
     """gh #107: `install FILE` acts on FILE, never a sibling SKILL.md.
 
     Pointing `install` at an invalid draft beside a valid SKILL.md must REJECT the
-    draft (exit 2), not silently install the sibling skill under its own name.
+    draft (exit 1), not silently install the sibling skill under its own name.
     """
     d = _write_skill_dir(tmp_path / "wt", "sib2", {"name": "sibling-skill", "description": "a valid sibling"})
     draft = d / "draft.md"
     draft.write_text("this is not a valid skill\n", encoding="utf-8")
 
     r = CliRunner().invoke(cli, ["skills", "install", str(draft)])
-    assert r.exit_code == 2, r.output  # invalid frontmatter → rejected
+    assert r.exit_code == 1, r.output  # invalid frontmatter → rejected
     # And it did NOT install the sibling skill.
     assert not (tmp_hermes_home / "skills" / "sibling-skill").exists()

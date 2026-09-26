@@ -83,7 +83,7 @@ def test_verify_removes_workspace_on_build_failure(tmp_hermes_home: Path, scratc
 
     result = CliRunner().invoke(cli, ["verify"])
 
-    assert result.exit_code == 2
+    assert result.exit_code == 1
     # Sanity: we really did get past the key gate and create the workspace.
     assert "isolated workspace" in result.output
     assert _leaked(scratch_tmp) == [], f"verify leaked its workspace on build failure: {_leaked(scratch_tmp)}"

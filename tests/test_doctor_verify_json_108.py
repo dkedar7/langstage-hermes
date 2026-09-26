@@ -57,7 +57,7 @@ def test_doctor_json_shape_and_ok_matches_exit(monkeypatch, tmp_path):
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
 
     r = CliRunner().invoke(cli, ["doctor", "--json"])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     data = json.loads(r.output)
     assert set(data) == {"ok", "checks"}
     assert data["ok"] is False
@@ -109,11 +109,11 @@ def test_doctor_human_output_unchanged(monkeypatch, tmp_path):
 
 def test_verify_json_keyless_skips_round_trip(monkeypatch, tmp_path):
     """Keyless default config: verify --json is one valid object, ``ok`` is false,
-    exit 2, and the live round-trip is reported ``skipped`` (never a paid call)."""
+    exit 1, and the live round-trip is reported ``skipped`` (never a paid call)."""
     _isolate(monkeypatch, tmp_path)
 
     r = CliRunner().invoke(cli, ["verify", "--json"])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     data = json.loads(r.output)
     assert set(data) == {"ok", "model", "model_aux", "checks"}
     assert data["ok"] is False
@@ -181,7 +181,7 @@ def test_verify_human_path_unchanged(monkeypatch, tmp_path):
     """No --json → the human banner + fail-fast exit, never JSON."""
     _isolate(monkeypatch, tmp_path)
     r = CliRunner().invoke(cli, ["verify"])
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "langstage-hermes verify — live end-to-end smoke" in r.output
     with pytest.raises(json.JSONDecodeError):
         json.loads(r.output)

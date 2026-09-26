@@ -36,6 +36,40 @@ from typing import Any, NamedTuple, NoReturn
 
 import click
 
+# ── exit codes ─────────────────────────────────────────────────────
+# The LangStage family scheme (core ADR 0007,
+# https://github.com/dkedar7/langstage-core/blob/main/docs/adr/0007-family-exit-codes.md):
+# 0 success / 1 failure / 2 paused on a human-in-the-loop interrupt / 64 usage error.
+# Defined here rather than imported from langstage_core.cli so hermes doesn't need a
+# newer core floor just for four integers.
+EXIT_OK = 0
+EXIT_FAIL = 1
+EXIT_PAUSED = 2
+EXIT_USAGE = 64
+
+
+class _FamilyExitGroup(click.Group):
+    """A click group whose usage errors exit 64, not click's 2 (which the family
+    reserves for "paused"). Parsing of the root group happens in ``make_context``;
+    every subcommand and nested group is parsed and run inside ``invoke``, so
+    wrapping both covers every ``UsageError`` (``BadParameter``, ``NoSuchOption``,
+    a missing argument, an explicit ``raise click.UsageError``)."""
+
+    def make_context(self, *args: Any, **kwargs: Any) -> click.Context:
+        try:
+            return super().make_context(*args, **kwargs)
+        except click.UsageError as e:
+            e.exit_code = EXIT_USAGE
+            raise
+
+    def invoke(self, ctx: click.Context) -> Any:
+        try:
+            return super().invoke(ctx)
+        except click.UsageError as e:
+            e.exit_code = EXIT_USAGE
+            raise
+
+
 # ── BUILTIN_SLASH_COMMANDS ──────────────────────────────────────────
 #
 # Module-level so ``plugins.context.register_slash_command`` can detect
@@ -253,7 +287,7 @@ def _preflight_model_key(model_for_run: str, *, suggest_verify: bool = False, qu
     """Provider-aware API-key preflight shared by ``verify`` and ``chat``.
 
     If the configured model's provider key is missing, print the same clean,
-    colored guidance ``verify``/``doctor`` give and exit 2 — instead of leaking a
+    colored guidance ``verify``/``doctor`` give and exit 1 — instead of leaking a
     raw provider exception mid-REPL on the ``anthropic:*`` path or a bare
     ``Missing credentials`` at build on the ``openai:*`` path the way ``chat``
     used to (gh #76). Factored out of ``verify``'s "(3) model API key sanity"
@@ -278,7 +312,7 @@ def _preflight_model_key(model_for_run: str, *, suggest_verify: bool = False, qu
     click.echo(click.style(f"  ✗ {msg}", fg="red"))
     if suggest_verify:
         click.echo(click.style("    run `langstage-hermes verify` or `doctor` for a full preflight", fg="yellow"))
-    sys.exit(2)
+    sys.exit(EXIT_FAIL)
 
 
 def _required_key_detail(model_for_run: str, *, qualifier: str = "") -> str | None:
@@ -389,7 +423,7 @@ def _doctor_report_model_key(model_for_run: str, *, label: str, as_json: bool = 
 
     Returns ``(key_missing, checks)``: ``key_missing`` is ``True`` when a
     *required* provider key is missing, so ``doctor`` can exit non-zero to match
-    ``verify`` (exit 2) and its own missing-provider-package path — a visible
+    ``verify`` (exit 1) and its own missing-provider-package path — a visible
     ``✗``/failure diagnostic must not coexist with a clean exit (gh #104). An
     unknown/custom provider has no required key, so it returns ``False``.
     ``checks`` is the structured pair (a ``model`` check + an ``api_key`` check)
@@ -549,6 +583,7 @@ def _resolve_agent(
 
 
 @click.group(
+    cls=_FamilyExitGroup,
     invoke_without_command=True,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
@@ -696,7 +731,7 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
             install_line = _missing_provider_install_line(model_id or cfg.model_default, e)
             if install_line:
                 click.echo(click.style(f"  {install_line}", fg="yellow"), err=True)
-        sys.exit(2)
+        sys.exit(EXIT_FAIL)
 
     import uuid
 
@@ -1285,7 +1320,7 @@ def search(
     # used to be silently dropped, so `search "q" --session <id>` returned unscoped
     # hits (even for a session id that doesn't exist) with exit 0. Reject the
     # half-specified combination up front instead of pretending it was applied
-    # (gh #135). Exit 2, like any other bad-usage error.
+    # (gh #135). Exit 64, like any other bad-usage error (ADR 0007).
     if (session_id is None) != (around_message_id is None):
         given, missing = ("--session", "--around") if session_id is not None else ("--around", "--session")
         raise click.UsageError(
@@ -1874,7 +1909,7 @@ def skills_install(path: Path) -> None:
         src_dir = path.parent
     if not skill_md.is_file():
         click.echo(click.style(f"No SKILL.md found at {path}.", fg="yellow"))
-        sys.exit(2)
+        sys.exit(EXIT_FAIL)
 
     import frontmatter
 
@@ -1891,7 +1926,7 @@ def skills_install(path: Path) -> None:
         click.echo(click.style("SKILL.md is invalid:", fg="red"))
         for e in errs:
             click.echo(f"  - {e}")
-        sys.exit(2)
+        sys.exit(EXIT_FAIL)
 
     target = hermes_home() / "skills" / install_name
     if target.exists():
@@ -2368,13 +2403,13 @@ def cron_create(prompt: str, schedule_expr: str, name: str | None, model: str | 
     try:
         job = create_job(prompt, schedule_expr, name=name, model=model)
     except ValueError as e:
-        # Preserve the exit code (2); emit the reason as a parseable object in
-        # --json mode instead of the human stderr line.
+        # An invalid --schedule is a usage error (64, ADR 0007); emit the reason as
+        # a parseable object in --json mode instead of the human stderr line.
         if as_json:
             click.echo(_json.dumps({"error": str(e)}))
         else:
             click.echo(click.style(f"Error: {e}", fg="red"), err=True)
-        sys.exit(2)
+        sys.exit(EXIT_USAGE)
     if as_json:
         click.echo(
             _json.dumps(
@@ -2922,7 +2957,7 @@ def _verify_json(*, model_id: str | None, keep_workspace: bool) -> NoReturn:
             default=str,
         )
     )
-    sys.exit(0 if overall_ok else 2)
+    sys.exit(EXIT_OK if overall_ok else EXIT_FAIL)
 
 
 @cli.command()
@@ -2982,7 +3017,7 @@ def verify(model_id: str | None, keep_workspace: bool, as_json: bool) -> None:
         click.echo(click.style(f"  ✗ bundled prompts missing: {missing}", fg="red"))
         click.echo(click.style(f"    expected under {prompts_dir}", fg="bright_black"))
         click.echo(click.style("    this is the v0.1.0/v0.1.1 packaging bug — upgrade to v0.1.2+", fg="yellow"))
-        sys.exit(2)
+        sys.exit(EXIT_FAIL)
     click.echo(click.style(f"  ✓ bundled prompts ({len(needed_prompts)} critical) present", fg="green"))
 
     # Count what the SkillLibrary actually LOADS, not just files on disk. A
@@ -3001,7 +3036,7 @@ def verify(model_id: str | None, keep_workspace: bool, as_json: bool) -> None:
     except Exception as exc:  # pragma: no cover - defensive
         n_loaded = 0
         click.echo(click.style(f"  ✗ failed to load bundled skills: {exc}", fg="red"))
-        sys.exit(2)
+        sys.exit(EXIT_FAIL)
 
     if n_files == 0:
         click.echo(click.style("  ⚠ no bundled SKILL.md files found", fg="yellow"))
@@ -3019,7 +3054,7 @@ def verify(model_id: str | None, keep_workspace: bool, as_json: bool) -> None:
                 fg="red",
             )
         )
-        sys.exit(2)
+        sys.exit(EXIT_FAIL)
     else:
         suffix = "" if n_loaded == n_files else f" ({n_files} shipped; rest platform-gated)"
         click.echo(click.style(f"  ✓ bundled skills: {n_loaded} loaded{suffix}", fg="green"))
@@ -3034,13 +3069,13 @@ def verify(model_id: str | None, keep_workspace: bool, as_json: bool) -> None:
         click.echo(click.style(f"  ✓ HERMES_HOME writable ({home})", fg="green"))
     except OSError as e:
         click.echo(click.style(f"  ✗ HERMES_HOME not writable ({home}): {e}", fg="red"))
-        sys.exit(2)
+        sys.exit(EXIT_FAIL)
 
     # ── (2b) FTS5 store opens — keyless, before any key check (gh #128) ──
     fts_ok, fts_detail = _fts5_store_probe(home)
     if not fts_ok:
         click.echo(click.style(f"  ✗ {fts_detail}", fg="red"))
-        sys.exit(2)
+        sys.exit(EXIT_FAIL)
     click.echo(click.style(f"  ✓ {fts_detail}", fg="green"))
 
     # ── (3) model API key sanity ─────────────────────────────────────────
@@ -3090,7 +3125,7 @@ def verify(model_id: str | None, keep_workspace: bool, as_json: bool) -> None:
             install_line = _missing_provider_install_line(model_for_run, e)
             if install_line:
                 click.echo(click.style(f"    {install_line}", fg="yellow"))
-            sys.exit(2)
+            sys.exit(EXIT_FAIL)
         build_s = time.perf_counter() - t0
         click.echo(click.style(f"  ✓ agent built in {build_s:.1f}s", fg="green"))
 
@@ -3109,7 +3144,7 @@ def verify(model_id: str | None, keep_workspace: bool, as_json: bool) -> None:
         except Exception as e:
             click.echo(click.style(f"  ✗ model invoke failed: {type(e).__name__}: {e}", fg="red"))
             click.echo(click.style("    (auth error? rate limit? check the API key + model id)", fg="bright_black"))
-            sys.exit(2)
+            sys.exit(EXIT_FAIL)
         invoke_s = time.perf_counter() - t0
 
         msgs = result.get("messages", [])
@@ -3119,7 +3154,7 @@ def verify(model_id: str | None, keep_workspace: bool, as_json: bool) -> None:
             content = "".join(b.get("text", "") for b in content if isinstance(b, dict))
         if not content:
             click.echo(click.style("  ✗ model returned an empty response", fg="red"))
-            sys.exit(2)
+            sys.exit(EXIT_FAIL)
         click.echo(click.style(f"  ✓ model round-trip in {invoke_s:.1f}s: {content.strip()[:80]!r}", fg="green"))
 
         # ── (6) FTS5 store wrote the turn ────────────────────────────────────
@@ -3128,7 +3163,7 @@ def verify(model_id: str | None, keep_workspace: bool, as_json: bool) -> None:
         db = home / "state.db"
         if not db.exists():
             click.echo(click.style("  ✗ FTS5 store wasn't created", fg="red"))
-            sys.exit(2)
+            sys.exit(EXIT_FAIL)
         conn = sqlite3.connect(str(db))
         try:
             n_sess = conn.execute("SELECT COUNT(*) FROM sessions WHERE id = ?", ("verify-001",)).fetchone()[0]
@@ -3236,7 +3271,7 @@ def demo(nudge_interval: int, keep_workspace: bool) -> None:
             res = run_demo(home=home, nudge_interval=nudge_interval)
         except Exception as e:  # pragma: no cover - defensive; surfaces a real regression
             click.echo(click.style(f"  ✗ demo run failed: {type(e).__name__}: {e}", fg="red"))
-            sys.exit(2)
+            sys.exit(EXIT_FAIL)
 
         click.echo(
             click.style(
@@ -3247,7 +3282,7 @@ def demo(nudge_interval: int, keep_workspace: bool) -> None:
 
         if not res.skill_created:
             click.echo(click.style("  ✗ the review subagent did not write a skill — the loop did not close", fg="red"))
-            sys.exit(2)
+            sys.exit(EXIT_FAIL)
 
         click.echo(click.style("  ✓ the review subagent reflected and called skill_manage(create)", fg="green"))
         click.echo(
@@ -3380,7 +3415,7 @@ def doctor(as_json: bool) -> None:
     # Provider PACKAGE importability — the dep most likely to be missing on a
     # fresh `pip install langstage-hermes` (no extras): the openai:* path needs
     # langchain-openai, which ships only behind the [openai] extra. doctor
-    # advertises that it checks "deps", and verify already fails (exit 2) here
+    # advertises that it checks "deps", and verify already fails (exit 1) here
     # naming the extra; doctor must agree instead of green-lighting a config that
     # cannot build. Mirror verify's gold-standard hint. (gh #41)
     # The prefix→package/extra table lives in _PROVIDER_PACKAGES so chat/verify
@@ -3449,7 +3484,7 @@ def doctor(as_json: bool) -> None:
 
     # A missing provider package OR a missing required API key means the configured
     # agent cannot make a single model call, so doctor must NOT return a clean exit
-    # — it would disagree with verify (exit 2) and with doctor's own missing-package
+    # — it would disagree with verify (exit 1) and with doctor's own missing-package
     # path. We defer the exit to here (rather than bailing mid-report) so the full
     # diagnostic still prints — doctor's value over verify is the complete picture —
     # while the exit code matches verify. (gh #41 for the package; gh #104 for the key.)
@@ -3461,7 +3496,7 @@ def doctor(as_json: bool) -> None:
         # `doctor --json | jq -e .ok` matches `doctor; echo $?`. (gh #108)
         click.echo(_json.dumps({"ok": ready, "checks": checks}, default=str))
     if not ready:
-        sys.exit(2)
+        sys.exit(EXIT_FAIL)
 
 
 # ── entry point ────────────────────────────────────────────────────

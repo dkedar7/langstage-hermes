@@ -52,13 +52,13 @@ _FAKE_GRAPH_INSTANCE = _FakeGraph()
 
 def test_chat_missing_anthropic_key_exits_clean_no_raw_traceback(monkeypatch, tmp_path):
     """The headline repro: default anthropic:* model, no key. Before the fix the
-    REPL opened, accepted 'hi', then leaked a raw TypeError. Now it exits 2 with
+    REPL opened, accepted 'hi', then leaked a raw TypeError. Now it exits 1 with
     verify's clean guidance BEFORE any input is consumed."""
     _isolate(monkeypatch, tmp_path)  # default model is anthropic:*
 
     r = CliRunner().invoke(cli, ["chat"], input="hi\n/quit\n")
 
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "model is anthropic:* but ANTHROPIC_API_KEY not set" in r.output
     # Points the user at the full preflight (chat-only pointer).
     assert "verify" in r.output
@@ -72,14 +72,14 @@ def test_chat_missing_anthropic_key_exits_clean_no_raw_traceback(monkeypatch, tm
 def test_chat_missing_openai_key_exits_clean(monkeypatch, tmp_path):
     """The openai:* variant: before the fix chat leaked a bare 'Missing
     credentials' at build; now it gives the same clean, provider-aware message
-    and exits 2 BEFORE trying to build (so it doesn't even need the [openai]
+    and exits 1 BEFORE trying to build (so it doesn't even need the [openai]
     extra installed)."""
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("LANGSTAGE_HERMES_MODEL_DEFAULT", "openai:openai/gpt-4o-mini")
 
     r = CliRunner().invoke(cli, ["chat"], input="hi\n/quit\n")
 
-    assert r.exit_code == 2, r.output
+    assert r.exit_code == 1, r.output
     assert "model is openai:* but neither OPENAI_API_KEY nor OPENROUTER_API_KEY set" in r.output
     # No raw build error leaked.
     assert "Missing credentials" not in r.output
@@ -144,19 +144,19 @@ def test_chat_spec_graph_bypasses_key_gate(monkeypatch, tmp_path):
 # ── _preflight_model_key unit contract (shared with verify) ─────────────────
 
 
-def test_preflight_exits_2_when_anthropic_key_missing(monkeypatch):
+def test_preflight_exits_1_when_anthropic_key_missing(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(SystemExit) as exc:
         _preflight_model_key("anthropic:claude-sonnet-4-6")
-    assert exc.value.code == 2
+    assert exc.value.code == 1
 
 
-def test_preflight_exits_2_when_openai_key_missing(monkeypatch):
+def test_preflight_exits_1_when_openai_key_missing(monkeypatch):
     for k in ("OPENAI_API_KEY", "OPENROUTER_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     with pytest.raises(SystemExit) as exc:
         _preflight_model_key("openai:openai/gpt-4o-mini")
-    assert exc.value.code == 2
+    assert exc.value.code == 1
 
 
 def test_preflight_passes_when_anthropic_key_present(monkeypatch):
