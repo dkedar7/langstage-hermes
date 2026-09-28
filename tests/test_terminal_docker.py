@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 
 import pytest
 
@@ -24,13 +25,32 @@ from langstage_hermes.tools.environments.docker import (
 
 # ── module-level skip when docker is unusable ────────────────────────
 
+
 # Per the SPEC: skip if the CLI is missing OR if `docker info` fails with
 # non-zero. Both conditions collapse into _docker_available(). We check at
 # module import time so the whole file goes "skipped" rather than producing
 # per-test skip noise.
-if not _docker_available():
+def _linux_containers() -> bool:
+    """Whether the daemon runs Linux containers, which the tests' image needs.
+
+    GitHub's windows-latest runners can have a reachable daemon in Windows-container
+    mode, where ``docker run python:3.13-slim`` fails with "Unable to find image".
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "info", "--format", "{{.OSType}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "linux"
+
+
+if not (_docker_available() and _linux_containers()):
     pytest.skip(
-        "Docker not available (CLI missing or daemon unreachable)",
+        "Docker not available (CLI missing, daemon unreachable, or not running Linux containers)",
         allow_module_level=True,
     )
 
@@ -97,15 +117,20 @@ def test_init_session_starts_container_and_cleanup_stops_it() -> None:
     finally:
         e.cleanup()
 
-    # After cleanup the container should be gone (--rm handles the delete).
-    # Give docker a moment to actually flush the stop.
-    result = subprocess.run(
-        ["docker", "ps", "-a", "--filter", f"name=^{e._container_name}$", "--format", "{{.ID}}"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    assert result.returncode == 0
+    # After cleanup the container should be gone. `docker stop` returns before the
+    # daemon finishes the --rm delete, so poll briefly rather than checking once.
+    deadline = time.monotonic() + 15
+    while True:
+        result = subprocess.run(
+            ["docker", "ps", "-a", "--filter", f"name=^{e._container_name}$", "--format", "{{.ID}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0
+        if not result.stdout.strip() or time.monotonic() > deadline:
+            break
+        time.sleep(0.5)
     assert not result.stdout.strip(), f"expected container {e._container_name} to be gone after cleanup, got: {result.stdout!r}"
 
 
