@@ -2,6 +2,18 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.37] - 2026-09-30
+
+### Fixed
+- **`--show-config --json` reports unknown config keys** (gh #170). `toml.unknown_keys` and
+  the `unknown_toml_key` entries in `issues` were always empty, because core's
+  `config_dict()` read an attribute hermes' own resolver never set. The human CLI's
+  stderr notes flagged the same typos. Both now come from the same detector over the
+  hermes TOML files (the shared `langstage.toml` is not linted, since it carries the
+  other stages' keys), and each issue's `did_you_mean` carries the typo suggestion. So
+  `langstage-hermes --show-config --json | jq -e '.toml.unknown_keys == []'` works as a
+  CI config-lint gate. The human `--show-config` lists them too.
+
 ## [0.4.36] - 2026-09-25
 
 ### Changed (breaking for scripts that matched the old codes)

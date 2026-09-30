@@ -820,6 +820,7 @@ class HermesConfig(HostConfig):
         # config_issues() read, so a present-but-malformed file is reported as MALFORMED,
         # not "no config found" (gh #151).
         obj._toml_files = base_toml_parsed + hermes_toml_parsed  # type: ignore[attr-defined]
+        obj._hermes_toml_files = hermes_toml_parsed  # type: ignore[attr-defined]  # unknown_toml_keys() (gh #170)
         obj._toml_malformed = base_malformed + hermes_malformed  # type: ignore[attr-defined]
         obj._value_issues = value_issues  # type: ignore[attr-defined]
         obj._toml_dirs = toml_dirs  # type: ignore[attr-defined]  # for toml_dir_for() (gh #162)
@@ -830,6 +831,31 @@ class HermesConfig(HostConfig):
         if use_toml:
             _warn_unknown_hermes_keys(hermes_toml_parsed)
         return obj
+
+    def unknown_toml_keys(self) -> list[str]:
+        """Unrecognized keys in the hermes TOML files, from the same detector as the
+        stderr ``note:`` lines (gh #84).
+
+        Core's version reads ``_toml_data``, which this resolver never sets, so
+        ``--show-config --json`` reported ``toml.unknown_keys: []`` and no issues while
+        the human CLI warned about the same typos (gh #170). The shared
+        ``langstage.toml`` isn't linted here: it carries the other stages' keys.
+        """
+        found = hermes_unknown_toml_keys(getattr(self, "_hermes_toml_files", []))
+        return sorted({dotted for _path, dotted, _hint in found})
+
+    def config_issues(self) -> list[dict]:
+        """Core's issues, with hermes' typo suggestion as ``did_you_mean`` (gh #170)."""
+        issues = super().config_issues()
+        hints = {dotted: hint for _path, dotted, hint in hermes_unknown_toml_keys(getattr(self, "_hermes_toml_files", []))}
+        for issue in issues:
+            if issue.get("kind") != "unknown_toml_key" or issue.get("did_you_mean"):
+                continue
+            hint = hints.get(issue.get("key"))
+            if hint:
+                issue["did_you_mean"] = hint
+                issue["message"] += f" (did you mean '{hint}'?)"
+        return issues
 
     def describe(self, omit_keys: list[str] | None = None, configurable: dict | None = None) -> str:
         """Like the base dump, but the 'no TOML found' line lists the search
