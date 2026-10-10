@@ -2,6 +2,15 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.38] - 2026-10-10
+
+### Fixed
+- **`python -m langstage_hermes.cron` parses its arguments** (gh #172). It ignored `sys.argv`, so `--help`,
+  `-h`, `--version` and any typo'd flag started the daemon, which never returns. Now `-h/--help` prints usage
+  (it runs the cron daemon forever; `langstage-hermes cron` is the full cron CLI) and `--version` prints
+  `langstage-hermes <version>`, both exiting `0`. Any other argument is a usage error, exit `64`, as the README's
+  exit-code table already said. No arguments still starts the daemon, and so does `langstage-hermes cron daemon`.
+
 ## [0.4.37] - 2026-09-30
 
 ### Fixed
