@@ -2,6 +2,15 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.39] - 2026-10-11
+
+### Fixed
+- **`memory show`'s empty-state hint leads somewhere** (gh #174). It said "Run `langstage-hermes demo` to see it
+  populated", but `demo` runs its loop in a throwaway home and copies only its session into `HERMES_HOME` (gh #114),
+  so `memory show` stayed empty and printed the same hint. The hint now says to run `langstage-hermes demo
+  --keep-workspace`, then set `HERMES_HOME` to the kept workspace and run `memory show`, or to ask the agent to
+  remember something in `chat`. `demo --keep-workspace` also prints that next step under the kept path.
+
 ## [0.4.38] - 2026-10-10
 
 ### Fixed
