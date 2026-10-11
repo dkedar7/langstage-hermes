@@ -1593,9 +1593,18 @@ def memory_show(only_user: bool, only_session: bool, as_json: bool) -> None:
                 fg="bright_black",
             )
         )
+        # `demo` alone never writes USER.md here: its loop runs in a throwaway home and
+        # only its session is copied back (gh #114), so point at the kept home (gh #174).
         click.echo(
             click.style(
-                '  or by user request ("remember that I prefer X"). Run `langstage-hermes demo` to see it populated.',
+                '  or by user request ("remember that I prefer X" in `chat`). To see one populated without a key,',
+                fg="bright_black",
+            )
+        )
+        click.echo(
+            click.style(
+                "  run `langstage-hermes demo --keep-workspace`, then set HERMES_HOME to the kept workspace"
+                " and run `langstage-hermes memory show`.",
                 fg="bright_black",
             )
         )
@@ -3343,6 +3352,12 @@ def demo(nudge_interval: int, keep_workspace: bool) -> None:
         if keep_workspace:
             click.echo()
             click.echo(click.style(f"  · workspace kept for inspection: {home}", fg="bright_black"))
+            click.echo(
+                click.style(
+                    "    its memory: set HERMES_HOME to that path and run `langstage-hermes memory show`",
+                    fg="bright_black",
+                )
+            )
         else:
             shutil.rmtree(home, ignore_errors=True)
 

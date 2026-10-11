@@ -14,6 +14,7 @@ class of bug a real user would hit.
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile as tempfile_mod
 from pathlib import Path
@@ -197,3 +198,34 @@ def test_demo_populates_the_store_search_reads(tmp_hermes_home: Path):
     assert human_res.exit_code == 0, human_res.output
     assert "No session store yet" not in human_res.output
     assert "demo-001" in human_res.output
+
+
+def test_memory_show_empty_hint_leads_to_a_populated_memory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """gh #174: ``memory show``'s empty-state hint must name a path that fills it.
+
+    It used to say "Run `langstage-hermes demo` to see it populated", but a bare
+    ``demo`` copies only its session back, never USER.md (gh #114). The hint now
+    points at ``demo --keep-workspace`` + HERMES_HOME=<kept home>; follow it.
+    """
+    empty = tmp_path / "empty_home"
+    empty.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(empty))
+    monkeypatch.delenv("LANGSTAGE_HERMES_HOME", raising=False)
+    hint = CliRunner().invoke(cli, ["memory", "show"])
+    assert hint.exit_code == 0, hint.output
+    assert "demo --keep-workspace" in hint.output
+    assert "Run `langstage-hermes demo` to see it populated" not in hint.output
+
+    _unset_hermes_home(monkeypatch)
+    scratch = tmp_path / "tmproot"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile_mod, "tempdir", str(scratch))
+    demo = CliRunner().invoke(cli, ["demo", "--keep-workspace"])
+    assert demo.exit_code == 0, demo.output
+    assert "langstage-hermes memory show" in demo.output
+    (kept,) = scratch.glob("dah-demo-*")
+
+    monkeypatch.setenv("HERMES_HOME", str(kept))
+    shown = CliRunner().invoke(cli, ["memory", "show", "--user", "--json"])
+    assert shown.exit_code == 0, shown.output
+    assert json.loads(shown.output)["user"]["content"].strip()
