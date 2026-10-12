@@ -2,6 +2,19 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.41] - 2026-10-12
+
+### Fixed
+- **Files the agent writes in `chat --workspace` land where you expect** (gh #177). The file tools are rooted at
+  the workspace (their `/` is the workspace), but the system prompt only said `Working directory: <host path>`.
+  A model that wrote to `<host path>/answer.txt` got that whole path re-rooted under the workspace, so the file
+  landed in `<ws>/<host path>/answer.txt` and the reply named a path where it didn't exist. On Windows the
+  drive-letter path was refused instead. The prompt now says the file tools' `/` is the workspace, and that the
+  user should be given the full host path. A host path inside the workspace (`/home/me/proj/answer.txt`,
+  `C:\Users\me\proj\answer.txt`, `C:/...`) is mapped to its `/` path before the tool runs, so it reaches
+  `<ws>/answer.txt`. `..` and paths outside the workspace are still refused or kept inside it, as before. A
+  `backend` passed to `create_hermes_agent` is left alone.
+
 ## [0.4.40] - 2026-10-11
 
 ### Changed

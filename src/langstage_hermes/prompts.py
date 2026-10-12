@@ -205,8 +205,13 @@ def build_context_files_prompt(cwd: Path | None = None) -> str:
 # ── environment hints ────────────────────────────────────────────────
 
 
-def _build_environment_hints(*, workspace_root: Path | None) -> str:
-    """One-line environment summary: python version, platform, cwd.
+def _build_environment_hints(*, workspace_root: Path | None, virtual_files: bool = False) -> str:
+    """Environment summary: python version, platform, cwd.
+
+    With ``virtual_files`` (hermes' own file tools, rooted at the workspace), a
+    second line says that the file tools' ``/`` is the working directory, and that
+    the user should be given the full host path. Without it the model passes the host
+    path it was shown, and the file lands in a nested copy under the workspace (gh #177).
 
     Deterministic for the lifetime of the process — does NOT include any
     wall-clock value (the date line is the only time-varying piece, and it
@@ -215,7 +220,15 @@ def _build_environment_hints(*, workspace_root: Path | None) -> str:
     py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     plat = _platform_mod.platform(terse=True)
     cwd = (workspace_root or Path.cwd()).resolve()
-    return f"Environment: Python {py} on {plat}. Working directory: {cwd}"
+    hint = f"Environment: Python {py} on {plat}. Working directory: {cwd}"
+    if virtual_files:
+        example = cwd / "answer.txt"
+        hint += (
+            f"\nFile tools are rooted at the working directory: their `/` is {cwd}, so pass "
+            f"`/answer.txt` for {example}. When you tell the user where a file is, give the full "
+            f"path on their machine ({example}), not the `/`-rooted one."
+        )
+    return hint
 
 
 # ── stable-layer assembly ────────────────────────────────────────────
@@ -272,6 +285,7 @@ def _build_stable_layer(
     model_id: str,
     platform: str,
     workspace_root: Path | None,
+    virtual_files: bool = False,
 ) -> str:
     """Assemble the stable layer (identity + guidance + env hints + platform hint)."""
     parts: list[str] = []
@@ -285,7 +299,7 @@ def _build_stable_layer(
 
     parts.extend(_model_family_blocks(model_id))
 
-    _append_nonempty(parts, _build_environment_hints(workspace_root=workspace_root))
+    _append_nonempty(parts, _build_environment_hints(workspace_root=workspace_root, virtual_files=virtual_files))
 
     if platform:
         _append_nonempty(parts, load_prompt(f"platform_hints/{platform.lower()}.md").strip())
@@ -390,6 +404,10 @@ class PromptAssemblyMiddleware(AgentMiddleware):
         workspace_root: Working directory for context-file discovery and the
             environment hint. Default: ``None`` (use the process cwd at
             assembly time).
+        virtual_files: ``True`` when the file tools are rooted at
+            ``workspace_root`` (``/`` is the workspace), as with the backend
+            ``create_hermes_agent`` builds. The environment hint then says so.
+            Default ``False`` (paths are real host paths).
     """
 
     def __init__(
@@ -399,11 +417,13 @@ class PromptAssemblyMiddleware(AgentMiddleware):
         platform: str = "cli",
         system_message: str = "",
         workspace_root: Path | None = None,
+        virtual_files: bool = False,
     ) -> None:
         self.enabled_toolsets: tuple[str, ...] = tuple(enabled_toolsets)
         self.platform = platform
         self.system_message = system_message
         self.workspace_root = workspace_root
+        self.virtual_files = virtual_files
 
     # ── public assembly entry point (handy for tests & debugging) ────
 
@@ -424,6 +444,7 @@ class PromptAssemblyMiddleware(AgentMiddleware):
             model_id=model_id,
             platform=self.platform,
             workspace_root=self.workspace_root,
+            virtual_files=self.virtual_files,
         )
         context = _build_context_layer(
             system_message=self.system_message,

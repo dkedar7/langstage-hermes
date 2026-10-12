@@ -54,6 +54,7 @@ from langstage_hermes.skills.tools import make_skill_tools
 from langstage_hermes.store.recorder import HermesStateRecorderMiddleware
 from langstage_hermes.store.sqlite_fts import SqliteFtsStore
 from langstage_hermes.tools.toolsets import resolve_enabled
+from langstage_hermes.workspace_paths import WorkspacePathMiddleware
 
 log = logging.getLogger(__name__)
 
@@ -261,13 +262,16 @@ def create_hermes_agent(
         # to the supplied backend, not us.
         fs_backend = backend
     else:
-        # virtual_mode=True so the agent's '/workspace/foo.py' (its natural
-        # absolute-path convention from the system prompt) resolves under our
-        # configured root rather than literal C:\workspace\foo.py. Without this,
-        # the agent silently writes to / reads from a path the user can't
-        # introspect — surfaced in the 2026-06-02 dogfood when reported file
-        # writes didn't appear on disk.
+        # virtual_mode=True keeps the file tools inside the workspace: their `/`
+        # is `ws` and `..` is refused. The system prompt says so (virtual_files
+        # below), and WorkspacePathMiddleware maps a host path inside `ws` to its
+        # `/` path, so a model that uses the host path anyway writes
+        # `<ws>/answer.txt`, not a nested `<ws>/<ws-path>/answer.txt` (gh #177).
         fs_backend = FilesystemBackend(root_dir=str(ws), virtual_mode=True)
+    fs_middleware = FilesystemMiddleware(backend=fs_backend)
+    path_middleware: list[Any] = []
+    if backend is None:
+        path_middleware.append(WorkspacePathMiddleware(workspace_root=ws, tool_names=[t.name for t in fs_middleware.tools]))
 
     # ── review subagent (reflection target) ──────────────────────────────
     # Wire the memory + skill_manage tools so the review fork can actually
@@ -295,6 +299,7 @@ def create_hermes_agent(
             enabled_toolsets=list(enabled_toolsets),
             platform=os.getenv("HERMES_PLATFORM", "cli"),
             workspace_root=ws,
+            virtual_files=backend is None,
         ),
         SkillLoaderMiddleware(library),
         # Memory snapshot loader / writer.
@@ -325,7 +330,8 @@ def create_hermes_agent(
         ),
         # Deepagents built-ins.
         TodoListMiddleware(),
-        FilesystemMiddleware(backend=fs_backend),
+        *path_middleware,
+        fs_middleware,
         SubAgentMiddleware(
             backend=fs_backend,
             subagents=[review_subagent],
