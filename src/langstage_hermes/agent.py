@@ -283,6 +283,16 @@ def create_hermes_agent(
     )
     review_tools = [*skill_tools, *_memory_mw_for_tools.tools]
     review_subagent = build_review_subagent(library=library, store=store, aux_model=aux_model, tools=review_tools)
+    # Compile it once and use the same graph for both ways a review can run:
+    # ReflectionMiddleware runs it itself when a review is due (gh #179: before,
+    # nothing passed it a graph, so a due review was dropped), and the model can
+    # still ask for it with `task(subagent_type="review")`.
+    review_graph = create_agent(
+        review_subagent["model"],
+        system_prompt=review_subagent["system_prompt"],
+        tools=review_subagent["tools"],
+        name=review_subagent["name"],
+    )
 
     # ── compose the middleware stack (SPEC §4 order) ─────────────────────
     # Note: deepagents inserts TodoList + Filesystem + SubAgent earlier in
@@ -317,6 +327,7 @@ def create_hermes_agent(
             store=store,
             model=main_model,
             aux_model=aux_model,
+            review_graph=review_graph,
         ),
         # Curator — runs on session start if idle gates open.
         CuratorMiddleware(
@@ -334,7 +345,13 @@ def create_hermes_agent(
         fs_middleware,
         SubAgentMiddleware(
             backend=fs_backend,
-            subagents=[review_subagent],
+            subagents=[
+                {
+                    "name": review_subagent["name"],
+                    "description": review_subagent["description"],
+                    "runnable": review_graph,
+                }
+            ],
         ),
         # Compression near the end so it sees the fully-assembled prompt + state.
         HermesCompressionMiddleware(

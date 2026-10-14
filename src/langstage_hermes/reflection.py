@@ -169,6 +169,8 @@ def build_review_subagent(
 
 _SKILL_TOOL_NAME = "skill_manage"
 _MEMORY_TOOL_NAME = "memory"
+_TASK_TOOL_NAME = "task"
+_REVIEW_SUBAGENT_NAME = "review"
 
 
 class ReflectionMiddleware(AgentMiddleware):
@@ -226,11 +228,11 @@ class ReflectionMiddleware(AgentMiddleware):
                 ``model`` if ``None``.
             skills_toolset_enabled: When ``False``, ``iters_since_skill`` is
                 never bumped (no review will fire for skills).
-            review_graph: Pre-compiled review subgraph. If ``None``, the
-                middleware can't invoke synchronously; callers must wire the
-                review subagent via ``SubAgentMiddleware`` instead and
-                implement their own dispatch in ``after_agent``. Passing this
-                lets tests inject a mock.
+            review_graph: The compiled review subagent graph that
+                ``after_agent`` runs when a review is due.
+                ``create_hermes_agent`` always passes one (gh #179). If
+                ``None``, a due review is skipped with a WARNING and the
+                counters reset.
         """
         super().__init__()
         self.skill_nudge_interval = skill_nudge_interval
@@ -259,7 +261,8 @@ class ReflectionMiddleware(AgentMiddleware):
         # Only bookkeep on a clean result; let exceptions propagate and let
         # `wrap_tool_call`s further out handle them.
         tool_name = request.tool_call.get("name") if request.tool_call else None
-        update = self._counter_update_for_tool(tool_name, request.state)
+        tool_args = request.tool_call.get("args") if request.tool_call else None
+        update = self._counter_update_for_tool(tool_name, request.state, tool_args)
         if not update:
             return result
 
@@ -273,8 +276,13 @@ class ReflectionMiddleware(AgentMiddleware):
         # alongside the message.
         return Command(update={**update, "messages": [result]})
 
-    def _counter_update_for_tool(self, tool_name: str | None, state: Any) -> dict[str, Any]:
+    def _counter_update_for_tool(self, tool_name: str | None, state: Any, args: Any = None) -> dict[str, Any]:
         """Decide which counter to bump/reset based on the tool that ran."""
+        if tool_name == _TASK_TOOL_NAME and isinstance(args, dict) and args.get("subagent_type") == _REVIEW_SUBAGENT_NAME:
+            # The model delegated to the review subagent itself, so this turn's
+            # review has happened. Reset both counters so ``after_agent`` doesn't
+            # run a second one on the same turn (gh #179).
+            return {"iters_since_skill": 0, "turns_since_memory": 0}
         if tool_name == _SKILL_TOOL_NAME:
             # Successful skill_manage call resets the skills counter.
             return {"iters_since_skill": 0}
@@ -359,35 +367,43 @@ class ReflectionMiddleware(AgentMiddleware):
 
     def after_agent(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
         """Invoke the review subagent synchronously and clear the counters."""
+        kind, reset = self._due_review(state)
+        if kind is None:
+            return None
+        if self._review_graph is None:
+            self._warn_unwired(kind)
+            return reset
+        try:
+            self._review_graph.invoke(self._review_input(state, kind))
+        except Exception as exc:
+            logger.warning("Reflection: review subagent failed: %s", exc)
+        return reset
+
+    def _due_review(self, state: Any) -> tuple[str | None, dict[str, Any]]:
+        """Return the pending review kind and the counter reset it implies."""
         kind = self._get(state, "pending_review_kind")
         if not kind:
-            return None
-
-        review_prompt = self._prompt_for(kind)
+            return None, {}
         reset: dict[str, Any] = {"pending_review_kind": None}
         if kind in ("skills", "combined"):
             reset["iters_since_skill"] = 0
         if kind in ("memory", "combined"):
             reset["turns_since_memory"] = 0
+        return kind, reset
 
-        if self._review_graph is None:
-            # No compiled subgraph wired — log and return the counter reset
-            # anyway so the trigger doesn't stay stuck on. Production wiring
-            # via SubAgentMiddleware will replace this branch.
-            logger.info(
-                "Reflection: pending_review_kind=%s but no review_graph wired; skipping inline invocation (counters reset).",
-                kind,
-            )
-            return reset
+    def _review_input(self, state: Any, kind: str) -> dict[str, Any]:
+        history = list(self._messages(state))
+        return {"messages": [*history, HumanMessage(content=self._prompt_for(kind))]}
 
-        try:
-            history = list(self._messages(state))
-            sub_state = {"messages": [*history, HumanMessage(content=review_prompt)]}
-            self._review_graph.invoke(sub_state)
-        except Exception as exc:
-            logger.warning("Reflection: review subagent failed: %s", exc)
-
-        return reset
+    @staticmethod
+    def _warn_unwired(kind: str) -> None:
+        # ``create_hermes_agent`` always wires a review graph (gh #179). A host
+        # that builds this middleware itself without one gets no review, and is
+        # told so here; the counters still reset so the trigger doesn't stick.
+        logger.warning(
+            "Reflection: a %s review is due but no review_graph is wired, so it was skipped (counters reset).",
+            kind,
+        )
 
     # ── helpers ──────────────────────────────────────────────────
 
@@ -426,7 +442,8 @@ class ReflectionMiddleware(AgentMiddleware):
     ) -> ToolMessage | Command:
         result = await handler(request)
         tool_name = request.tool_call.get("name") if request.tool_call else None
-        update = self._counter_update_for_tool(tool_name, request.state)
+        tool_args = request.tool_call.get("args") if request.tool_call else None
+        update = self._counter_update_for_tool(tool_name, request.state, tool_args)
         if not update:
             return result
         if isinstance(result, Command):
@@ -442,8 +459,23 @@ class ReflectionMiddleware(AgentMiddleware):
         return self.after_model(state, runtime)
 
     async def aafter_agent(self, state: Any, runtime: Runtime[Any] | None = None) -> dict[str, Any] | None:
-        # Synchronous path is fine — review_graph.invoke is sync.
-        return self.after_agent(state, runtime)
+        # Await the review on the async path (chat drives the graph through the
+        # async AG-UI adapter) so it doesn't block the event loop.
+        kind, reset = self._due_review(state)
+        if kind is None:
+            return None
+        if self._review_graph is None:
+            self._warn_unwired(kind)
+            return reset
+        try:
+            ainvoke = getattr(self._review_graph, "ainvoke", None)
+            if callable(ainvoke):
+                await ainvoke(self._review_input(state, kind))
+            else:
+                self._review_graph.invoke(self._review_input(state, kind))
+        except Exception as exc:
+            logger.warning("Reflection: review subagent failed: %s", exc)
+        return reset
 
 
 __all__ = [
