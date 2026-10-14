@@ -3221,7 +3221,7 @@ def demo(nudge_interval: int, keep_workspace: bool) -> None:
     live multi-turn session (see ``examples/dogfood_procedural.py``).
 
     This runs the SAME machinery — ``create_hermes_agent`` with the genuine
-    ``ReflectionMiddleware``, the real ``task`` review dispatch, ``skill_manage``
+    ``ReflectionMiddleware``, the review it runs when one is due, ``skill_manage``
     / ``memory`` tools, ``SkillLibrary.write()``, the audit log and FTS5 store —
     against a scripted fake model instead of a live provider. No network, no key.
     It prints the generated skill so you can see exactly what the loop produces.

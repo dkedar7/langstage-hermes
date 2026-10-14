@@ -1,7 +1,7 @@
 """Tests for the keyless / offline reflection→skill-creation demo (gh #69).
 
 The demo drives the REAL shipped machinery — ``create_hermes_agent`` with the
-genuine ``ReflectionMiddleware``, the ``task`` review dispatch, the real
+genuine ``ReflectionMiddleware``, the review it runs when one is due, the real
 ``skill_manage`` / ``memory`` tools, ``SkillLibrary.write()``, the audit log and
 the FTS5 store — against a scripted fake model instead of a live provider. These
 tests assert the loop closes with NO API key and writes the real side effects,

@@ -2,6 +2,21 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.42] - 2026-10-14
+
+### Fixed
+- **The reflection review runs in the shipped agent** (gh #179). When ~10 tool-using iterations or user turns
+  had passed, `ReflectionMiddleware` marked a review as due, but `create_hermes_agent` never gave it the review
+  subagent to run. It logged an INFO line nobody saw, reset its counters, and dropped the review, so no
+  `SKILL.md` or memory note was ever written unless the model called `task(subagent_type="review")` on its own,
+  which nothing told it to do. `create_hermes_agent` now compiles the review subagent once and hands it to the
+  middleware, which runs it on the aux model when the turn ends (awaited on the async path `chat` uses). The
+  same graph still serves `task(review)`; if the model asks for the review itself, the counters reset and the
+  middleware doesn't run a second one that turn. A host that builds `ReflectionMiddleware` without a review graph
+  now gets a WARNING when a review is skipped. Each due review costs a few aux-model calls (default every ~10
+  tool-using iterations or user turns); tune `skills.creation_nudge_interval` / `memory.nudge_interval` to change
+  how often. `demo` now closes the loop the same way: its scripted model no longer calls `task(review)`.
+
 ## [0.4.41] - 2026-10-12
 
 ### Fixed

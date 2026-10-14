@@ -22,7 +22,7 @@ A faithful reproduction of [Nous Research's Hermes Agent](https://github.com/nou
 
 A `deepagents`-built agent with a **closed reflection→skill-creation loop**:
 
-- After ~10 tool-using iterations, a review subagent runs in the background, writes/patches a `SKILL.md` capturing the pattern it just exercised, and ships it to a skill library.
+- After ~10 tool-using iterations (`skills.creation_nudge_interval`) or ~10 user turns (`memory.nudge_interval`), a review subagent runs when the turn ends. It writes/patches a `SKILL.md` capturing the pattern it just exercised, ships it to a skill library, and saves durable notes to memory. It runs on the aux model (`model.aux_model`) before your next prompt, so that turn takes a little longer and costs a few aux-model calls.
 - Next session, the agent reads the library at startup, sees the new skill's description in its system prompt, and can `skill_view(name)` to load the full body on demand (progressive disclosure per the [agentskills.io spec](https://agentskills.io/specification.md)).
 - A weekly **curator** consolidates skills into umbrellas and archives stale ones.
 - A **frozen-snapshot memory** (`MEMORY.md` + `USER.md`) preserves prefix-cache hits for the entire session.

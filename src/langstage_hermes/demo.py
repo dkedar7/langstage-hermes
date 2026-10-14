@@ -23,10 +23,11 @@ thread in a scripted ``BaseChatModel`` whose turns:
 
 1. call a real tool a few times (crossing the ``skills_creation_nudge_interval``
    counter that ``ReflectionMiddleware`` tracks), then
-2. spawn the ``review`` subagent via the genuine ``task`` tool — exactly how the
-   live runtime closes the loop.
+2. give a final answer. Like a real model, it never asks for a review itself.
 
-The review subagent (driven by the scripted *aux* model) then calls the real
+``ReflectionMiddleware`` sees the review is due and runs the ``review`` subagent
+once the turn ends, which is how the live runtime closes the loop (gh #179). The
+review subagent (driven by the scripted *aux* model) then calls the real
 ``skill_manage`` + ``memory`` tools, writing the real files.
 
 ``run_demo`` is import-and-call friendly so both the CLI ``demo`` command and the
@@ -42,7 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 # ── the canned skill + memory the review subagent "discovers" ────────────────
@@ -113,11 +114,15 @@ class DemoMainModel(_ScriptedModel):
 
     Emits ``nudge_interval`` tool-using turns (a harmless ``ls``) so the genuine
     ``ReflectionMiddleware`` counter crosses ``skills_creation_nudge_interval``,
-    then spawns the ``review`` subagent via the real ``task`` tool, then returns
-    a final text answer.
+    then returns a final text answer. The middleware runs the review.
+
+    With ``delegate_review=True`` it instead asks for the review itself with the
+    real ``task`` tool before answering (a model may do that too); the middleware
+    then doesn't run a second one.
     """
 
     nudge_interval: int = 3
+    delegate_review: bool = False
 
     def _generate(self, messages: list[Any], stop: Any = None, run_manager: Any = None, **kwargs: Any) -> ChatResult:
         n_ai = sum(1 for m in messages if isinstance(m, AIMessage))
@@ -128,9 +133,8 @@ class DemoMainModel(_ScriptedModel):
             # that the README then sends new users to inspect with `search` (gh #102).
             # A valid, read-only cwd listing keeps the recorded trace clean.
             return self._result(AIMessage(content="", tool_calls=[{"name": _LS_TOOL, "id": f"ls-{n_ai}", "args": {"path": "."}}]))
-        if n_ai == self.nudge_interval:
-            # Cross the threshold, then spawn the reflection review subagent the
-            # same way the live agent does — via the genuine `task` tool.
+        if self.delegate_review and n_ai == self.nudge_interval:
+            # Ask for the review subagent directly via the genuine `task` tool.
             return self._result(
                 AIMessage(
                     content="",
@@ -150,7 +154,7 @@ class DemoMainModel(_ScriptedModel):
                     ],
                 )
             )
-        return self._result(AIMessage(content="Done — reflected on the session and persisted what was reusable."))
+        return self._result(AIMessage(content="Done — I used the same procedure to profile each slow Python script."))
 
 
 class DemoReviewModel(_ScriptedModel):
@@ -168,7 +172,11 @@ class DemoReviewModel(_ScriptedModel):
     memory_entry: str = DEMO_MEMORY_ENTRY
 
     def _generate(self, messages: list[Any], stop: Any = None, run_manager: Any = None, **kwargs: Any) -> ChatResult:
-        already_acted = any(isinstance(m, ToolMessage) for m in messages)
+        # Only this review's own tool results count: when ReflectionMiddleware runs
+        # the review itself it passes the whole conversation (with the main turn's
+        # tool results) followed by the review prompt as the last human message.
+        last_human = max((i for i, m in enumerate(messages) if isinstance(m, HumanMessage)), default=-1)
+        already_acted = any(isinstance(m, ToolMessage) for m in messages[last_human + 1 :])
         if not already_acted:
             return self._result(
                 AIMessage(
