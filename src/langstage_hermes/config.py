@@ -221,20 +221,6 @@ def _toml_winner(parsed: list[tuple[Path, dict]], tkey: str) -> Path | None:
     return winner
 
 
-def _toml_source_label(parsed: list[tuple[Path, dict]], tkey: str) -> str:
-    """Name the HIGHEST-precedence parsed file that actually sets ``tkey``.
-
-    ``parsed`` is in ascending precedence, so the last file containing the key is
-    the one whose value wins the merge — that's the file to attribute it to,
-    instead of unconditionally the last file *read* (the gh #55 mislabel).
-    """
-    winner: Path | None = None
-    for p, data in parsed:
-        if _get_dotted(data, tkey) is not None:
-            winner = p
-    return f"toml ({winner.name})" if winner is not None else "toml"
-
-
 # ── Unknown-key detection (gh #84) ───────────────────────────────────
 #
 # A syntactically valid but unrecognized key in a hermes TOML is silently
@@ -727,38 +713,40 @@ class HermesConfig(HostConfig):
 
             tkey = toml_map.get(name)
             if tkey is not None:
-                # Look up the field in BOTH TOML stacks — hermes TOML wins
-                # because we check it second (overwrites).
-                tv = _get_dotted(base_toml_data, tkey)
-                if tv is not None:
-                    try:
-                        val = _coerce(f, tv)
-                    except (ValueError, TypeError) as exc:
-                        # A type-mismatched TOML value must degrade, not crash the
-                        # command that loads config (gh #122). The env layer below
-                        # already does this (gh #83), and so does the base
-                        # HostConfig.resolve() for its own TOML cast — but this
-                        # override re-implements the TOML loop to layer both TOML
-                        # stacks and dropped the guard. Keep the value/source
-                        # resolved so far and emit the same one-line note via the
-                        # shared core helper so the wording can't drift.
-                        _warn_malformed_toml_value(tkey, tv, exc, val, base_toml_paths)
-                        value_issues.append(_value_issue("malformed_value", name, f"toml:{tkey}", tv, exc, val))
-                    else:
-                        src = _toml_source_label(base_toml_parsed, tkey)
-                        winner = _toml_winner(base_toml_parsed, tkey)
-                        toml_dir = winner.parent if winner is not None else None
-                tv2 = _get_dotted(hermes_toml_data, tkey)
-                if tv2 is not None:
-                    try:
-                        val = _coerce(f, tv2)
-                    except (ValueError, TypeError) as exc:
-                        _warn_malformed_toml_value(tkey, tv2, exc, val, hermes_toml_paths)
-                        value_issues.append(_value_issue("malformed_value", name, f"toml:{tkey}", tv2, exc, val))
-                    else:
-                        src = _toml_source_label(hermes_toml_parsed, tkey)
-                        winner = _toml_winner(hermes_toml_parsed, tkey)
-                        toml_dir = winner.parent if winner is not None else None
+                # Coerce each file on its own, lowest precedence first: the base stack
+                # (global ~/.langstage/config.toml, then the project langstage.toml),
+                # then the hermes stack ($HERMES_HOME/config.toml, then the project
+                # langstage-hermes.toml). A value that can't be coerced keeps whatever
+                # the layer beneath resolved, so a typo in a project file falls back to
+                # the global value one layer down, not to the default (the hermes twin
+                # of langstage-core #207). It must degrade, never crash the command
+                # that loads config (gh #122). Each accepted value is attributed to the
+                # file that supplied it (gh #55), and a relative path is rebased onto
+                # that file's directory (gh #162). A table-valued key keeps each
+                # stack's deep-merged view, so global and project entries still combine.
+                for merged, parsed in (
+                    (base_toml_data, base_toml_parsed),
+                    (hermes_toml_data, hermes_toml_parsed),
+                ):
+                    layers = parsed
+                    if isinstance(_get_dotted(merged, tkey), dict):
+                        winner = _toml_winner(parsed, tkey)
+                        layers = [(winner, merged)] if winner is not None else []
+                    for tpath, tdata in layers:
+                        tv = _get_dotted(tdata, tkey)
+                        if tv is None:
+                            continue
+                        try:
+                            coerced = _coerce(f, tv)
+                        except (ValueError, TypeError) as exc:
+                            # Same one-line note as core, via the shared helper, so the
+                            # wording can't drift.
+                            _warn_malformed_toml_value(tkey, tv, exc, val, [tpath], kept_src=src)
+                            value_issues.append(_value_issue("malformed_value", name, f"toml:{tkey}", tv, exc, val))
+                            continue
+                        val = coerced
+                        src = f"toml ({tpath.name})"
+                        toml_dir = tpath.parent
 
             if name in env_map:
                 var, caster = env_map[name]

@@ -2,6 +2,18 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.43] - 2026-10-15
+
+### Fixed
+- **A bad project TOML value falls back to the global value, not the default** (gh #181). Each TOML stack
+  (`~/.langstage/config.toml` + `langstage.toml`, `$HERMES_HOME/config.toml` + `langstage-hermes.toml`) was
+  deep-merged before anything was coerced, so a value in a project file that couldn't be coerced
+  (`max_iterations = "forty"`) threw away a valid value in the global file of the same stack and the field fell
+  back to its default. Each file is now coerced on its own, lowest precedence first, so the bad value falls back
+  one layer, as langstage-core 1.0.49 does for its own layers (langstage-core #207). The note names the value
+  kept and the file it came from. Table-valued keys (`skills.platform_disabled`) still merge across files.
+  Requires langstage-core 1.0.49.
+
 ## [0.4.42] - 2026-10-14
 
 ### Fixed
