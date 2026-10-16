@@ -670,3 +670,87 @@ class TestMalformedTomlValue:
         cfg = HermesConfig.resolve(toml_start=tmp_path)
         assert cfg.memory_nudge_interval == 7
         assert "langstage-hermes.toml" in cfg.sources["memory_nudge_interval"]
+
+
+class TestBadProjectTomlFallsBackOneLayer:
+    """A value a project file can't coerce falls back to the layer beneath, not to the
+    default (the hermes twin of langstage-core #207).
+
+    Each TOML stack used to be deep-merged before anything was coerced, so a typo in a
+    project file threw away a valid value in the global file of the same stack. Each
+    file is now coerced on its own: global langstage config, project langstage.toml,
+    $HERMES_HOME/config.toml, then the project langstage-hermes.toml.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, monkeypatch, tmp_path):
+        import langstage_core.host.config as core_config
+
+        getattr(core_config, "_warned_malformed_toml_value", set()).clear()
+        _strip_env(monkeypatch)
+        self.core_home = tmp_path / "core_home"
+        self.hermes_home = tmp_path / "hermes_home"
+        self.proj = tmp_path / "proj"
+        for d in (self.core_home, self.hermes_home, self.proj):
+            d.mkdir()
+        monkeypatch.setenv("LANGSTAGE_CONFIG_HOME", str(self.core_home))
+        monkeypatch.setenv("LANGSTAGE_HERMES_HOME", str(self.hermes_home))
+        monkeypatch.chdir(self.proj)
+        yield
+        getattr(core_config, "_warned_malformed_toml_value", set()).clear()
+
+    def _write(self, path, body):
+        path.write_text(body, encoding="utf-8")
+
+    def test_bad_hermes_project_value_keeps_hermes_global_value(self, capsys):
+        self._write(self.hermes_home / "config.toml", "[agent]\nmax_iterations = 40\n")
+        self._write(self.proj / "langstage-hermes.toml", '[agent]\nmax_iterations = "forty"\n')
+        cfg = HermesConfig.resolve(toml_start=self.proj)
+        assert cfg.agent_max_iterations == 40
+        assert cfg.sources["agent_max_iterations"] == "toml (config.toml)"
+        err = capsys.readouterr().err
+        assert "using 40 (toml (config.toml)) instead" in err
+        assert "langstage-hermes.toml" in err
+
+    def test_bad_project_langstage_toml_keeps_global_langstage_value(self):
+        self._write(self.core_home / "config.toml", "[agent]\nmax_iterations = 40\n")
+        self._write(self.proj / "langstage.toml", "[agent]\nmax_iterations = 3.5\n")
+        cfg = HermesConfig.resolve(toml_start=self.proj)
+        assert cfg.agent_max_iterations == 40
+        assert cfg.sources["agent_max_iterations"] == "toml (config.toml)"
+
+    def test_bad_hermes_files_fall_back_across_stacks(self):
+        self._write(self.proj / "langstage.toml", "[agent]\nmax_iterations = 30\n")
+        self._write(self.hermes_home / "config.toml", '[agent]\nmax_iterations = "x"\n')
+        self._write(self.proj / "langstage-hermes.toml", '[agent]\nmax_iterations = "y"\n')
+        cfg = HermesConfig.resolve(toml_start=self.proj)
+        assert cfg.agent_max_iterations == 30
+        assert cfg.sources["agent_max_iterations"] == "toml (langstage.toml)"
+
+    def test_every_layer_bad_keeps_default(self):
+        self._write(self.hermes_home / "config.toml", '[agent]\nmax_iterations = "x"\n')
+        self._write(self.proj / "langstage-hermes.toml", '[agent]\nmax_iterations = "y"\n')
+        cfg = HermesConfig.resolve(toml_start=self.proj)
+        assert cfg.agent_max_iterations == HermesConfig.agent_max_iterations
+        assert cfg.sources["agent_max_iterations"] == "default"
+
+    def test_valid_project_value_still_wins(self):
+        self._write(self.hermes_home / "config.toml", "[agent]\nmax_iterations = 40\n")
+        self._write(self.proj / "langstage-hermes.toml", "[agent]\nmax_iterations = 12\n")
+        cfg = HermesConfig.resolve(toml_start=self.proj)
+        assert cfg.agent_max_iterations == 12
+        assert cfg.sources["agent_max_iterations"] == "toml (langstage-hermes.toml)"
+
+    def test_relative_path_rebases_onto_the_file_that_set_it(self):
+        # The project file is read but does not set the key, so the global value is
+        # used, and its relative entry resolves against the GLOBAL file's directory.
+        self._write(self.hermes_home / "config.toml", '[skills]\nexternal_dirs = ["shared"]\n')
+        self._write(self.proj / "langstage-hermes.toml", "[agent]\nmax_iterations = 12\n")
+        cfg = HermesConfig.resolve(toml_start=self.proj)
+        assert [Path(p) for p in cfg.skills_external_dirs] == [(self.hermes_home / "shared").resolve()]
+
+    def test_table_keys_still_merge_global_and_project(self):
+        self._write(self.hermes_home / "config.toml", '[skills.platform_disabled]\ncli = ["a"]\n')
+        self._write(self.proj / "langstage-hermes.toml", '[skills.platform_disabled]\nweb = ["b"]\n')
+        cfg = HermesConfig.resolve(toml_start=self.proj)
+        assert cfg.skills_platform_disabled == {"cli": ["a"], "web": ["b"]}
