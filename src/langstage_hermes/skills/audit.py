@@ -90,7 +90,7 @@ def _restore_archived_dir(target: MutationRow, path: Path) -> None:
     prefix = f"{target.skill_name}-"
     candidates: list[tuple[float, Path]] = []
     for d in archive_root.iterdir():
-        stamp = d.name[len(prefix):]
+        stamp = d.name[len(prefix) :]
         if not (d.is_dir() and d.name.startswith(prefix) and _ARCHIVE_STAMP.fullmatch(stamp)):
             continue
         try:

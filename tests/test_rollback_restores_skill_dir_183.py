@@ -4,6 +4,7 @@
 the rollback used to write back only SKILL.md and leave the supporting files in
 `_archived/`, so the "restored" skill was silently broken.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,8 +17,9 @@ from langstage_hermes.skills.library import SkillLibrary
 
 def _make_tool_skill(skills: Path) -> Path:
     lib = SkillLibrary(dirs=[skills])
-    lib.write("tool-skill", {"name": "tool-skill", "description": "Run the helper script."},
-              "# Tool skill\n\nRun scripts/helper.py.\n")
+    lib.write(
+        "tool-skill", {"name": "tool-skill", "description": "Run the helper script."}, "# Tool skill\n\nRun scripts/helper.py.\n"
+    )
     d = skills / "tool-skill"
     (d / "scripts").mkdir()
     (d / "scripts" / "helper.py").write_text("print(42)\n", encoding="utf-8")
