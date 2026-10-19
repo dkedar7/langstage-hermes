@@ -2,6 +2,17 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.44] - 2026-10-19
+
+### Fixed
+- **`audit rollback` of a `skills remove` restores the whole skill, not just SKILL.md** (gh #183). `remove`
+  archives the skill's directory under `skills/_archived/<name>-<stamp>/`, but the restore command it prints
+  wrote back only SKILL.md, so a skill's `scripts/`, `references/` and `assets/` stayed in the archive and the
+  "restored" skill was silently broken. Rolling back a delete now moves the matching archive back whole (found
+  by its SKILL.md content, stamped closest to the delete). If the skill's directory was recreated in the
+  meantime, only the files it lacks are copied in, and nothing is overwritten. With no archive left (cleaned up
+  by hand) the SKILL.md restore still works as before. This covers the agent's own rollbacks too.
+
 ## [0.4.43] - 2026-10-15
 
 ### Fixed

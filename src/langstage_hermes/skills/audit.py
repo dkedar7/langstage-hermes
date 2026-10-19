@@ -27,9 +27,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
+import shutil
 import sqlite3
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +66,53 @@ def render_unified_diff(before: bytes, after: bytes, *, fromfile: str, tofile: s
         else:
             out.append(line + "\n" + _NO_NEWLINE_MARKER)
     return "".join(out)
+
+
+_ARCHIVE_STAMP = re.compile(r"\d{8}T\d{6}Z")
+
+
+def _restore_archived_dir(target: MutationRow, path: Path) -> None:
+    """Return a deleted skill's archived directory to *path*'s directory (gh #183).
+
+    ``SkillLibrary.delete`` moves the whole directory to
+    ``<search dir>/_archived/<name>-<stamp>/`` but the audit row records only
+    SKILL.md. The archive for *target* is the one whose SKILL.md matches the
+    recorded before-content, stamped closest to the delete. If the skill's
+    directory is gone the archive moves back whole; if it was recreated since,
+    only the supporting files it lacks are copied in (nothing is overwritten).
+    With no matching archive (moved or cleaned up by hand) the caller's
+    SKILL.md-only restore stands.
+    """
+    skill_dir = path.parent
+    archive_root = skill_dir.parent / "_archived"
+    if not archive_root.is_dir():
+        return
+    prefix = f"{target.skill_name}-"
+    candidates: list[tuple[float, Path]] = []
+    for d in archive_root.iterdir():
+        stamp = d.name[len(prefix) :]
+        if not (d.is_dir() and d.name.startswith(prefix) and _ARCHIVE_STAMP.fullmatch(stamp)):
+            continue
+        try:
+            if (d / path.name).read_bytes() != target.before_content:
+                continue
+            ts = datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC).timestamp()
+        except (OSError, ValueError):
+            continue
+        candidates.append((abs(ts - target.timestamp), d))
+    if not candidates:
+        return
+    archive = min(candidates, key=lambda c: c[0])[1]
+    if not skill_dir.exists():
+        shutil.move(str(archive), str(skill_dir))
+        return
+    for src in sorted(archive.rglob("*")):
+        dest = skill_dir / src.relative_to(archive)
+        if src.is_dir():
+            dest.mkdir(parents=True, exist_ok=True)
+        elif not dest.exists():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
 
 
 class RollbackError(RuntimeError):
@@ -371,8 +421,12 @@ class SkillAuditLog:
                 f"mutation #{mutation_id} targets a bundled skill inside the installed package ({path}); "
                 f"refusing to modify it — reinstall the package to restore the shipped version."
             )
-        path.parent.mkdir(parents=True, exist_ok=True)
         before_disk = path.read_bytes() if path.exists() else None
+        if target.action == "delete":
+            # `delete` archived the whole skill directory, not just SKILL.md: bring
+            # back its scripts/, references/ and assets/ too (gh #183).
+            _restore_archived_dir(target, path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(target.before_content)
 
         # Append the rollback itself as a new mutation row so the log
