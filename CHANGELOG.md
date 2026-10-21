@@ -2,6 +2,15 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.45] - 2026-10-21
+
+### Fixed
+- **A zero cron interval is rejected** (gh #185). `cron create --schedule "every 0m"` (or `0s`,
+  `0h`, a bare `0m`) exited 0 and listed a `scheduled` job that could never run, because a
+  zero-second interval has no next run. It's now a usage error (exit 64, `{"error": ...}` with
+  `--json`), like `every -5m`. The agent's `cronjob` tool returns an error, and
+  `update_job` refuses to change a schedule to zero.
+
 ## [0.4.44] - 2026-10-19
 
 ### Fixed

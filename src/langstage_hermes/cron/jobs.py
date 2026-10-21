@@ -109,13 +109,17 @@ _DURATION_RE = re.compile(
 def parse_duration(expr: str) -> int:
     """Parse a duration like ``"30s"`` / ``"5m"`` / ``"2h"`` / ``"7d"`` → seconds.
 
-    Returns total seconds. Raises ``ValueError`` on garbage.
+    Returns total seconds. Raises ``ValueError`` on garbage and on a zero duration:
+    an ``every 0m`` interval has no next run, so the job would be listed as
+    scheduled and never fire (gh #185).
     """
     text = expr.strip().lower()
     m = _DURATION_RE.match(text)
     if not m:
         raise ValueError(f"Invalid duration {expr!r}. Use forms like '30s', '5m', '2h', '7d'.")
     value = int(m.group(1))
+    if value == 0:
+        raise ValueError(f"Invalid duration {expr!r}: it must be greater than zero, e.g. '30s', '5m', '2h'.")
     unit = m.group(2)[0]  # s / m / h / d
     multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
     return value * multipliers[unit]
