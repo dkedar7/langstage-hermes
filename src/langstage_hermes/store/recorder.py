@@ -29,7 +29,7 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware import AgentMiddleware, AgentState
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from langstage_hermes.store.sqlite_fts import SqliteFtsStore
 
@@ -187,12 +187,39 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
             )
         except sqlite3.OperationalError as exc:
             logger.warning("recorder.before_agent ensure_session failed: %s", exc)
+        self._record_human_messages(session_id, state)
         # Surface the session_id we used so downstream middleware / the
         # session_search tool can read it consistently.
         return {"session_id": session_id}
 
     async def abefore_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         return self.before_agent(state, runtime)
+
+    def _record_human_messages(self, session_id: str, state: Any) -> None:
+        """Persist the user's turns, which only exist before the model runs.
+
+        ``after_model`` sees the conversation after the agent loop and records
+        the assistant reply, but nothing else writes a ``role="user"`` row.
+        Without this, ``search`` and ``session_search`` cannot find anything
+        the user typed (gh #187).
+        """
+        messages = state.get("messages") if isinstance(state, dict) else getattr(state, "messages", [])
+        for message in messages or []:
+            if not isinstance(message, HumanMessage):
+                continue
+            key = (session_id, _message_id_key(message))
+            if key in self._seen_message_keys:
+                continue
+            self._seen_message_keys.add(key)
+            try:
+                self.store.record_message(
+                    session_id,
+                    "user",
+                    _serialize_content(message.content),
+                    platform_message_id=getattr(message, "id", None),
+                )
+            except sqlite3.OperationalError as exc:
+                logger.warning("recorder.before_agent record_message failed: %s", exc)
 
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
