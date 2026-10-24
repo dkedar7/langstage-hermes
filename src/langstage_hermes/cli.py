@@ -233,6 +233,12 @@ def _print_chat_context(
     rows: list[tuple[str, str]] = [
         ("agent", agent_qualname),
         ("model", model_id),
+    ]
+    aux = _aux_model_to_check(getattr(cfg, "model_aux", None), str(model_id_raw)) if agent_source != "spec" else None
+    if aux:
+        # The reflection review runs on it; verify/doctor show it too (gh #189).
+        rows.append(("aux model", aux))
+    rows += [
         ("workspace", _shorten_path(str(workspace))),
         ("home", _shorten_path(str(getattr(cfg, "hermes_home", "(unset)")))),
         ("session", session_id),
@@ -328,6 +334,35 @@ def _required_key_detail(model_for_run: str, *, qualifier: str = "") -> str | No
     if model_for_run.startswith("openai:") and not (os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")):
         return f"{qualifier}model is openai:* but neither OPENAI_API_KEY nor OPENROUTER_API_KEY set"
     return None
+
+
+def _aux_model_to_check(model_aux: str | None, model_for_run: str) -> str | None:
+    """The aux model id when it needs its own key check: set and not the main model."""
+    aux = (model_aux or "").strip()
+    return aux if aux and aux != model_for_run else None
+
+
+def _warn_aux_model_key(model_aux: str | None, model_for_run: str) -> None:
+    """``chat``'s check of the aux model's key: the one ``verify``/``doctor`` run (gh #189).
+
+    The reflection review (skill and memory creation) runs on ``model_aux``, and
+    ``--model`` overrides only the main model, so ``chat --model openai:...`` with no
+    ``ANTHROPIC_API_KEY`` still has the default ``anthropic:*`` aux model. When the
+    review then fails, ``reflection.py`` only logs it, so this startup line is the one
+    place the user is told. A warning, not an exit: chatting itself works.
+    """
+    aux = _aux_model_to_check(model_aux, model_for_run)
+    detail = _required_key_detail(aux, qualifier="aux ") if aux else None
+    if detail is None:
+        return
+    click.echo(click.style(f"  ! {detail}: skill and memory creation will fail", fg="yellow"), err=True)
+    click.echo(
+        click.style(
+            "    set LANGSTAGE_HERMES_MODEL_AUX (or [model] aux_model) to a model you have a key for",
+            fg="yellow",
+        ),
+        err=True,
+    )
 
 
 class _ProviderPkg(NamedTuple):
@@ -696,6 +731,7 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
     # a BYO spec (that would re-introduce the #33 false-positive class).
     if source == "builtin":
         _preflight_model_key(model_id or cfg.model_default, suggest_verify=True)
+        _warn_aux_model_key(cfg.model_aux, model_id or cfg.model_default)
 
     # Apply the resolved workspace as the shared source of truth (ADR 0005) BEFORE
     # building the agent. The built-in factory reads workspace_root() when no explicit
