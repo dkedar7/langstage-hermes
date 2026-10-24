@@ -4,7 +4,9 @@ Hooks into the agent lifecycle:
 
 - ``before_agent``: upsert the session row (so FTS5 search and the
   session_search tool can find this conversation even if it never
-  finishes).
+  finishes), then write the turn's new ``HumanMessage`` messages as
+  ``role="user"`` rows (gh #187: before, nothing recorded what the user
+  typed, so search only ever found the agent's side).
 - ``after_model``: write the latest ``AIMessage``'s content (plus a
   JSON snapshot of any tool calls it issued).
 - ``wrap_tool_call``: after the tool returns, write a ``role="tool"``
@@ -29,7 +31,7 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware import AgentMiddleware, AgentState
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from langstage_hermes.store.sqlite_fts import SqliteFtsStore
 
@@ -187,12 +189,31 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
             )
         except sqlite3.OperationalError as exc:
             logger.warning("recorder.before_agent ensure_session failed: %s", exc)
+        messages = state.get("messages") if isinstance(state, dict) else getattr(state, "messages", [])
+        self._record_new_user_messages(session_id, messages or [])
         # Surface the session_id we used so downstream middleware / the
         # session_search tool can read it consistently.
         return {"session_id": session_id}
 
     async def abefore_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         return self.before_agent(state, runtime)
+
+    def _record_new_user_messages(self, session_id: str, messages: list[Any]) -> None:
+        """Write this turn's user input: the ``HumanMessage`` messages after the last
+        agent/tool message. Earlier ones belong to turns already recorded, and the
+        checkpointed history is replayed into state on every turn."""
+        start = len(messages)
+        while start > 0 and isinstance(messages[start - 1], HumanMessage):
+            start -= 1
+        for msg in messages[start:]:
+            key = (session_id, _message_id_key(msg))
+            if key in self._seen_message_keys:
+                continue
+            self._seen_message_keys.add(key)
+            try:
+                self.store.record_message(session_id, "user", _serialize_content(msg.content))
+            except sqlite3.OperationalError as exc:
+                logger.warning("recorder.before_agent record_message failed: %s", exc)
 
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime

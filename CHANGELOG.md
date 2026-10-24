@@ -2,6 +2,22 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.46] - 2026-10-24
+
+### Fixed
+- **The session store records what the user typed** (gh #187). The recorder wrote the agent's replies and
+  tool output to `state.db` but never the user's messages, so `search` and the agent's own `session_search`
+  could only find the agent's side of a conversation, and a session's `msgs=` count was higher than the rows
+  it actually stored. Each turn's user message is now a `role="user"` row, indexed and searchable like the
+  rest. Sessions recorded before this release have no user rows; there is nothing to recover them from.
+- **`chat` warns when the aux model has no API key** (gh #189). `verify` and `doctor` check the key for
+  `model_aux`, the model the reflection review (skill and memory creation) runs on, but `chat` checked only
+  the main model. So `chat --model openai:openai/gpt-4o-mini`, the README's first OpenAI snippet, started
+  silently with the default `anthropic:*` aux model and no `ANTHROPIC_API_KEY`, and every review failed into
+  a log line. `chat` now prints a warning at startup naming the missing key and `LANGSTAGE_HERMES_MODEL_AUX`,
+  and the startup block shows an `aux model` row when it differs from the main model. Chat still starts: the
+  main-model key stays the only hard stop.
+
 ## [0.4.45] - 2026-10-21
 
 ### Fixed
