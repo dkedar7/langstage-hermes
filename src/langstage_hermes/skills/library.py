@@ -495,9 +495,15 @@ class SkillLibrary:
             raise ValueError(f"SKILL.md frontmatter for {name!r} is invalid:\n- " + "\n- ".join(errors))
 
         base = Path(target_dir) if target_dir is not None else self._default_write_dir()
+        if category is not None:
+            _check_category(category, existing=_is_segment(category) and (base / category).is_dir())
         skill_root = base / category / name if category else base / name
-        skill_root.mkdir(parents=True, exist_ok=True)
         skill_md = skill_root / "SKILL.md"
+        # `category` (and on a re-write, the dirs already on disk) can come from the
+        # model, so the final path must resolve inside the write dir: a symlinked
+        # category or skill dir is caught here too, not only `..` (gh #191).
+        _check_contained(skill_md, base)
+        skill_root.mkdir(parents=True, exist_ok=True)
 
         before_content = skill_md.read_bytes() if skill_md.exists() else None
         post = frontmatter.Post(body, **frontmatter_data)
@@ -782,6 +788,58 @@ class SkillLibrary:
             platforms=platforms,
             version=version,
         )
+
+
+# Device names Windows reserves in every directory (with or without an extension).
+_WINDOWS_RESERVED = frozenset(
+    {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+)
+
+
+def _is_segment(category: Any) -> bool:
+    """True for one directory name: no separators, drive, ``.``/``..`` or control characters."""
+    return (
+        isinstance(category, str)
+        and bool(category.strip())
+        and category not in {".", ".."}
+        and not any(c in category for c in "/\\:")
+        and not any(ord(c) < 32 for c in category)
+    )
+
+
+def _check_category(category: str, *, existing: bool = False) -> None:
+    """Raise ``ValueError`` unless ``category`` is one plain directory name.
+
+    A category is the top-level dir under a search dir (``_extract_category``),
+    so it's a single segment: no separators, ``..``, drive or absolute forms,
+    and never a dir the scan skips (``_archived``, ``.git`` …), which would
+    leave the skill invisible to ``skills list`` (gh #191). A *new* category
+    must also be a portable name (no leading ``.``/``_``, trailing dot or
+    space, or Windows device name); an ``existing`` one is left as named.
+    """
+    problem = None
+    if not _is_segment(category):
+        problem = "must be a single directory name (no path separators, '..', ':' or control characters)"
+    elif category in _EXCLUDED_DIR_NAMES:
+        problem = "is a reserved directory name"
+    elif existing:
+        pass
+    elif category[0] in "._" or category[-1] in ". ":
+        problem = "must not start with '.' or '_' or end with '.' or a space"
+    elif category.partition(".")[0].lower() in _WINDOWS_RESERVED:
+        problem = "is a reserved directory name"
+    elif len(category) > MAX_NAME_LENGTH:
+        problem = f"must be at most {MAX_NAME_LENGTH} characters"
+    if problem:
+        raise ValueError(f"category {category!r} {problem}")
+
+
+def _check_contained(path: Path, base: Path) -> None:
+    """Raise ``ValueError`` unless ``path`` resolves (symlinks followed) inside ``base``."""
+    try:
+        path.resolve().relative_to(base.resolve())
+    except (ValueError, OSError):
+        raise ValueError(f"refusing to write outside the skill library: {path}") from None
 
 
 def _extract_category(skill_md: Path, *, base_dir: Path) -> str | None:

@@ -93,7 +93,7 @@ def skill_manage(
 
     Actions:
       - ``create``: create a new skill. Requires ``description`` + ``body``;
-        optional ``category``.
+        optional ``category`` (one directory name, e.g. ``data-science``).
       - ``patch``: in-place edit. Requires ``old_str`` + ``new_str``.
       - ``write_file``: overwrite the SKILL.md whole. Requires ``frontmatter_data``
         + ``body``.
@@ -167,7 +167,10 @@ def make_skill_tools(library: SkillLibrary, *, store: Any = None) -> list[BaseTo
         frontmatter_data: dict[str, Any] | None = None,
         tool_call_id: Annotated[str, InjectedToolCallId] = "",
     ) -> Command:
-        """Curate the skill library (create/patch/write_file/delete/pin/unpin)."""
+        """Curate the skill library (create/patch/write_file/delete/pin/unpin).
+
+        ``category`` (create only) is one directory name, e.g. ``data-science``.
+        """
         return _skill_manage_impl(
             library,
             action=action,
