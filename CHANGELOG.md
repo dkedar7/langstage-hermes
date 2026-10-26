@@ -2,6 +2,20 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.47] - 2026-10-26
+
+### Security
+- **`skill_manage` can no longer write a skill outside the skill library** (gh #191). The model-supplied
+  `category` of a `create` was joined into the path unchecked, so `../…` or an absolute path planted a
+  `SKILL.md` anywhere the process could write, reported as success and invisible to `skills list` and
+  `skills audit`. Text the agent reads (a web page, a tool result) could steer it, and the reflection
+  review calls `skill_manage` on its own. `category` must now be one directory name: no separators
+  (`/` or `\`), `..`, drive or UNC forms, and never a directory the scan skips (`_archived`, `.git`, …).
+  A new category must also be portable (no leading `.`/`_`, trailing dot or space, or Windows device name);
+  an existing category dir keeps working whatever its name. Every `SkillLibrary.write` also checks that the
+  resolved `SKILL.md` lands inside the write dir, so a symlinked category or skill dir can't redirect it.
+  A rejected call returns `{"success": false, "error": "category … must be a single directory name …"}`.
+
 ## [0.4.46] - 2026-10-24
 
 ### Fixed
