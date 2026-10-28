@@ -44,6 +44,7 @@ from langstage_hermes.memory.provider import (
     get_provider,
 )
 from langstage_hermes.memory.tool import MemoryToolMiddleware
+from langstage_hermes.model_override import ModelOverrideMiddleware
 from langstage_hermes.plugins.event_bus import PluginEventBus
 from langstage_hermes.prompts import PromptAssemblyMiddleware
 from langstage_hermes.reflection import ReflectionMiddleware, build_review_subagent
@@ -363,6 +364,9 @@ def create_hermes_agent(
             summary_target_ratio=cfg.compression_target_ratio,
             abort_on_summary_failure=cfg.compression_abort_on_summary_failure,
         ),
+        # `/model` in chat: swap the main model for the rest of the session (gh #193).
+        # Outside the caching middleware so cache headers match the model that runs.
+        ModelOverrideMiddleware(None if model is not None else cfg.model_default, _init_chat_model),
         # Caching wraps the actual model call — must be near the inner edge.
         AnthropicCachingS3Middleware(ttl="5m"),
         # PatchToolCalls fixes orphaned tool_call ids after interrupted runs.

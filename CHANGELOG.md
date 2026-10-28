@@ -2,6 +2,22 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.48] - 2026-10-28
+
+### Fixed
+- **`/model` in `chat` switches the model for the turns that follow** (gh #193). It printed
+  `(model override set: …)` and `/model` then reported the new id, but nothing read the override, so every
+  turn still ran on the original model. A new `ModelOverrideMiddleware` runs the main model call on the
+  override (built once per id with the same `init_chat_model` path; tools stay bound). The aux model is
+  unchanged. `/model <id>` now also checks the id before accepting it: a missing provider key, a missing
+  provider package or an id `init_chat_model` can't build prints `(model not changed: …)` and keeps the
+  current model, and with an `--agent` spec it says the spec picks its own model instead of claiming a switch.
+- **`plugins enable` / `plugins disable` no longer report success for nothing** (gh #194). They printed
+  "TBD" and exited 0 without writing anything. They now reject an unknown plugin name (exit 1), and for a
+  known one print the exact setting to change (`[plugins] disabled` in `$HERMES_HOME/config.toml`, the
+  project `langstage-hermes.toml` or `LANGSTAGE_HERMES_PLUGINS_DISABLED`) and exit 1, because the CLI doesn't
+  edit your config (rewriting it would lose its comments).
+
 ## [0.4.47] - 2026-10-26
 
 ### Security

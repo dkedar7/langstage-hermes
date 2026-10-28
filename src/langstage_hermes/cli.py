@@ -876,8 +876,30 @@ def _slash_model(args: str, state: dict[str, Any]) -> bool:
     if not args.strip():
         click.echo(f"Current model: {state.get('model_override') or state['cfg'].model_default}")
         return False
-    state["model_override"] = args.strip()
-    click.echo(f"(model override set: {args.strip()})")
+    model_id = args.strip()
+    # Only the built-in agent reads the override (ModelOverrideMiddleware, gh #193);
+    # an --agent spec graph owns its model, so saying "set" there would be false.
+    if not hasattr(state.get("agent"), "langstage_hermes_config"):
+        click.echo(click.style("(/model only applies to the built-in agent; an --agent spec picks its own model)", fg="yellow"))
+        return False
+    # Check now, not on the next turn: a missing key or provider package is
+    # reported here and the current model stays.
+    detail = _required_key_detail(model_id)
+    if detail:
+        click.echo(click.style(f"(model not changed: {detail})", fg="red"))
+        return False
+    try:
+        from langstage_hermes.agent import _init_chat_model
+
+        _init_chat_model(model_id)
+    except Exception as e:  # unknown provider, missing package, bad id
+        click.echo(click.style(f"(model not changed: {e})", fg="red"))
+        install_line = _missing_provider_install_line(model_id, e)
+        if install_line:
+            click.echo(click.style(f"  {install_line}", fg="yellow"))
+        return False
+    state["model_override"] = model_id
+    click.echo(f"(model override set: {model_id})")
     return False
 
 
@@ -2800,18 +2822,49 @@ def plugins_list() -> None:
         )
 
 
+def _plugin_toggle_hint(name: str, enable: bool) -> int:
+    """Tell the user how to enable/disable ``name``; the CLI doesn't edit config (gh #194).
+
+    These verbs used to print "TBD" and exit 0, so a script took them as done.
+    Plugins are configured in TOML (``[plugins].disabled``, or an ``enabled``
+    allowlist) or ``LANGSTAGE_HERMES_PLUGINS_DISABLED``; writing the user's TOML
+    would lose its comments, so the command names the exact setting instead and
+    exits 1, because nothing changed. An unknown name is rejected like every
+    other not-found path.
+    """
+    from langstage_hermes.config import _hermes_global_toml_path
+    from langstage_hermes.plugins.loader import HermesPluginLoader
+
+    cfg = _load_config()
+    known = {p.name for p in HermesPluginLoader(enabled=cfg.plugins_enabled or None, disabled=cfg.plugins_disabled).discover()}
+    if name not in known:
+        click.echo(click.style(f"No plugin named {name!r}. See `langstage-hermes plugins list`.", fg="red"), err=True)
+        return EXIT_FAIL
+    verb = "enable" if enable else "disable"
+    click.echo(f"`plugins {verb}` doesn't edit your config. To {verb} {name!r}:", err=True)
+    if enable:
+        click.echo(f"  remove {name!r} from [plugins] disabled = [...] in {_hermes_global_toml_path()}", err=True)
+        click.echo("  (or ./langstage-hermes.toml, or LANGSTAGE_HERMES_PLUGINS_DISABLED)", err=True)
+        if cfg.plugins_enabled:
+            click.echo(f"  and add it to the [plugins] enabled allowlist: {cfg.plugins_enabled!r}", err=True)
+    else:
+        click.echo(f"  add it to [plugins] disabled = [...] in {_hermes_global_toml_path()}", err=True)
+        click.echo(f"  or set LANGSTAGE_HERMES_PLUGINS_DISABLED={name}", err=True)
+    return EXIT_FAIL
+
+
 @plugins.command("enable")
 @click.argument("name")
 def plugins_enable(name: str) -> None:
-    """Add ``name`` to ``[plugins.enabled]`` in user TOML (TBD)."""
-    click.echo(f"(Plugin enable for {name!r} TBD — edit langstage-hermes.toml.)")
+    """Show how to enable plugin NAME (the CLI doesn't edit config; exits 1)."""
+    sys.exit(_plugin_toggle_hint(name, True))
 
 
 @plugins.command("disable")
 @click.argument("name")
 def plugins_disable(name: str) -> None:
-    """Add ``name`` to ``[plugins.disabled]`` in user TOML (TBD)."""
-    click.echo(f"(Plugin disable for {name!r} TBD — edit langstage-hermes.toml.)")
+    """Show how to disable plugin NAME (the CLI doesn't edit config; exits 1)."""
+    sys.exit(_plugin_toggle_hint(name, False))
 
 
 # ── verify ─────────────────────────────────────────────────────────
