@@ -388,9 +388,9 @@ def create_hermes_agent(
     # host renders every turn through the in-process AG-UI adapter, which drives the
     # graph *asynchronously*. ``SqliteSaver`` has no async methods ("SqliteSaver
     # does not support async methods"), so it crashed chat on the first message
-    # (gh #43). hermes' turn loop opens a fresh event loop per turn
-    # (``agui_stream.stream_frames_sync``), which also rules out a long-lived
-    # loop-bound ``AsyncSqliteSaver``. ``InMemorySaver`` is async-safe and
+    # (gh #43). hermes' turn loop drives the graph from a sync REPL on its own
+    # event loop (``agui_stream.stream_frames_sync``), which also rules out a
+    # loop-bound ``AsyncSqliteSaver`` shared with other callers. ``InMemorySaver`` is async-safe and
     # loop-agnostic, and persists conversation/interrupt state across turns within a
     # chat session. (Durable cross-restart checkpointing is a follow-up; hermes'
     # substantive memory lives in its own FTS5 store + memory snapshots, not the
