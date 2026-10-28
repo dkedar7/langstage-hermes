@@ -276,12 +276,10 @@ def _build_cron_response(job: dict[str, Any], *, prompt: str) -> tuple[bool, str
     try:
         from langstage_hermes.agent import create_hermes_agent
     except ImportError as e:
-        logger.warning(
-            "Cron job %s: langstage_hermes.agent not available (%s). Returning placeholder response.",
-            job.get("id"),
-            e,
-        )
-        return True, f"[langstage-hermes.agent unavailable; prompt was] {prompt}"
+        # A failure, not a placeholder "success" that run_job would deliver as the
+        # job's output (same contract as an invoke failure, gh #72).
+        _log_cron_failure("Cron job %s: agent unavailable", job.get("id"), exc=e)
+        return False, f"[agent unavailable: {e}]"
 
     from langstage_hermes.config import HermesConfig
 

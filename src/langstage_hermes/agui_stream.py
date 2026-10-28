@@ -22,6 +22,7 @@ Requires the ``agui`` extra::
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any
 
 _IMPORT_HINT = 'the AG-UI path needs the agui extra: pip install "langstage-hermes[agui]"'
@@ -57,19 +58,39 @@ def _extractors() -> list:
     return [cls() for cls in ALL_EXTRACTORS]
 
 
+_loops = threading.local()
+
+
+def _session_loop() -> asyncio.AbstractEventLoop:
+    """One event loop per thread, reused by every turn of a chat session.
+
+    A fresh loop per turn, closed afterwards, broke every other turn on the
+    ``openai:*`` path with "RuntimeError: Event loop is closed": the provider SDK's
+    shared async HTTP client keeps pooled keep-alive connections bound to the loop
+    that opened them, so the next turn's request tripped over the dead loop and
+    only the turn after that (with the stale connections dropped) worked.
+    """
+    loop = getattr(_loops, "loop", None)
+    if loop is None or loop.is_closed():
+        loop = _loops.loop = asyncio.new_event_loop()
+    return loop
+
+
 def stream_frames_sync(agent, message: str, thread_id: str, *, state=None, resume=None):
     """Sync bridge: pump ``iter_event_frames`` (with hermes' extractors wired) one
-    frame at a time. hermes' turn loop is a plain sync process, so a fresh event
-    loop is safe and keeps rendering lazy."""
+    frame at a time on the session's event loop, keeping rendering lazy."""
     from langstage_core.agui import iter_event_frames
 
-    loop = asyncio.new_event_loop()
+    loop = _session_loop()
+    agen = iter_event_frames(agent, message, thread_id, extractors=_extractors(), state=state, resume=resume)
     try:
-        agen = iter_event_frames(agent, message, thread_id, extractors=_extractors(), state=state, resume=resume)
         while True:
             try:
                 yield loop.run_until_complete(agen.__anext__())
             except StopAsyncIteration:
                 break
     finally:
-        loop.close()
+        # A consumer that stops early (an error frame, Ctrl-C) still lets the
+        # generator clean up on the loop it ran on.
+        if not loop.is_closed() and not loop.is_running():
+            loop.run_until_complete(agen.aclose())

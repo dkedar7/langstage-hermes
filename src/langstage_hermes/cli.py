@@ -784,6 +784,8 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
         "cfg": cfg,
         "session_id": session_id,
         "agent": agent,
+        # --model / --workspace, so /reload re-applies them instead of dropping them.
+        "cli_overrides": overrides,
     }
 
     _print_banner(tagline="chat | type /help for commands, /quit to exit")
@@ -809,7 +811,7 @@ def chat(model_id: str | None, agent_spec: str | None, workspace: str | None) ->
                 break
             continue
 
-        _run_agent_turn(agent, line, state)
+        _run_agent_turn(state["agent"], line, state)  # /reload may have rebuilt it
 
 
 # ── slash command dispatch ─────────────────────────────────────────
@@ -909,14 +911,20 @@ def _slash_config(args: str, state: dict[str, Any]) -> bool:
 
 
 def _slash_verbose(args: str, state: dict[str, Any]) -> bool:
+    # Read by _run_agent_turn_agui: tool arguments, tool results and reasoning (gh #193 follow-up).
     state["verbose"] = not state["verbose"]
-    click.echo(f"(verbose = {state['verbose']})")
+    shown = "tool arguments, tool results and reasoning are shown" if state["verbose"] else "tool names only"
+    click.echo(f"(verbose = {state['verbose']}: {shown})")
     return False
 
 
 def _slash_yolo(args: str, state: dict[str, Any]) -> bool:
+    # Read by _run_agent_turn_agui: a tool-approval pause is approved automatically.
     state["yolo"] = not state["yolo"]
-    click.echo(f"(yolo = {state['yolo']})")
+    if state["yolo"]:
+        click.echo("(yolo = True: tool calls that pause for approval are approved automatically)")
+    else:
+        click.echo("(yolo = False: a tool call that pauses for approval stops the turn)")
     return False
 
 
@@ -1147,8 +1155,46 @@ def _slash_stop(args: str, state: dict[str, Any]) -> bool:
 
 
 def _slash_reload(args: str, state: dict[str, Any]) -> bool:
-    state["cfg"] = _load_config()
-    click.echo("(config reloaded)")
+    """Re-read config and plugins and rebuild the built-in agent, keeping the conversation.
+
+    It used to refresh only the REPL's copy of the config (what ``/config`` shows),
+    while the running agent kept everything it was built with, and it dropped
+    ``--model`` / ``--workspace``. Now the CLI overrides are re-applied, and the
+    built-in agent is rebuilt for the same session with the current conversation
+    copied into it. If the rebuild fails, the old agent and config stay. An
+    ``--agent`` spec graph isn't rebuilt: hermes can't rebuild what the spec made.
+    """
+    from langstage_core import apply_workspace
+
+    from langstage_hermes.config import HermesConfig
+
+    try:
+        cfg = HermesConfig.resolve(overrides=dict(state.get("cli_overrides") or {}))
+    except Exception as e:
+        click.echo(click.style(f"(reload failed, nothing changed: {e})", fg="red"))
+        return False
+    old = state.get("agent")
+    if not hasattr(old, "langstage_hermes_config"):
+        state["cfg"] = cfg
+        click.echo("(config reloaded for /config; your --agent spec's graph isn't rebuilt — restart chat to reload it)")
+        return False
+    sid = state.get("session_id") or getattr(old, "langstage_hermes_session_id", None)
+    try:
+        from langstage_hermes.agent import create_hermes_agent
+
+        apply_workspace(cfg.workspace_root)
+        new = create_hermes_agent(cfg, session_id=sid)
+        thread = {"configurable": {"thread_id": sid}}
+        messages = (old.get_state(thread).values or {}).get("messages") or []
+        if messages:
+            new.update_state(thread, {"messages": messages})
+    except Exception as e:
+        apply_workspace(state["cfg"].workspace_root)
+        click.echo(click.style(f"(reload failed, still running the previous agent: {e})", fg="red"))
+        return False
+    state["cfg"], state["agent"] = cfg, new
+    state.pop("_agui_agent", None)  # the AG-UI wrapper is rebuilt around the new graph next turn
+    click.echo(f"(config and plugins reloaded; agent rebuilt, {len(messages)} message(s) of this session kept)")
     return False
 
 
@@ -1224,29 +1270,87 @@ def _run_agent_turn_agui(agent: Any, user_text: str, state: dict[str, Any]) -> N
         "model_override": state.get("model_override"),
         "iteration_budget_remaining": state["cfg"].agent_max_iterations,
     }
+    verbose = bool(state.get("verbose"))
     text_open = False
+    resume: Any = None  # the first pass sends the message; a /yolo pass carries the approval
     try:
-        for frame in stream_frames_sync(state["_agui_agent"], user_text, sid or "hermes", state=agui_state):
-            ftype = frame.get("type")
-            if ftype == "content":
-                click.echo(frame.get("content", ""), nl=False)
-                text_open = True
-                continue
+        while True:
+            approve: dict[str, Any] | None = None
+            for frame in stream_frames_sync(state["_agui_agent"], user_text, sid or "hermes", state=agui_state, resume=resume):
+                ftype = frame.get("type")
+                if ftype == "content":
+                    click.echo(frame.get("content", ""), nl=False)
+                    text_open = True
+                    continue
+                if verbose and ftype == "reasoning":
+                    click.echo(click.style(frame.get("content", ""), fg="bright_black"), nl=False)
+                    text_open = True
+                    continue
+                if text_open:
+                    click.echo()
+                    text_open = False
+                if ftype == "tool_start":
+                    click.echo(click.style(f"  ⚙ {frame.get('name', 'tool')}", fg="green"))
+                    if verbose and frame.get("args") not in (None, "", {}):
+                        click.echo(click.style(f"    args: {_clip(frame.get('args'))}", fg="bright_black"))
+                elif ftype == "tool_end" and verbose:
+                    status = frame.get("status") or "success"
+                    color = "red" if status == "error" else "bright_black"
+                    click.echo(click.style(f"    {status}: {_clip(frame.get('result'))}", fg=color))
+                elif ftype == "extraction":
+                    _render_extraction_frame(frame)
+                elif ftype == "interrupt":
+                    approve = _yolo_decision(frame) if state.get("yolo") else None
+                    if approve is None:
+                        click.echo(
+                            click.style(
+                                "  ⚠ agent paused for approval; chat can't answer it yet (/yolo auto-approves tool calls)",
+                                fg="yellow",
+                            )
+                        )
+                elif ftype == "error":
+                    click.echo(click.style(f"Agent stream failed: {frame.get('error')}", fg="red"))
             if text_open:
                 click.echo()
                 text_open = False
-            if ftype == "tool_start":
-                click.echo(click.style(f"  ⚙ {frame.get('name', 'tool')}", fg="green"))
-            elif ftype == "extraction":
-                _render_extraction_frame(frame)
-            elif ftype == "interrupt":
-                click.echo(click.style("  ⚠ agent paused for input (not resumable on --agui yet)", fg="yellow"))
-            elif ftype == "error":
-                click.echo(click.style(f"Agent stream failed: {frame.get('error')}", fg="red"))
-        if text_open:
-            click.echo()
+            if approve is None:
+                break
+            names = ", ".join(_action_name(a) for a in approve["requests"])
+            click.echo(click.style(f"  ✓ auto-approved (/yolo): {names}", fg="yellow"))
+            resume = approve["resume"]
     except Exception as exc:
         click.echo(click.style(f"Agent stream failed: {exc}", fg="red"))
+
+
+def _clip(value: Any, limit: int = 300) -> str:
+    """One-line, length-capped rendering of a tool's args or result for /verbose."""
+    import json as _json
+
+    text = value if isinstance(value, str) else _json.dumps(value, default=str)
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else text[:limit] + f"… ({len(text)} chars)"
+
+
+def _action_name(action: Any) -> str:
+    if isinstance(action, dict):
+        return str(action.get("name") or action.get("action") or action.get("tool") or "tool")
+    return "tool"
+
+
+def _yolo_decision(frame: dict[str, Any]) -> dict[str, Any] | None:
+    """The resume that approves every tool call in an approval pause, or ``None``.
+
+    Only a tool-review interrupt (each request names a tool) that allows
+    ``approve`` is auto-approved; a question the agent asks (a bare
+    ``interrupt("…")``) still needs a person, so /yolo never answers it.
+    """
+    requests = frame.get("action_requests") or []
+    is_review = bool(requests) and all(
+        isinstance(a, dict) and (a.get("name") or a.get("action") or a.get("tool")) for a in requests
+    )
+    if not is_review or "approve" not in (frame.get("allowed_decisions") or []):
+        return None
+    return {"requests": requests, "resume": {"decisions": [{"type": "approve"} for _ in requests]}}
 
 
 def _run_agent_turn(agent: Any, user_text: str, state: dict[str, Any]) -> None:

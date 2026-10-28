@@ -2,6 +2,26 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.49] - 2026-10-28
+
+### Fixed
+- **Every other `chat` turn failed with "Agent stream failed: RuntimeError: Event loop is closed"** on the
+  `openai:*` path (including OpenRouter). Each turn ran on a new event loop that was closed afterwards, while
+  the provider SDK's shared async HTTP client kept pooled connections bound to it, so the next turn tripped
+  over the dead loop and only the one after recovered. Turns now share one event loop per thread.
+- **`/yolo` auto-approves.** It flipped a flag nothing read. Now, when a tool call pauses for approval
+  (`LANGSTAGE_HERMES_INTERRUPT_ON`), `/yolo` approves every tool call in the pause, prints
+  `✓ auto-approved (/yolo): <tools>` and continues the turn. A question the agent asks (a bare `interrupt("…")`)
+  is never auto-answered. Without `/yolo`, the pause message says chat can't answer it yet and names `/yolo`.
+- **`/verbose` changes the output.** It also flipped a flag nothing read. With it on, chat shows each tool
+  call's arguments, its result or error (one line, capped at 300 characters) and reasoning.
+- **`/reload` reaches the running agent.** It refreshed only the REPL's copy of the config (what `/config`
+  shows) and dropped `--model` / `--workspace`. It now re-applies those flags, rebuilds the built-in agent
+  for the same session with the current conversation copied in, and says so. If the rebuild fails, the old
+  agent keeps running. With an `--agent` spec it reloads the config and says the spec's graph isn't rebuilt.
+- **A cron job whose agent can't be imported is recorded as failed** (`[agent unavailable: …]`). It used to
+  return a placeholder "success" that echoed the prompt and was delivered as the job's output.
+
 ## [0.4.48] - 2026-10-28
 
 ### Fixed
