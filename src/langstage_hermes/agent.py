@@ -54,7 +54,7 @@ from langstage_hermes.skills.loader import SkillLoaderMiddleware
 from langstage_hermes.skills.tools import make_skill_tools
 from langstage_hermes.store.recorder import HermesStateRecorderMiddleware
 from langstage_hermes.store.sqlite_fts import SqliteFtsStore
-from langstage_hermes.tools.toolsets import resolve_enabled
+from langstage_hermes.tools.toolsets import resolve_enabled, tool_allowed, unknown_toolsets
 from langstage_hermes.workspace_paths import WorkspacePathMiddleware
 
 log = logging.getLogger(__name__)
@@ -243,12 +243,18 @@ def create_hermes_agent(
         disabled_toolsets=set(cfg.agent_disabled_toolsets),
         platform=os.getenv("HERMES_PLATFORM", "cli"),
     )
+    unknown = unknown_toolsets(cfg.agent_disabled_toolsets)
+    if unknown:
+        log.warning("agent.disabled_toolsets: unknown toolset(s) %s ignored (see `langstage-hermes tools`)", unknown)
+
+    def _allowed(t: Any) -> bool:
+        return tool_allowed(getattr(t, "name", ""), enabled_toolsets)
 
     # ── tools (kept as a flat list; deepagents'/langchain's create_agent merges from middleware too) ──
     skill_tools = make_skill_tools(library, store=store)
     session_search_tool = make_session_search_tool(store, current_session_id_getter=lambda: sid)
     # FilesystemBackend tools come in via the FilesystemMiddleware (below).
-    tools: list[Any] = [*skill_tools, session_search_tool]
+    tools: list[Any] = [t for t in (*skill_tools, session_search_tool) if _allowed(t)]
 
     # ── deepagents middleware (filesystem + subagents + todos) ───────────
     from deepagents.backends.filesystem import FilesystemBackend
@@ -282,7 +288,8 @@ def create_hermes_agent(
         memory_char_limit=cfg.memory_char_limit,
         user_char_limit=cfg.memory_user_char_limit,
     )
-    review_tools = [*skill_tools, *_memory_mw_for_tools.tools]
+    # A disabled toolset is off for the review fork too, or it would write what the agent can't.
+    review_tools = [t for t in (*skill_tools, *_memory_mw_for_tools.tools) if _allowed(t)]
     review_subagent = build_review_subagent(library=library, store=store, aux_model=aux_model, tools=review_tools)
     # Compile it once and use the same graph for both ways a review can run:
     # ReflectionMiddleware runs it itself when a review is due (gh #179: before,
@@ -340,19 +347,26 @@ def create_hermes_agent(
             archive_days=cfg.curator_archive_after_days,
             enabled=cfg.curator_enabled,
         ),
-        # Deepagents built-ins.
-        TodoListMiddleware(),
+        # Deepagents built-ins. Todo and delegation are left out whole when their
+        # toolset is disabled, so the prompt doesn't describe a tool that isn't there.
+        *([TodoListMiddleware()] if "todo" in enabled_toolsets else []),
         *path_middleware,
         fs_middleware,
-        SubAgentMiddleware(
-            backend=fs_backend,
-            subagents=[
-                {
-                    "name": review_subagent["name"],
-                    "description": review_subagent["description"],
-                    "runnable": review_graph,
-                }
-            ],
+        *(
+            [
+                SubAgentMiddleware(
+                    backend=fs_backend,
+                    subagents=[
+                        {
+                            "name": review_subagent["name"],
+                            "description": review_subagent["description"],
+                            "runnable": review_graph,
+                        }
+                    ],
+                )
+            ]
+            if "delegation" in enabled_toolsets
+            else []
         ),
         # Compression near the end so it sees the fully-assembled prompt + state.
         HermesCompressionMiddleware(
@@ -382,6 +396,14 @@ def create_hermes_agent(
 
     if extra_middleware:
         middleware.extend(extra_middleware)
+
+    # `[agent].disabled_toolsets` is enforced here, at build time (SPEC §11.3):
+    # a disabled toolset's tools are never bound, so the model can't see or call
+    # them. Before, only the prompt changed and every tool still ran (gh #197).
+    for mw in middleware:
+        mw_tools = getattr(mw, "tools", None)
+        if mw_tools and not all(_allowed(t) for t in mw_tools):
+            mw.tools = [t for t in mw_tools if _allowed(t)]
 
     # ── checkpointer ─────────────────────────────────────────────────────
     # In-memory, NOT the sync SqliteSaver: since langstage-core 1.0 (ADR 0003) the

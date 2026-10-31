@@ -2,6 +2,20 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.50] - 2026-10-30
+
+### Fixed
+- **`[agent].disabled_toolsets` now removes the toolsets' tools from the agent (#197).** It only changed the
+  system prompt: `/toolsets` and `--show-config` reported a toolset as disabled while the agent still bound and
+  ran its tools, so with `file` disabled `write_file` still wrote into the workspace. The filter now runs when
+  the agent is built (SPEC §11.3), for chat, one-shot, cron, `/reload` and the server alike, and covers the
+  tools deepagents names differently (`ls`/`glob`/`grep`/`edit_file`/`delete` are `file`, `execute` is
+  `terminal`, `write_todos` is `todo`, `task` is `delegation`). The review fork loses a disabled toolset too,
+  so it can't write memory or skills the agent itself may not. Tools outside the toolset taxonomy (your own,
+  a plugin's) are never filtered. The `LANGSTAGE_HERMES_AGENT_DISABLED_TOOLSETS` env var works the same way.
+- **An unknown name in `disabled_toolsets` is reported** in a warning at agent build and in `/toolsets`,
+  instead of being silently ignored.
+
 ## [0.4.49] - 2026-10-28
 
 ### Fixed

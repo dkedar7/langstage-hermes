@@ -160,6 +160,50 @@ def is_implemented(toolset: str) -> bool:
     return toolset in IMPLEMENTED_TOOLSETS
 
 
+# The tools the agent factory actually binds, by toolset. deepagents names the
+# file/terminal/todo/delegation tools differently from Hermes's wire names in
+# TOOLSETS, so filtering by TOOLSETS alone would miss them (gh #197).
+BOUND_TOOL_TOOLSETS: dict[str, str] = {
+    "ls": "file",
+    "read_file": "file",
+    "write_file": "file",
+    "edit_file": "file",
+    "delete": "file",
+    "glob": "file",
+    "grep": "file",
+    "execute": "terminal",
+    "write_todos": "todo",
+    "task": "delegation",
+}
+
+
+def toolset_of(tool_name: str) -> str | None:
+    """Return the toolset a tool belongs to, or ``None`` for a tool outside the taxonomy."""
+    if tool_name in BOUND_TOOL_TOOLSETS:
+        return BOUND_TOOL_TOOLSETS[tool_name]
+    for toolset, names in TOOLSETS.items():
+        # Composites ("search", "debugging") reuse names from a primary toolset;
+        # the first match is the primary one by dict order.
+        if tool_name in names:
+            return toolset
+    return None
+
+
+def tool_allowed(tool_name: str, enabled: set[str]) -> bool:
+    """Whether a tool may be bound when only ``enabled`` toolsets are on.
+
+    A tool outside the taxonomy (a caller's own tool, a plugin's) is never
+    filtered: ``disabled_toolsets`` names toolsets, not arbitrary tools.
+    """
+    toolset = toolset_of(tool_name)
+    return toolset is None or toolset in enabled
+
+
+def unknown_toolsets(names: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:
+    """Return the entries of ``names`` that aren't toolsets, sorted."""
+    return sorted({n for n in (names or ()) if n not in TOOLSETS})
+
+
 def resolve_enabled(
     *,
     disabled_toolsets: list[str] | tuple[str, ...] | set[str] | None = None,

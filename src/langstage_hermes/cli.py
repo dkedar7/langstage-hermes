@@ -949,7 +949,7 @@ def _slash_tools(args: str, state: dict[str, Any]) -> bool:
 def _slash_toolsets(args: str, state: dict[str, Any]) -> bool:
     """Shows which toolsets are currently enabled vs disabled in the loaded config."""
     cfg = state["cfg"]
-    from langstage_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, resolve_enabled
+    from langstage_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, resolve_enabled, unknown_toolsets
 
     disabled = set(cfg.agent_disabled_toolsets or [])
     enabled = resolve_enabled(disabled_toolsets=disabled, platform=os.getenv("HERMES_PLATFORM", "cli"))
@@ -962,6 +962,11 @@ def _slash_toolsets(args: str, state: dict[str, Any]) -> bool:
             click.echo(click.style(f"  ✗ {ts}  (disabled in config)", fg="bright_black"))
     if disabled:
         click.echo(click.style(f"\n  agent.disabled_toolsets = {sorted(disabled)}", fg="bright_black"))
+    unknown = unknown_toolsets(disabled)
+    if unknown:
+        click.echo(
+            click.style(f"  unknown toolset(s) {unknown} ignored: run `langstage-hermes tools` for the names", fg="yellow")
+        )
     return False
 
 
