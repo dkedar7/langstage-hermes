@@ -2,6 +2,13 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.51] - 2026-10-30
+
+### Fixed
+- **`disabled_toolsets` no longer changes middleware you pass in.** 0.4.50 filtered `extra_middleware` in
+  place, so an instance reused for a later build with a different (or no) disabled set had permanently lost
+  tools. The filter now works on a shallow copy, and your instance keeps its tools.
+
 ## [0.4.50] - 2026-10-30
 
 ### Fixed

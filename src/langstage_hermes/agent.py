@@ -25,6 +25,7 @@ and assemble the middleware ourselves.
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import uuid
@@ -400,10 +401,14 @@ def create_hermes_agent(
     # `[agent].disabled_toolsets` is enforced here, at build time (SPEC §11.3):
     # a disabled toolset's tools are never bound, so the model can't see or call
     # them. Before, only the prompt changed and every tool still ran (gh #197).
-    for mw in middleware:
+    # The caller's own middleware is filtered on a shallow copy: the instance may be
+    # reused for another build with a different disabled set, so it must keep its tools.
+    callers = {id(mw) for mw in extra_middleware or ()}
+    for i, mw in enumerate(middleware):
         mw_tools = getattr(mw, "tools", None)
         if mw_tools and not all(_allowed(t) for t in mw_tools):
-            mw.tools = [t for t in mw_tools if _allowed(t)]
+            target = middleware[i] = copy.copy(mw) if id(mw) in callers else mw
+            target.tools = [t for t in mw_tools if _allowed(t)]
 
     # ── checkpointer ─────────────────────────────────────────────────────
     # In-memory, NOT the sync SqliteSaver: since langstage-core 1.0 (ADR 0003) the
