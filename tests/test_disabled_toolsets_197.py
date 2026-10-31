@@ -155,3 +155,33 @@ def test_toolset_helpers():
     assert tool_allowed("my_own_tool", set())  # a caller's own tool is never filtered
     assert not tool_allowed("write_file", {"terminal"})
     assert unknown_toolsets(["file", "nope", "nope"]) == ["nope"]
+
+
+def test_caller_middleware_is_not_mutated_across_builds(home: Path):
+    from langchain.agents.middleware import AgentMiddleware
+    from langchain_core.tools import tool
+
+    @tool
+    def ls(path: str) -> str:
+        """List a directory (a caller's tool that shares a `file` tool name)."""
+        return path
+
+    @tool
+    def my_tool(x: str) -> str:
+        """A caller's tool outside the taxonomy."""
+        return x
+
+    class CallerMW(AgentMiddleware):
+        pass
+
+    mw = CallerMW()
+    mw.tools = [ls, my_tool]
+
+    def build(disabled: list[str]) -> set[str]:
+        cfg = HermesConfig.resolve(overrides={"agent_disabled_toolsets": disabled})
+        model = _Fake(messages=iter([AIMessage("ok")]))
+        return _bound(create_hermes_agent(cfg, model=model, workspace=home, extra_middleware=[mw]))
+
+    assert "ls" not in build(["file"])
+    assert [t.name for t in mw.tools] == ["ls", "my_tool"]  # the caller's instance is unchanged
+    assert {"ls", "my_tool"} <= build([])  # a later build with nothing disabled still gets both
