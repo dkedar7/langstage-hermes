@@ -2,6 +2,19 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.52] - 2026-10-31
+
+### Fixed
+- **Cron jobs keep their wall-clock time across a DST change (#200).** The next run was
+  computed at the previous run's fixed UTC offset, so after DST ended a `0 9 * * *` job ran
+  at 08:00, and after DST started at 10:00. Cron schedules are now stepped in the local time
+  zone (it honours `TZ`). In the hour that repeats when DST ends, a job pinned to particular
+  hours (`30 1 * * *`) runs once; a job on every hour (`*/30 * * * *`) keeps running through
+  both. A time skipped when DST starts runs at the next valid time, once. A job saved by an
+  earlier version with a stale offset fires at its intended wall-clock time; its next run
+  is then stored correctly. Interval and one-shot jobs were not affected.
+- New dependencies: `tzlocal`, plus `tzdata` on Windows, which ships no zone database.
+
 ## [0.4.51] - 2026-10-30
 
 ### Fixed

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langstage-hermes"
-version = "0.4.51"
+version = "0.4.52"
 description = "Closed-loop reflection / skill creation agent on LangGraph + deepagents. Faithful reproduction of Nous Research's Hermes Agent."
 readme = "README.md"
 license = { text = "MIT" }
@@ -36,6 +36,10 @@ dependencies = [
     "langgraph>=1.0",
     "langgraph-checkpoint-sqlite>=2.0",
     "croniter>=2.0",
+    # The local zone's DST rules for cron schedules (gh #200). tzlocal honours TZ and
+    # maps Windows zone names; tzdata is the zone database Windows doesn't ship.
+    "tzlocal>=5.0",
+    "tzdata; sys_platform == 'win32'",
     # The cron daemon's tick lock. An OS-level lock the kernel releases when the
     # process dies, so a SIGTERM / OOM kill can't strand it and wedge the next
     # start (gh #136). The O_EXCL fallback only runs if this is somehow missing.

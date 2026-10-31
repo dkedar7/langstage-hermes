@@ -41,6 +41,11 @@ except ImportError:  # pragma: no cover - croniter is a pinned dep
     croniter = None  # type: ignore[assignment]
     _HAS_CRONITER = False
 
+try:
+    from tzlocal import get_localzone
+except ImportError:  # pragma: no cover - tzlocal is a pinned dep
+    get_localzone = None  # type: ignore[assignment]
+
 
 # ── paths ───────────────────────────────────────────────────────────
 
@@ -261,6 +266,79 @@ def _now() -> datetime:
     return datetime.now().astimezone()
 
 
+def _local_zone() -> Any:
+    """The machine's time zone as a real zone (honours ``TZ``), or ``None``.
+
+    ``_now()`` carries a fixed UTC offset, which is right for "now" but not for a
+    wall-clock time on the other side of a DST change (gh #200). Cron schedules
+    need the zone's rules.
+    """
+    if get_localzone is None:
+        return None
+    try:
+        return get_localzone()
+    except Exception:
+        logger.debug("Could not determine the local time zone", exc_info=True)
+        return None
+
+
+def _is_repeated_wall_time(dt: datetime) -> bool:
+    """True for the second occurrence of a wall-clock time in the hour DST ends."""
+    first, second = dt.replace(fold=0).utcoffset(), dt.replace(fold=1).utcoffset()
+    return first != second and dt.utcoffset() == second
+
+
+def _next_cron_run(expr: str, base: datetime) -> datetime:
+    """The first run of cron ``expr`` after ``base``, on the local wall clock.
+
+    Cron times are wall-clock times, so the step happens in the local zone, not at
+    ``base``'s UTC offset: "0 9 * * *" stays at 09:00 across a DST change (gh #200).
+    In the hour DST ends, a job pinned to particular hours ("30 1 * * *") runs once,
+    at the first 01:30; a job on every hour ("*/30 * * * *") keeps running in real
+    time through both. A time skipped when DST starts runs at the first valid time
+    after it (croniter's behaviour).
+    """
+    zone = _local_zone()
+    if zone is None:
+        # No zone rules available: step on the naive local wall clock and let the OS
+        # give the result its offset for that instant.
+        naive = base.astimezone().replace(tzinfo=None)
+        return croniter(expr, naive).get_next(datetime).astimezone()
+    it = croniter(expr, base.astimezone(zone))
+    every_hour = it.expanded[1] == ["*"]
+    nxt = it.get_next(datetime)
+    while not every_hour and _is_repeated_wall_time(nxt):
+        nxt = it.get_next(datetime)
+    return nxt
+
+
+def _local_wall_time_view(job: dict[str, Any]) -> dict[str, Any]:
+    """Re-read a cron ``next_run_at`` stored at a stale UTC offset in the local zone.
+
+    Before gh #200, a run on the far side of a DST change was stored as the right
+    wall-clock time at the old offset (``…T09:00:00-04:00`` for 09:00 EST), so it
+    fired an hour off. A correct record's offset always matches the zone for its
+    wall time, so a mismatch is read as that wall time in the local zone. Read-only:
+    the next completed run stores a correct value.
+    """
+    if (job.get("schedule") or {}).get("kind") != "cron" or not job.get("next_run_at"):
+        return job
+    zone = _local_zone()
+    if zone is None:
+        return job
+    try:
+        stored = datetime.fromisoformat(job["next_run_at"])
+    except (TypeError, ValueError):
+        return job
+    if stored.tzinfo is None:
+        return job
+    wall = stored.replace(tzinfo=None)
+    offsets = {wall.replace(tzinfo=zone, fold=f).utcoffset() for f in (0, 1)}
+    if stored.utcoffset() in offsets:
+        return job
+    return {**job, "next_run_at": wall.replace(tzinfo=zone).isoformat()}
+
+
 def _ensure_aware(dt: datetime) -> datetime:
     """Coerce a naive datetime to local-tz aware (back-compat with old records)."""
     if dt.tzinfo is None:
@@ -309,8 +387,7 @@ def compute_next_run(
             )
             return None
         base = _ensure_aware(datetime.fromisoformat(last_run_at)) if last_run_at else now
-        c = croniter(schedule["expr"], base)
-        return c.get_next(datetime)
+        return _next_cron_run(schedule["expr"], base)
 
     return None
 
@@ -476,7 +553,7 @@ def create_job(
 def list_jobs(*, include_disabled: bool = True) -> list[dict[str, Any]]:
     """Return all stored jobs. Disabled jobs included by default."""
     with _jobs_lock:
-        jobs = _load()
+        jobs = [_local_wall_time_view(j) for j in _load()]
     if not include_disabled:
         jobs = [j for j in jobs if j.get("enabled", True)]
     return jobs
@@ -487,7 +564,7 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     with _jobs_lock:
         for job in _load():
             if job.get("id") == job_id:
-                return job
+                return _local_wall_time_view(job)
     return None
 
 
