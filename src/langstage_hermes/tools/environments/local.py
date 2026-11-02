@@ -41,8 +41,10 @@ def _find_bash() -> str | None:
         or os.environ.get("DEEPAGENT_HERMES_BASH_PATH")
         or os.environ.get("HERMES_BASH_PATH")
     )
-    if override and Path(override).is_file():
-        return override
+    if override:
+        override = os.path.expanduser(override)  # gh #202: `~` from .env / quoted exports
+        if Path(override).is_file():
+            return override
 
     found = shutil.which("bash")
     if found:

@@ -2,6 +2,22 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.53] - 2026-11-02
+
+### Fixed
+- **A `~` in `HERMES_HOME` expands to your home directory (#202).** Shells only expand an
+  unquoted `~`, so a quoted export, a `.env` file, Docker `ENV`, a systemd unit or an IDE
+  kernel env passed it through literally. Hermes then wrote skills, memory and `state.db` under
+  a directory named `~` inside the current directory, so memory split by working directory.
+  `HERMES_HOME`, `LANGSTAGE_HERMES_HOME` and legacy `DEEPAGENT_HERMES_HOME` now expand `~`
+  and `~user`. Absolute and relative values are unchanged.
+- **`doctor` points at a leftover `./~` store.** If the current directory holds a `~/.langstage-hermes`
+  left by an older version, `doctor` names it and how to move it. Nothing is moved or deleted
+  automatically.
+- **The same expansion for other path settings:** `LANGSTAGE_HERMES_BASH_PATH`,
+  `LANGSTAGE_HERMES_SSH_KEY`, `LANGSTAGE_HERMES_SINGULARITY_WORKSPACE` (and their legacy
+  aliases), and the bundled google-workspace skill's `HERMES_HOME` lookup.
+
 ## [0.4.52] - 2026-10-31
 
 ### Fixed

@@ -81,14 +81,41 @@ def hermes_home_override() -> str | None:
     core's ``_warn_legacy_env`` (so ``LANGSTAGE_SUPPRESS_LEGACY_NOTICE`` silences it
     too) (gh #145). This is the single place the env precedence lives; every
     home resolver in the package goes through it.
+
+    A leading ``~`` / ``~user`` is expanded here. Shells only expand an unquoted
+    ``~``, so ``.env`` files, Docker ``ENV``, systemd units and quoted exports
+    hand it over literally, and it used to become a directory named ``~`` under
+    the cwd, splitting skills / memory / ``state.db`` per working directory
+    (gh #202).
     """
     canonical = os.getenv("LANGSTAGE_HERMES_HOME") or os.getenv("HERMES_HOME")
     if canonical:
-        return canonical
+        return os.path.expanduser(canonical)
     legacy = os.getenv("DEEPAGENT_HERMES_HOME")
     if legacy:
         _warn_legacy_env("DEEPAGENT_HERMES_HOME", "HERMES_HOME (or LANGSTAGE_HERMES_HOME)")
-        return legacy
+        return os.path.expanduser(legacy)
+    return None
+
+
+def stray_tilde_home(cwd: Path | None = None) -> Path | None:
+    """A literal ``<cwd>/~`` directory left by a pre-0.4.53 unexpanded ``HERMES_HOME``.
+
+    Before gh #202, ``HERMES_HOME="~/.langstage-hermes"`` (quoted, or from a
+    ``.env`` file) wrote skills, memory and ``state.db`` under ``<cwd>/~/``.
+    ``doctor`` reports it so the user can move the data into the real home; it is
+    never migrated or deleted automatically. Returns the ``~`` directory when it
+    holds a Hermes home, else ``None``.
+    """
+    stray = (cwd or Path.cwd()) / "~"
+    try:
+        if not stray.is_dir():
+            return None
+        for name in (".langstage-hermes", ".deepagent-hermes"):
+            if (stray / name).is_dir():
+                return stray
+    except OSError:
+        return None
     return None
 
 
