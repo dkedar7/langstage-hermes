@@ -274,9 +274,8 @@ class SshEnvironment(BaseEnvironment):
         self.key_path = (
             key_path
             if key_path is not None
-            else (
-                os.environ.get("LANGSTAGE_HERMES_SSH_KEY")
-                or os.environ.get("DEEPAGENT_HERMES_SSH_KEY", os.path.expanduser("~/.ssh/id_rsa"))
+            else os.path.expanduser(  # gh #202: `~` from .env / quoted exports
+                os.environ.get("LANGSTAGE_HERMES_SSH_KEY") or os.environ.get("DEEPAGENT_HERMES_SSH_KEY", "~/.ssh/id_rsa")
             )
         )
         self.password = (

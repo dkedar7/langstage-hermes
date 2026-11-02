@@ -3684,6 +3684,21 @@ def doctor(as_json: bool) -> None:
         _emit(f"  HERMES_HOME ({home}): NOT writable — {e}")
         checks.append({"name": "hermes_home", "ok": False, "detail": f"{home}: {e}", "writable": False})
 
+    # gh #202: before 0.4.53 an unexpanded `~` in HERMES_HOME wrote the store under
+    # a literal `<cwd>/~/`. Point at it (never move or delete it: a careless
+    # `rm -rf ~` cleanup would hit the real home).
+    from langstage_hermes.config import stray_tilde_home
+
+    stray = stray_tilde_home()
+    if stray is not None:
+        stray_detail = (
+            f"found {stray} (a directory literally named '~', left by an unexpanded HERMES_HOME "
+            f"before 0.4.53); move what you need into {home}, then remove it with "
+            f"`rm -rf ./~` (quote the ./ prefix; never `rm -rf ~`)"
+        )
+        _emit(f"  note: {stray_detail}")
+        checks.append({"name": "stray_tilde_home", "ok": True, "detail": stray_detail})
+
     cron_dir = home / "cron"
     cron_detail = "exists" if cron_dir.exists() else "absent (created on first use)"
     _emit(f"  cron dir: {'exists' if cron_dir.exists() else 'absent (will be created on first use)'}")

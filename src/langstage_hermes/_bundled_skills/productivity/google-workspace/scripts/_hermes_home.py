@@ -29,7 +29,7 @@ except (ModuleNotFoundError, ImportError):
 
         Mirrors ``hermes_constants.get_hermes_home()``."""
         val = os.environ.get("HERMES_HOME", "").strip()
-        return Path(val) if val else Path.home() / ".hermes"
+        return Path(val).expanduser() if val else Path.home() / ".hermes"
 
     def display_hermes_home() -> str:
         """Return a user-friendly ``~/``-shortened display string.

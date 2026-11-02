@@ -68,7 +68,7 @@ def _resolve_workspace() -> Path:
         "DEEPAGENT_HERMES_SINGULARITY_WORKSPACE"
     )
     if override:
-        path = Path(override)
+        path = Path(override).expanduser()  # gh #202: `~` from .env / quoted exports
         path.mkdir(parents=True, exist_ok=True)
         return path
     return Path(tempfile.gettempdir())
