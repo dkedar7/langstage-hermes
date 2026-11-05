@@ -27,6 +27,11 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
   unattended runs stays with the `cron` CLI. `tools` lists both as declared, not bound, and the
   README status rows say so. `delegation` (the `task` tool, which is bound) is now listed as
   implemented.
+- **`HermesConfig.resolve(overrides=...)` coerces values like the TOML layer** (the hermes
+  twin of langstage-core #225). A str `"false"` for a bool field stayed the truthy str
+  `'false'`, and a str number stayed a str. Overrides now go through the same coercion; one
+  that can't be coerced keeps the layer beneath, with a one-line note and a
+  `config_issues()` entry.
 
 ## [0.4.53] - 2026-11-02
 
