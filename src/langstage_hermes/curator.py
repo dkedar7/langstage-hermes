@@ -408,6 +408,9 @@ class CuratorMiddleware(AgentMiddleware):
 
         now = _now()
         cstate = _load_curator_state(self.store)
+        # `curator pause` sets this; a paused curator skips its scheduled pass (gh #204).
+        if cstate.get("paused"):
+            return None
         last_run_at = float(cstate.get("last_run_at") or 0.0)
         last_user_activity = float(cstate.get("last_user_activity") or 0.0)
 

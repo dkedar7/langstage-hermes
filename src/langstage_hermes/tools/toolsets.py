@@ -131,14 +131,37 @@ assert len(TOOLSETS) == 33, f"TOOLSETS must contain exactly 33 entries (per SPEC
 # enum-only — they exist so config (``[agent].disabled_toolsets``) and slash
 # commands can reference them but won't actually surface any tools until a
 # v0.2+ release (or a plugin) registers their handlers.
+#
+# ``clarify`` and ``cronjob`` have tool modules (``tools/clarify.py``,
+# ``cron/tool.py``) but the agent factory doesn't bind them: clarify needs a
+# host that pauses for the answer, and an agent that schedules its own
+# unattended runs is a step the `cron` CLI keeps with the user (gh #205).
 IMPLEMENTED_TOOLSETS: set[str] = {
     "file",
     "todo",
-    "clarify",
     "skills",
     "memory",
     "session_search",
     "terminal",
+    "delegation",
+}
+
+# The tool names the model is actually given for each implemented toolset.
+# deepagents supplies the file/terminal/todo/delegation tools under its own
+# names, not the Hermes wire names in TOOLSETS (gh #205).
+BOUND_TOOLS: dict[str, list[str]] = {
+    "file": ["ls", "read_file", "write_file", "edit_file", "delete", "glob", "grep"],
+    "terminal": ["execute"],
+    "todo": ["write_todos"],
+    "delegation": ["task"],
+    "skills": ["skills_list", "skill_view", "skill_manage"],
+    "memory": ["memory"],
+    "session_search": ["session_search"],
+}
+
+# A caveat printed next to a toolset by `tools` and `/tools`.
+TOOLSET_NOTES: dict[str, str] = {
+    "terminal": "only with a sandbox backend (create_hermes_agent(backend=...)); the default workspace backend has no shell",
 }
 
 
@@ -164,17 +187,13 @@ def is_implemented(toolset: str) -> bool:
 # file/terminal/todo/delegation tools differently from Hermes's wire names in
 # TOOLSETS, so filtering by TOOLSETS alone would miss them (gh #197).
 BOUND_TOOL_TOOLSETS: dict[str, str] = {
-    "ls": "file",
-    "read_file": "file",
-    "write_file": "file",
-    "edit_file": "file",
-    "delete": "file",
-    "glob": "file",
-    "grep": "file",
-    "execute": "terminal",
-    "write_todos": "todo",
-    "task": "delegation",
+    name: toolset for toolset in ("file", "terminal", "todo", "delegation") for name in BOUND_TOOLS[toolset]
 }
+
+
+def bound_tools_for(toolset: str) -> list[str]:
+    """Return the tool names the model is given for ``toolset`` (``[]`` if it binds none)."""
+    return list(BOUND_TOOLS.get(toolset, []))
 
 
 def toolset_of(tool_name: str) -> str | None:
@@ -265,9 +284,12 @@ def register_implemented_tools(
 
 
 __all__ = [
+    "BOUND_TOOLS",
     "IMPLEMENTED_TOOLSETS",
     "TOOLSETS",
+    "TOOLSET_NOTES",
     "all_toolset_names",
+    "bound_tools_for",
     "is_implemented",
     "register_implemented_tools",
     "resolve_enabled",

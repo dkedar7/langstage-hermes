@@ -229,7 +229,7 @@ See [SPEC.md](./SPEC.md) for the full 21-section requirements doc. Top-level lay
 - `src/langstage_hermes/caching.py` — `AnthropicCachingS3Middleware`
 - `src/langstage_hermes/budget.py` — `IterationBudgetMiddleware`
 - `src/langstage_hermes/tools/` — registry + 33 toolsets + 6 terminal envs
-- `src/langstage_hermes/cron/` — daemon + `cronjob` tool
+- `src/langstage_hermes/cron/` — daemon + `cron` CLI (the `cronjob` tool module isn't bound into the agent)
 - `src/langstage_hermes/plugins/` — discovery + lifecycle hooks
 - `src/langstage_hermes/cli.py` — `langstage-hermes` entry point
 - `prompts/` — verbatim/paraphrased system-prompt building blocks
@@ -249,13 +249,13 @@ See [SPEC.md](./SPEC.md) for the full 21-section requirements doc. Top-level lay
 | Iteration budget middleware | ✅ working |
 | Compression middleware (13-section template) | ✅ working |
 | Anthropic `system_and_3` caching strategy | ✅ working |
-| Tool registry + 33-toolset enum | ✅ working |
-| `LocalEnvironment` terminal backend | ✅ working (Git Bash on Windows) |
+| Tool registry + 33-toolset enum | ✅ working — `langstage-hermes tools` lists the tool names the model is actually given; `clarify` and `cronjob` are declared but not bound |
+| `LocalEnvironment` terminal backend | ✅ working (Git Bash on Windows); the agent gets the `execute` shell tool only when built with a sandbox `backend=` — the default workspace backend has no shell |
 | `DockerEnvironment` | ✅ working (gated on `docker info` reachability) |
 | `SshEnvironment` | ✅ working (paramiko-backed, behind `[ssh]` extra) |
 | `SingularityEnvironment` | ✅ working (auto-detects `singularity` / `apptainer`) |
 | `DaytonaEnvironment` / `ModalEnvironment` | ✅ lazy SDK with defensive attribute probing (extras-gated) |
-| Cron daemon + `cronjob` tool | ✅ working (deliverers: `local`, `stdout`, `agentmail`) |
+| Cron daemon + `cron` CLI (also `/cron <subcommand>` in chat) | ✅ working (deliverers: `local`, `stdout`, `agentmail`); the agent can't schedule its own jobs |
 | Plugin loader (4 discovery sources) | ✅ working (13 of 17 lifecycle hooks wired) |
 | CLI + v1-essentials slash commands | ✅ working |
 | Curator (skill lifecycle) | ✅ basic |
