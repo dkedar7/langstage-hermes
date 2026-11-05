@@ -42,8 +42,11 @@ def test_resolved_config_reports_hermes_unknown_keys(monkeypatch, tmp_path):
     assert cfg.unknown_toml_keys() == ["memory.bogus_key", "model.defaultt"]
     issues = {i["key"]: i for i in cfg.config_issues() if i["kind"] == "unknown_toml_key"}
     assert set(issues) == {"memory.bogus_key", "model.defaultt"}
-    assert issues["model.defaultt"]["did_you_mean"] == "default"
-    assert "did you mean 'default'" in issues["model.defaultt"]["message"]
+    # langstage-core >= 1.0.56 names the full key itself; hermes' own hint (the
+    # bare field name) fills in only when core gives none (gh #170).
+    hint = issues["model.defaultt"]["did_you_mean"]
+    assert hint in ("default", "model.default")
+    assert hint in issues["model.defaultt"]["message"]
 
 
 def test_show_config_json_is_a_usable_lint_gate(monkeypatch, tmp_path):
