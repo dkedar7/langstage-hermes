@@ -56,6 +56,17 @@ from langstage_core.host.config import (
     _warned_legacy_toml,
 )
 
+try:  # langstage-core >= 1.0.57
+    from langstage_core.host.config import _warn_malformed_override
+except ImportError:  # pragma: no cover - older core: same one-line note, local copy
+
+    def _warn_malformed_override(field: str, value: Any, exc: Exception, kept: Any, kept_src: str = "default") -> None:
+        kept_desc = f"default {kept!r}" if kept_src == "default" else f"{kept!r} ({kept_src})"
+        print(
+            f"note: ignoring malformed override {field}={value!r} ({type(exc).__name__}: {exc}); using {kept_desc} instead.",
+            file=sys.stderr,
+        )
+
 # ── Hermes TOML locations ────────────────────────────────────────────
 
 # The global config's DEFAULT location. The *effective* path honors HERMES_HOME —
@@ -808,8 +819,19 @@ class HermesConfig(HostConfig):
                         value_issues.append(_value_issue("malformed_value", name, f"env:{used}", ev, exc, val))
 
             if name in overrides:
-                val = overrides[name]
-                src = "override"
+                # Overrides go through the same coercion as TOML (the hermes twin of
+                # langstage-core #225): overrides={"memory_nudge_interval": "5"} used to
+                # stay the str '5', and a bool "false" stayed truthy. An uncoercible
+                # value keeps the layer beneath, with a note and a config_issues() entry.
+                ov = overrides[name]
+                try:
+                    coerced = _coerce(f, ov)
+                except (ValueError, TypeError) as exc:
+                    _warn_malformed_override(name, ov, exc, val, src)
+                    value_issues.append(_value_issue("malformed_value", name, "override", ov, exc, val))
+                else:
+                    val = coerced
+                    src = "override"
 
             # Path-valued fields follow core's rule (gh #162): a relative path from a
             # TOML file resolves against that file's directory, not the cwd, so running
