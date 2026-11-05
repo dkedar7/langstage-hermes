@@ -35,8 +35,8 @@ def test_implemented_toolsets_is_a_subset() -> None:
 
 
 def test_implemented_set_matches_spec() -> None:
-    """v0.1.0 ships the seven toolsets the spec lists; no more, no less."""
-    expected = {"file", "todo", "clarify", "skills", "memory", "session_search", "terminal"}
+    """The toolsets whose tools the agent factory binds (gh #205: clarify is not bound, delegation is)."""
+    expected = {"file", "todo", "skills", "memory", "session_search", "terminal", "delegation"}
     assert IMPLEMENTED_TOOLSETS == expected
 
 

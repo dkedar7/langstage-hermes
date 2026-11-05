@@ -87,11 +87,11 @@ BUILTIN_SLASH_COMMANDS: dict[str, str] = {
     "model": "Switch model for subsequent turns: /model anthropic:claude-haiku-4-5",
     "config": "Show the resolved config.",
     "skills": "List/manage skills.",
-    "cron": "Pass-through to the cron subcommand.",
-    "curator": "Run / inspect the skill curator.",
+    "cron": "List cron jobs; /cron <subcommand> runs `langstage-hermes cron <subcommand>`.",
+    "curator": "Curator status; /curator pause|resume|run [--dry-run] act on it.",
     "memory": "View MEMORY.md / USER.md snapshots.",
     "tools": "List registered toolsets.",
-    "toolsets": "Toggle which toolsets are active for this session.",
+    "toolsets": "Show toolsets; /toolsets disable|enable <name> changes them for this session.",
     "verbose": "Toggle verbose stream output.",
     "yolo": "Toggle auto-approval of dangerous tool calls.",
     "reload": "Reload plugins / config from disk.",
@@ -930,12 +930,13 @@ def _slash_yolo(args: str, state: dict[str, Any]) -> bool:
 
 def _slash_tools(args: str, state: dict[str, Any]) -> bool:
     """Inline summary of implemented toolsets — full taxonomy via `tools` subcommand."""
-    from langstage_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, TOOLSETS
+    from langstage_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, TOOLSET_NOTES, TOOLSETS, bound_tools_for
 
     click.echo(click.style("Toolsets (implemented):", fg="cyan"))
     for ts in sorted(IMPLEMENTED_TOOLSETS):
-        names = TOOLSETS.get(ts, [])
-        click.echo(f"  ● {ts:<18}  {', '.join(names)}")
+        click.echo(f"  ● {ts:<18}  {', '.join(bound_tools_for(ts))}")
+        if ts in TOOLSET_NOTES:
+            click.echo(click.style(f"      ({TOOLSET_NOTES[ts]})", fg="bright_black"))
     stubbed = len(TOOLSETS) - len(IMPLEMENTED_TOOLSETS)
     click.echo(
         click.style(
@@ -947,9 +948,52 @@ def _slash_tools(args: str, state: dict[str, Any]) -> bool:
 
 
 def _slash_toolsets(args: str, state: dict[str, Any]) -> bool:
-    """Shows which toolsets are currently enabled vs disabled in the loaded config."""
+    """Show which toolsets are enabled, or ``/toolsets disable|enable <name>...`` for this session.
+
+    A change rebuilds the built-in agent with the new ``disabled_toolsets``, keeping
+    the conversation, so a disabled toolset's tools are really gone (gh #206). It
+    lasts for this chat (``/reload`` keeps it) and is not written to the config.
+    """
+    from langstage_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, TOOLSETS, resolve_enabled, unknown_toolsets
+
+    parts = args.split()
+    if parts:
+        action, names = parts[0].lower(), parts[1:]
+        if action not in ("disable", "enable") or not names:
+            click.echo(click.style("Usage: /toolsets [disable|enable <toolset> ...]", fg="yellow"))
+            return False
+        unknown = unknown_toolsets(names)
+        if unknown:
+            click.echo(click.style(f"(nothing changed: unknown toolset(s) {unknown}; run /tools for the names)", fg="red"))
+            return False
+        if not hasattr(state.get("agent"), "langstage_hermes_config"):
+            click.echo(
+                click.style("(/toolsets only changes the built-in agent; an --agent spec builds its own tools)", fg="yellow")
+            )
+            return False
+        import dataclasses
+
+        current = list(state["cfg"].agent_disabled_toolsets or [])
+        if action == "disable":
+            new_disabled = current + [n for n in names if n not in current]
+        else:
+            new_disabled = [n for n in current if n not in names]
+        if new_disabled == current:
+            click.echo(f"(no change: {', '.join(names)} already {action}d)")
+        else:
+            try:
+                kept = _rebuild_builtin_agent(state, dataclasses.replace(state["cfg"], agent_disabled_toolsets=new_disabled))
+            except Exception as e:
+                click.echo(click.style(f"(nothing changed, still running the previous agent: {e})", fg="red"))
+                return False
+            # /reload re-resolves the config; carry the session's choice through it.
+            state.setdefault("cli_overrides", {})["agent_disabled_toolsets"] = new_disabled
+            click.echo(f"({action}d {', '.join(names)} for this session; agent rebuilt, {kept} message(s) kept)")
+        unbound = [n for n in names if n in TOOLSETS and n not in IMPLEMENTED_TOOLSETS]
+        if unbound:
+            click.echo(click.style(f"  note: {', '.join(unbound)} has no tools in this version", fg="bright_black"))
+
     cfg = state["cfg"]
-    from langstage_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, resolve_enabled, unknown_toolsets
 
     disabled = set(cfg.agent_disabled_toolsets or [])
     enabled = resolve_enabled(disabled_toolsets=disabled, platform=os.getenv("HERMES_PLATFORM", "cli"))
@@ -959,7 +1003,7 @@ def _slash_toolsets(args: str, state: dict[str, Any]) -> bool:
         if ts in enabled:
             click.echo(click.style(f"  ✓ {ts}", fg="green"))
         else:
-            click.echo(click.style(f"  ✗ {ts}  (disabled in config)", fg="bright_black"))
+            click.echo(click.style(f"  ✗ {ts}  (disabled)", fg="bright_black"))
     if disabled:
         click.echo(click.style(f"\n  agent.disabled_toolsets = {sorted(disabled)}", fg="bright_black"))
     unknown = unknown_toolsets(disabled)
@@ -1016,8 +1060,42 @@ def _slash_skills(args: str, state: dict[str, Any]) -> bool:
     return False
 
 
+def _run_cli_from_slash(argv: list[str]) -> None:
+    """Run ``langstage-hermes <argv>`` inside the REPL; errors are printed, never fatal."""
+    try:
+        cli.main(args=argv, prog_name="langstage-hermes", standalone_mode=False)
+    except click.ClickException as e:
+        e.show()
+    except (click.exceptions.Abort, click.exceptions.Exit, SystemExit):
+        pass
+
+
+def _slash_argv(args: str) -> list[str] | None:
+    import shlex
+
+    try:
+        return shlex.split(args)
+    except ValueError as e:
+        click.echo(click.style(f"(could not parse arguments: {e})", fg="red"))
+        return None
+
+
 def _slash_cron(args: str, state: dict[str, Any]) -> bool:
-    """List currently-scheduled cron jobs."""
+    """List cron jobs, or ``/cron <subcommand ...>`` to run the ``cron`` subcommand (gh #206)."""
+    argv = _slash_argv(args)
+    if argv is None:
+        return False
+    if argv and argv[0] != "list":
+        if argv[0] == "daemon":
+            click.echo(
+                click.style(
+                    "(/cron daemon would block the chat; run `langstage-hermes cron daemon` in another terminal)",
+                    fg="yellow",
+                )
+            )
+            return False
+        _run_cli_from_slash(["cron", *argv])
+        return False
     from langstage_hermes.cron.jobs import list_jobs
 
     items = list_jobs()
@@ -1035,7 +1113,13 @@ def _slash_cron(args: str, state: dict[str, Any]) -> bool:
 
 
 def _slash_curator(args: str, state: dict[str, Any]) -> bool:
-    """Inline curator state — same data as `curator status` subcommand."""
+    """Inline curator state, or ``/curator pause|resume|run|pin|unpin ...`` to act (gh #206)."""
+    argv = _slash_argv(args)
+    if argv is None:
+        return False
+    if argv and argv[0] != "status":
+        _run_cli_from_slash(["curator", *argv])
+        return False
     try:
         cstate = _curator_state_get()
     except Exception as e:
@@ -1169,8 +1253,6 @@ def _slash_reload(args: str, state: dict[str, Any]) -> bool:
     copied into it. If the rebuild fails, the old agent and config stay. An
     ``--agent`` spec graph isn't rebuilt: hermes can't rebuild what the spec made.
     """
-    from langstage_core import apply_workspace
-
     from langstage_hermes.config import HermesConfig
 
     try:
@@ -1183,24 +1265,40 @@ def _slash_reload(args: str, state: dict[str, Any]) -> bool:
         state["cfg"] = cfg
         click.echo("(config reloaded for /config; your --agent spec's graph isn't rebuilt — restart chat to reload it)")
         return False
+    try:
+        kept = _rebuild_builtin_agent(state, cfg)
+    except Exception as e:
+        click.echo(click.style(f"(reload failed, still running the previous agent: {e})", fg="red"))
+        return False
+    click.echo(f"(config and plugins reloaded; agent rebuilt, {kept} message(s) of this session kept)")
+    return False
+
+
+def _rebuild_builtin_agent(state: dict[str, Any], cfg: Any) -> int:
+    """Rebuild the built-in agent from ``cfg`` for the same session, keeping the conversation.
+
+    Returns how many messages were carried over. On failure it raises, and the
+    previous agent, config and workspace stay in place.
+    """
+    from langstage_core import apply_workspace
+
+    from langstage_hermes.agent import create_hermes_agent
+
+    old = state["agent"]
     sid = state.get("session_id") or getattr(old, "langstage_hermes_session_id", None)
     try:
-        from langstage_hermes.agent import create_hermes_agent
-
         apply_workspace(cfg.workspace_root)
         new = create_hermes_agent(cfg, session_id=sid)
         thread = {"configurable": {"thread_id": sid}}
         messages = (old.get_state(thread).values or {}).get("messages") or []
         if messages:
             new.update_state(thread, {"messages": messages})
-    except Exception as e:
+    except Exception:
         apply_workspace(state["cfg"].workspace_root)
-        click.echo(click.style(f"(reload failed, still running the previous agent: {e})", fg="red"))
-        return False
+        raise
     state["cfg"], state["agent"] = cfg, new
     state.pop("_agui_agent", None)  # the AG-UI wrapper is rebuilt around the new graph next turn
-    click.echo(f"(config and plugins reloaded; agent rebuilt, {len(messages)} message(s) of this session kept)")
-    return False
+    return len(messages)
 
 
 _SLASH_HANDLERS: dict[str, Callable[[str, dict[str, Any]], bool]] = {
@@ -1799,7 +1897,7 @@ def tools(toolset_filter: str | None, implemented_only: bool) -> None:
     (homeassistant, spotify, etc.). For live check-status info, run
     ``langstage-hermes doctor``.
     """
-    from langstage_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, TOOLSETS
+    from langstage_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, TOOLSET_NOTES, TOOLSETS, bound_tools_for
 
     declared = sorted(TOOLSETS.keys())
     shown = 0
@@ -1810,14 +1908,18 @@ def tools(toolset_filter: str | None, implemented_only: bool) -> None:
         if implemented_only and not is_impl:
             continue
         mark = "●" if is_impl else "○"
-        names = TOOLSETS[ts]
+        # An implemented toolset lists the names the model is given, which for
+        # deepagents' tools differ from the Hermes names in TOOLSETS (gh #205).
+        names = bound_tools_for(ts) if is_impl else TOOLSETS[ts]
         header_color = "cyan" if is_impl else "bright_black"
-        suffix = "" if is_impl else "  (declared, not implemented in v0.1)"
+        suffix = "" if is_impl else "  (declared, not bound into the agent)"
         click.echo(
             click.style(f"  {mark} {ts:<20}", fg=header_color) + click.style(f" {len(names)} tool(s){suffix}", fg="bright_black")
         )
         for name in names:
             click.echo(click.style(f"      · {name}", fg="bright_black"))
+        if is_impl and ts in TOOLSET_NOTES:
+            click.echo(click.style(f"      ({TOOLSET_NOTES[ts]})", fg="yellow"))
         shown += 1
     if shown == 0:
         if toolset_filter and toolset_filter not in TOOLSETS:
@@ -2851,7 +2953,7 @@ def curator_run(dry_run: bool) -> None:
 
 @curator.command("pause")
 def curator_pause() -> None:
-    """Pause the curator's scheduled runs (status flag only)."""
+    """Pause the curator's scheduled runs inside chat turns (`curator run` still works)."""
     state = _curator_state_get()
     state["paused"] = True
     _curator_state_save(state)

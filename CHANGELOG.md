@@ -2,6 +2,32 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.54] - 2026-11-05
+
+### Fixed
+- **`curator pause` pauses the curator (#204).** The flag was only shown by `curator status`;
+  the curator pass that runs at the start of a chat turn never read it, so a paused curator
+  still archived skills. A paused curator now skips that pass. `curator run` still runs on
+  demand.
+- **`/cron`, `/curator` and `/toolsets` in chat act on their arguments (#206).** They used to
+  print state and drop everything after the command name.
+  - `/cron <subcommand ...>` runs `langstage-hermes cron <subcommand ...>` (`/cron` alone
+    still lists jobs; `/cron daemon` is refused because it would block the chat).
+  - `/curator pause|resume|run [--dry-run]|pin|unpin` acts; `/curator` alone shows status.
+  - `/toolsets disable|enable <toolset> ...` rebuilds the agent without (or with) those
+    toolsets for the rest of the chat, keeping the conversation. `/reload` keeps the choice;
+    the config file is not changed.
+  - `/help` describes what each command does.
+- **`tools` lists the tool names the model is actually given (#205).** Implemented toolsets
+  showed the upstream Hermes names (`terminal`, `patch`, `todo`, ...); they now show the names
+  the agent binds (`execute`, `edit_file`, `write_todos`, ...). `terminal` notes that `execute`
+  only exists with a sandbox backend; the default workspace backend has no shell.
+- **`clarify` and `cronjob` are no longer advertised as working (#205).** Neither tool is bound
+  into the agent: `clarify` needs a host that pauses for the answer, and scheduling
+  unattended runs stays with the `cron` CLI. `tools` lists both as declared, not bound, and the
+  README status rows say so. `delegation` (the `task` tool, which is bound) is now listed as
+  implemented.
+
 ## [0.4.53] - 2026-11-02
 
 ### Fixed
