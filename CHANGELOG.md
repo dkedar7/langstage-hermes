@@ -2,6 +2,22 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.55] - 2026-11-06
+
+### Fixed
+- **A list key written as a bare string works like the env var (#209).** In
+  `langstage-hermes.toml`, `skills.external_dirs = "extskills"` crashed `skills list` and
+  `chat` (`'PosixPath' object is not iterable`), `agent.disabled_toolsets = "file"` disabled
+  toolsets named `f`, `i`, `l`, `e` and left `file` on, and `skills.disabled = "x"` was
+  ignored. `--show-config` reported none of it. A bare string is now split on commas, the
+  same as the `LANGSTAGE_HERMES_*` env vars already were, so `"file"` means `["file"]`.
+  This covers `agent.disabled_toolsets`, `skills.external_dirs`, `skills.disabled`,
+  `plugins.enabled`, `plugins.disabled` and each platform in `skills.platform_disabled`.
+- **Other wrong shapes for those keys are reported.** A number, a table, a list holding a
+  non-string, or a non-table `skills.platform_disabled` now prints a `note:`, appears in
+  `config_issues()` / `--show-config --json`, and keeps the value from the layer beneath.
+  `overrides=` goes through the same check.
+
 ## [0.4.54] - 2026-11-05
 
 ### Fixed
