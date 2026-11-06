@@ -406,6 +406,44 @@ def _env_list_csv(value: str | None, default: list[str] | None = None) -> list[s
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _as_str_list(value: Any, what: str) -> list[str]:
+    """A TOML/override value for a ``list[str]`` field, as a list of strings.
+
+    A bare string is read like the env layer reads it (``_env_list_csv``): split on
+    commas, so ``disabled_toolsets = "file"`` means ``["file"]`` in TOML exactly as
+    ``LANGSTAGE_HERMES_AGENT_DISABLED_TOOLSETS=file`` already did. It used to pass
+    through verbatim, so the runtime iterated the characters (``['f','i','l','e']``)
+    or crashed on a ``Path`` (gh #209). Any other non-list, or a list holding a
+    non-string, raises ``TypeError`` so ``resolve()`` keeps the layer beneath with a
+    note and a ``config_issues()`` entry.
+    """
+    if isinstance(value, str):
+        return _env_list_csv(value)
+    if isinstance(value, (list, tuple)):
+        bad = [v for v in value if not isinstance(v, str)]
+        if bad:
+            raise TypeError(f"expected a list of strings for {what}, got item {bad[0]!r}")
+        return list(value)
+    raise TypeError(f"expected a list of strings for {what}, got {type(value).__name__} {value!r}")
+
+
+def _coerce_field(f: Any, value: Any) -> Any:
+    """``_coerce`` plus the container shapes only hermes declares (gh #209).
+
+    Core's ``_coerce`` handles Path, bool, numeric and text fields and returns any
+    other shape unchanged, so the five ``list[str]`` fields and the
+    ``dict[str, list[str]]`` ``skills_platform_disabled`` were never checked.
+    """
+    ftype = str(f.type)
+    if ftype == "list[str]":
+        return _as_str_list(value, f.name)
+    if ftype == "dict[str, list[str]]":
+        if not isinstance(value, dict):
+            raise TypeError(f"expected a table of lists for {f.name}, got {type(value).__name__} {value!r}")
+        return {str(k): _as_str_list(v, f"{f.name}.{k}") for k, v in value.items()}
+    return _coerce(f, value)
+
+
 def _env_float(value: str | None) -> float:
     return float(value) if value not in (None, "") else 0.0
 
@@ -775,7 +813,7 @@ class HermesConfig(HostConfig):
                         if tv is None:
                             continue
                         try:
-                            coerced = _coerce(f, tv)
+                            coerced = _coerce_field(f, tv)
                         except (ValueError, TypeError) as exc:
                             # Same one-line note as core, via the shared helper, so the
                             # wording can't drift.
@@ -825,7 +863,7 @@ class HermesConfig(HostConfig):
                 # value keeps the layer beneath, with a note and a config_issues() entry.
                 ov = overrides[name]
                 try:
-                    coerced = _coerce(f, ov)
+                    coerced = _coerce_field(f, ov)
                 except (ValueError, TypeError) as exc:
                     _warn_malformed_override(name, ov, exc, val, src)
                     value_issues.append(_value_issue("malformed_value", name, "override", ov, exc, val))
