@@ -166,6 +166,29 @@ def test_absent_store_json_mode(tmp_hermes_home):
     assert json.loads(res.output)["mode"] == "empty"
 
 
+def test_absent_store_browse_exits_0(tmp_hermes_home):
+    res = CliRunner().invoke(cli, ["search", "--browse", "--json"])
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.output)["mode"] == "empty"
+
+
+def test_absent_store_scroll_exits_1_human(tmp_hermes_home):
+    """A named session can't exist without a store: exit 1, like the store-present path (gh #211)."""
+    res = CliRunner().invoke(cli, ["search", "--session", "nope", "--around", "3"])
+    assert res.exit_code == 1, res.output
+    assert "session_id 'nope' not found" in res.output
+    assert not (tmp_hermes_home / "state.db").exists()
+
+
+def test_absent_store_scroll_exits_1_json(tmp_hermes_home):
+    res = CliRunner().invoke(cli, ["search", "--session", "nope", "--around", "3", "--json"])
+    assert res.exit_code == 1, res.output
+    payload = json.loads(res.output)
+    assert payload["mode"] == "scroll"
+    assert payload["error"] == "session_id 'nope' not found"
+    assert not (tmp_hermes_home / "state.db").exists()
+
+
 # ── structured helper directly ─────────────────────────────────────
 
 

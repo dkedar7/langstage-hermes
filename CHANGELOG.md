@@ -2,6 +2,16 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.56] - 2026-11-07
+
+### Fixed
+- **`search --session <id> --around N` exits 1 when there's no session store yet (#211).** On a
+  fresh `HERMES_HOME` with no `state.db`, the "No session store yet" early return ran before the
+  not-found check from #99 and #134, so a lookup of a named session exited 0 (and `--json` printed
+  `{"mode": "empty"}` with no `error`). It now prints `scroll: session_id '<id>' not found` and
+  exits 1, and `--json` carries `mode: "scroll"` and the same `error` as when the store exists.
+  DISCOVERY and BROWSE on a missing store still exit 0. No `state.db` is created.
+
 ## [0.4.55] - 2026-11-06
 
 ### Fixed

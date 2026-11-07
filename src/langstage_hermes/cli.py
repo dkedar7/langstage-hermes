@@ -1598,6 +1598,16 @@ def search(
     if not db_path.exists():
         # No store yet — a clear message, never a traceback, and never create an
         # empty DB as a side effect of a read command.
+        if session_id is not None:
+            # SCROLL names a session, which can't exist without a store: same
+            # error and exit 1 as the store-present not-found path (gh #211).
+            result = {"mode": "scroll", "session_id": session_id, "error": f"session_id {session_id!r} not found"}
+            if as_json:
+                click.echo(_json.dumps({**result, "db_path": str(db_path), "messages": []}))
+            else:
+                click.echo(click.style(f"scroll: {result['error']}", fg="yellow"))
+                click.echo(click.style(f"  (no session store yet at {db_path})", fg="bright_black"))
+            sys.exit(1)
         if as_json:
             click.echo(_json.dumps({"mode": "empty", "db_path": str(db_path), "results": [], "sessions": [], "messages": []}))
         else:
