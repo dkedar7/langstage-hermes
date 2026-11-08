@@ -513,6 +513,9 @@ class HermesConfig(HostConfig):
 
     # ── [cron] ──
     cron_tick_seconds: int = 60
+    # Bind the `cronjob` tool so the agent can manage scheduled jobs from a chat.
+    # Off by default; `create` / `resume` / `run-now` always pause for approval.
+    cron_agent_tool: bool = False
 
     # ── [plugins] ──
     plugins_enabled: list[str] = field(default_factory=list)
@@ -610,6 +613,7 @@ class HermesConfig(HostConfig):
         ),
         # [cron]
         "cron_tick_seconds": ("DEEPAGENT_HERMES_CRON_TICK_SECONDS", int),
+        "cron_agent_tool": ("DEEPAGENT_HERMES_CRON_AGENT_TOOL", _env_bool_strict),
         # [plugins]
         "plugins_enabled": ("DEEPAGENT_HERMES_PLUGINS_ENABLED", _env_list_csv),
         "plugins_disabled": ("DEEPAGENT_HERMES_PLUGINS_DISABLED", _env_list_csv),
@@ -663,6 +667,7 @@ class HermesConfig(HostConfig):
         "curator_prune_builtins": "curator.prune_builtins",
         # [cron]
         "cron_tick_seconds": "cron.tick_seconds",
+        "cron_agent_tool": "cron.agent_tool",
         # [plugins]
         "plugins_enabled": "plugins.enabled",
         "plugins_disabled": "plugins.disabled",

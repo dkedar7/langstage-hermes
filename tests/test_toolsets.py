@@ -35,8 +35,9 @@ def test_implemented_toolsets_is_a_subset() -> None:
 
 
 def test_implemented_set_matches_spec() -> None:
-    """The toolsets whose tools the agent factory binds (gh #205: clarify is not bound, delegation is)."""
-    expected = {"file", "todo", "skills", "memory", "session_search", "terminal", "delegation"}
+    """The toolsets whose tools the agent factory binds (gh #205: clarify is not bound, delegation is;
+    cronjob is bound when `[cron] agent_tool = true`)."""
+    expected = {"file", "todo", "skills", "memory", "session_search", "terminal", "delegation", "cronjob"}
     assert IMPLEMENTED_TOOLSETS == expected
 
 

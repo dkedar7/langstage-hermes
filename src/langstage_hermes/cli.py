@@ -924,7 +924,7 @@ def _slash_yolo(args: str, state: dict[str, Any]) -> bool:
     if state["yolo"]:
         click.echo("(yolo = True: tool calls that pause for approval are approved automatically)")
     else:
-        click.echo("(yolo = False: a tool call that pauses for approval stops the turn)")
+        click.echo("(yolo = False: a tool call that pauses for approval asks you to approve or reject it)")
     return False
 
 
@@ -1379,6 +1379,7 @@ def _run_agent_turn_agui(agent: Any, user_text: str, state: dict[str, Any]) -> N
     try:
         while True:
             approve: dict[str, Any] | None = None
+            paused: dict[str, Any] | None = None
             for frame in stream_frames_sync(state["_agui_agent"], user_text, sid or "hermes", state=agui_state, resume=resume):
                 ftype = frame.get("type")
                 if ftype == "content":
@@ -1403,23 +1404,33 @@ def _run_agent_turn_agui(agent: Any, user_text: str, state: dict[str, Any]) -> N
                 elif ftype == "extraction":
                     _render_extraction_frame(frame)
                 elif ftype == "interrupt":
-                    approve = _yolo_decision(frame) if state.get("yolo") else None
-                    if approve is None:
-                        click.echo(
-                            click.style(
-                                "  ⚠ agent paused for approval; chat can't answer it yet (/yolo auto-approves tool calls)",
-                                fg="yellow",
-                            )
-                        )
+                    paused = frame
                 elif ftype == "error":
                     click.echo(click.style(f"Agent stream failed: {frame.get('error')}", fg="red"))
             if text_open:
                 click.echo()
                 text_open = False
+            auto = False
+            if paused is not None:
+                if state.get("yolo"):
+                    approve = _yolo_decision(paused)
+                    auto = approve is not None
+                if approve is None:
+                    # Ask in the chat itself, so a gated tool (e.g. cronjob create) can
+                    # be answered here as on the web and terminal stages.
+                    approve = _ask_review(paused)
+                if approve is None:
+                    click.echo(
+                        click.style(
+                            "  ⚠ agent paused for approval and chat has no answer to give it (/yolo auto-approves tool calls)",
+                            fg="yellow",
+                        )
+                    )
             if approve is None:
                 break
-            names = ", ".join(_action_name(a) for a in approve["requests"])
-            click.echo(click.style(f"  ✓ auto-approved (/yolo): {names}", fg="yellow"))
+            if auto:
+                names = ", ".join(_action_name(a) for a in approve["requests"])
+                click.echo(click.style(f"  ✓ auto-approved (/yolo): {names}", fg="yellow"))
             resume = approve["resume"]
     except Exception as exc:
         click.echo(click.style(f"Agent stream failed: {exc}", fg="red"))
@@ -1454,6 +1465,46 @@ def _yolo_decision(frame: dict[str, Any]) -> dict[str, Any] | None:
     if not is_review or "approve" not in (frame.get("allowed_decisions") or []):
         return None
     return {"requests": requests, "resume": {"decisions": [{"type": "approve"} for _ in requests]}}
+
+
+def _ask_review(frame: dict[str, Any]) -> dict[str, Any] | None:
+    """Ask the person in the chat to approve or reject each tool call in an approval pause.
+
+    Returns the resume that carries their answers, or ``None`` when this isn't a
+    tool review that allows both answers (a bare ``interrupt("…")`` question) or
+    when there's no one to ask (stdin closed). ``y``/``yes`` approves; anything
+    else rejects, and text other than ``n``/``no`` goes to the agent as the reason.
+    """
+    requests = frame.get("action_requests") or []
+    allowed = frame.get("allowed_decisions") or []
+    is_review = bool(requests) and all(
+        isinstance(a, dict) and (a.get("name") or a.get("action") or a.get("tool")) for a in requests
+    )
+    if not is_review or "approve" not in allowed or "reject" not in allowed:
+        return None
+    decisions: list[dict[str, Any]] = []
+    for action in requests:
+        click.echo(click.style(f"  ⚠ approval needed: {_action_name(action)}", fg="yellow"))
+        description = str(action.get("description") or "").strip()
+        if description:
+            for line in description.splitlines():
+                click.echo(f"    {line}")
+        if action.get("args") not in (None, "", {}):
+            click.echo(click.style(f"    args: {_clip(action.get('args'))}", fg="bright_black"))
+        try:
+            answer = input("  approve? [y/N, or type a reason to reject] ").strip()
+        except (EOFError, OSError):
+            return None
+        if answer.lower() in ("y", "yes"):
+            decisions.append({"type": "approve"})
+            click.echo(click.style("  ✓ approved", fg="green"))
+        else:
+            decision: dict[str, Any] = {"type": "reject"}
+            if answer and answer.lower() not in ("n", "no"):
+                decision["message"] = answer
+            decisions.append(decision)
+            click.echo(click.style("  ✗ rejected", fg="red"))
+    return {"requests": requests, "resume": {"decisions": decisions}}
 
 
 def _run_agent_turn(agent: Any, user_text: str, state: dict[str, Any]) -> None:

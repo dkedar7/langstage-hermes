@@ -111,10 +111,10 @@ def test_tools_lists_the_names_the_model_is_given(home: Path):
     bound = set(_Recorder.seen)
 
     advertised = {name for ts in IMPLEMENTED_TOOLSETS for name in BOUND_TOOLS[ts]}
-    # Every bound tool is advertised; the only advertised name not bound is the
-    # sandbox-only shell, which `tools` says needs a sandbox backend.
+    # Every bound tool is advertised; the advertised names not bound by default are
+    # the sandbox-only shell and the opt-in cronjob tool, and `tools` says why for each.
     assert bound <= advertised
-    assert advertised - bound == {"execute"}
+    assert advertised - bound == {"execute", "cronjob"}
 
     out = CliRunner().invoke(cli, ["tools", "--implemented-only"]).output
     for name in ("edit_file", "write_todos", "glob", "task", "execute"):
@@ -122,9 +122,10 @@ def test_tools_lists_the_names_the_model_is_given(home: Path):
     for hermes_name in ("· patch", "· search_files", "· todo\n", "· process"):
         assert hermes_name not in out
     assert "sandbox backend" in out
+    assert "agent_tool = true" in out
 
 
-@pytest.mark.parametrize("toolset", ["clarify", "cronjob"])
+@pytest.mark.parametrize("toolset", ["clarify"])
 def test_unbound_tools_are_not_advertised_as_implemented(home: Path, toolset: str):
     res = CliRunner().invoke(cli, ["tools", "--toolset", toolset])
     assert res.exit_code == 0

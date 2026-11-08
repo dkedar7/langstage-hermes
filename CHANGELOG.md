@@ -2,6 +2,28 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.58] - 2026-11-08
+
+### Added
+- **The agent can manage cron jobs, behind a flag and your approval.** With `[cron] agent_tool = true`
+  (env `LANGSTAGE_HERMES_CRON_AGENT_TOOL`, off by default), the agent factory binds the `cronjob`
+  tool (`create`, `list`, `show`, `pause`, `resume`, `delete`, `run-now`), so a chat request like
+  "summarise this repo every morning" can schedule the job itself. `list`, `show`, `pause` and
+  `delete` run straight away. `create`, `resume` and `run-now`, which start or restart unattended
+  runs, pause through `HumanInTheLoopMiddleware` and describe what will be scheduled or run;
+  nothing happens until you approve. Any action not on the read-or-stop list is gated too. A cron
+  run's own agent still never gets the tool, and `[agent] disabled_toolsets = ["cronjob"]` wins
+  over the flag. Naming `cronjob` in `LANGSTAGE_HERMES_INTERRUPT_ON` gates every call.
+- **`langstage-hermes chat` answers approval pauses.** When a tool call pauses for review, chat
+  shows the request and asks `approve? [y/N, or type a reason to reject]`. Before, the turn just
+  stopped unless `/yolo` was on. `/yolo` still approves automatically, and a question the agent
+  asks with a bare `interrupt()` still stops the turn.
+
+### Changed
+- `langstage-hermes tools` and `/tools` list `cronjob` as implemented, with a note that it's off
+  unless `[cron] agent_tool = true`.
+- Requires `langchain>=1.4`, for the per-call `when` predicate that gates `cronjob` by action.
+
 ## [0.4.57] - 2026-11-08
 
 ### Changed

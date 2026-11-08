@@ -59,6 +59,9 @@ prune_builtins = true
 
 [cron]
 tick_seconds = 60
+# Let the agent manage cron jobs with the `cronjob` tool. create / resume / run-now
+# always ask you to approve first. Off by default.
+agent_tool = false
 
 [plugins]
 enabled = []

@@ -213,6 +213,18 @@ langstage-jupyter
 
 `langstage-hermes.toml` (project) or `$HERMES_HOME/config.toml` (global — default `~/.langstage-hermes/config.toml`, and it moves with a custom `HERMES_HOME`). Layered resolution: `defaults < TOML < LANGSTAGE_HERMES_* env < CLI overrides`. See [SPEC §2](./SPEC.md#2-configuration) for every field; `langstage-hermes --show-config` prints the resolved value + source of each, and `langstage-hermes --show-config --json` prints the same thing as one JSON object (`{"config": {<field>: {value, source, env, legacy_env, toml}}, "toml": {...}, "issues": [...]}`) for CI. The legacy project filename `deepagent-hermes.toml` is still read, with a one-time deprecation note on stderr (silence it with `LANGSTAGE_SUPPRESS_LEGACY_NOTICE=1`).
 
+### Let the agent schedule cron jobs
+
+The agent has no `cronjob` tool unless you turn it on:
+
+```toml
+# langstage-hermes.toml
+[cron]
+agent_tool = true   # or LANGSTAGE_HERMES_CRON_AGENT_TOOL=true
+```
+
+With it on, you can ask in a chat for "a summary of this repo every morning at 9" and the agent schedules the job itself. `list`, `show`, `pause` and `delete` run straight away. `create`, `resume` and `run-now` start or restart unattended runs, so they pause first and show you what the agent wants to schedule or run, and nothing happens until you approve. The web and terminal stages show their usual Approve / Reject controls. `langstage-hermes chat` asks `approve? [y/N, or type a reason to reject]` (`/yolo` approves automatically). A cron run's own agent never gets the tool, and `[agent] disabled_toolsets = ["cronjob"]` turns it off even with the flag on.
+
 ## Architecture
 
 See [SPEC.md](./SPEC.md) for the full 21-section requirements doc. Top-level layout:
@@ -229,7 +241,7 @@ See [SPEC.md](./SPEC.md) for the full 21-section requirements doc. Top-level lay
 - `src/langstage_hermes/caching.py` — `AnthropicCachingS3Middleware`
 - `src/langstage_hermes/budget.py` — `IterationBudgetMiddleware`
 - `src/langstage_hermes/tools/` — registry + 33 toolsets + 6 terminal envs
-- `src/langstage_hermes/cron/` — daemon + `cron` CLI (the `cronjob` tool module isn't bound into the agent)
+- `src/langstage_hermes/cron/` — daemon + `cron` CLI + the opt-in, approval-gated `cronjob` tool
 - `src/langstage_hermes/plugins/` — discovery + lifecycle hooks
 - `src/langstage_hermes/cli.py` — `langstage-hermes` entry point
 - `prompts/` — verbatim/paraphrased system-prompt building blocks
@@ -249,13 +261,13 @@ See [SPEC.md](./SPEC.md) for the full 21-section requirements doc. Top-level lay
 | Iteration budget middleware | ✅ working |
 | Compression middleware (13-section template) | ✅ working |
 | Anthropic `system_and_3` caching strategy | ✅ working |
-| Tool registry + 33-toolset enum | ✅ working — `langstage-hermes tools` lists the tool names the model is actually given; `clarify` and `cronjob` are declared but not bound |
+| Tool registry + 33-toolset enum | ✅ working — `langstage-hermes tools` lists the tool names the model is actually given; `clarify` is declared but not bound, and `cronjob` is bound only with `[cron] agent_tool = true` |
 | `LocalEnvironment` terminal backend | ✅ working (Git Bash on Windows); the agent gets the `execute` shell tool only when built with a sandbox `backend=` — the default workspace backend has no shell |
 | `DockerEnvironment` | ✅ working (gated on `docker info` reachability) |
 | `SshEnvironment` | ✅ working (paramiko-backed, behind `[ssh]` extra) |
 | `SingularityEnvironment` | ✅ working (auto-detects `singularity` / `apptainer`) |
 | `DaytonaEnvironment` / `ModalEnvironment` | ✅ lazy SDK with defensive attribute probing (extras-gated) |
-| Cron daemon + `cron` CLI (also `/cron <subcommand>` in chat) | ✅ working (deliverers: `local`, `stdout`, `agentmail`); the agent can't schedule its own jobs |
+| Cron daemon + `cron` CLI (also `/cron <subcommand>` in chat) | ✅ working (deliverers: `local`, `stdout`, `agentmail`); with `[cron] agent_tool = true` the agent can manage jobs too, and asks before it creates, resumes or runs one |
 | Plugin loader (4 discovery sources) | ✅ working (13 of 17 lifecycle hooks wired) |
 | CLI + v1-essentials slash commands | ✅ working |
 | Curator (skill lifecycle) | ✅ basic |
