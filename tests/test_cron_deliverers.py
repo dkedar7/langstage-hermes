@@ -85,6 +85,7 @@ def test_agentmail_deliverer_posts_to_endpoint(monkeypatch):
         job = _job(
             deliver="agentmail",
             name="weekly-digest",
+            from_inbox="agent@example.org",
             deliver_to="someone@example.com",
         )
         AgentMailDeliverer().deliver(job, "## Digest\n- item 1", output_path=None)
@@ -94,7 +95,7 @@ def test_agentmail_deliverer_posts_to_endpoint(monkeypatch):
 
     # URL is positional; verify it.
     url = args[0] if args else kwargs.get("url")
-    assert url == "https://api.agentmail.to/v0/inboxes/kzest@agentmail.to/messages/send"
+    assert url == "https://api.agentmail.to/v0/inboxes/agent@example.org/messages/send"
 
     # Headers carry Bearer auth + JSON content type.
     headers = kwargs["headers"]
@@ -108,16 +109,71 @@ def test_agentmail_deliverer_posts_to_endpoint(monkeypatch):
     assert payload["to"] == ["someone@example.com"]
 
 
-def test_agentmail_deliverer_uses_default_recipient(monkeypatch):
-    """When job['deliver_to'] is absent, falls back to Kedar's known address."""
+@pytest.mark.parametrize(
+    "fields, named, not_named",
+    [
+        ({"from_inbox": "agent@example.org"}, ['"deliver_to"'], ['"from_inbox"']),
+        ({"deliver_to": "you@example.org"}, ['"from_inbox"'], ['"deliver_to"']),
+        ({}, ['"from_inbox"', '"deliver_to"'], []),
+        ({"from_inbox": "", "deliver_to": ""}, ['"from_inbox"', '"deliver_to"'], []),
+    ],
+)
+def test_agentmail_deliverer_requires_explicit_addresses(monkeypatch, fields, named, not_named):
+    """There are no default addresses: a missing sender or recipient raises
+    a RuntimeError naming the field, and nothing is sent."""
+    monkeypatch.setenv("AGENTMAIL_API_KEY", "test-key-123")
+
+    with patch("requests.post") as mock_post:
+        with pytest.raises(RuntimeError) as exc:
+            AgentMailDeliverer().deliver(
+                _job(deliver="agentmail", name="digest", **fields), "body", output_path=None
+            )
+
+    assert mock_post.call_count == 0
+    msg = str(exc.value)
+    assert "'digest'" in msg and "jobs.json" in msg and "no default addresses" in msg
+    for field in named:
+        assert field in msg
+    for field in not_named:
+        assert field not in msg
+
+
+def test_agentmail_deliverer_has_no_default_addresses():
+    """The class carries no built-in sender or recipient."""
+    assert not hasattr(AgentMailDeliverer, "DEFAULT_FROM_INBOX")
+    assert not hasattr(AgentMailDeliverer, "DEFAULT_RECIPIENT")
+
+
+def test_agentmail_deliverer_accepts_a_recipient_list(monkeypatch):
+    """Explicit values still work, including a list of recipients."""
     monkeypatch.setenv("AGENTMAIL_API_KEY", "test-key-123")
 
     fake_resp = MagicMock(status_code=200, text="{}")
     with patch("requests.post", return_value=fake_resp) as mock_post:
-        AgentMailDeliverer().deliver(_job(deliver="agentmail"), "body", output_path=None)
+        AgentMailDeliverer().deliver(
+            _job(
+                deliver="agentmail",
+                from_inbox="agent@example.org",
+                deliver_to=["a@example.org", "b@example.org"],
+            ),
+            "body",
+            output_path=None,
+        )
 
-    _, kwargs = mock_post.call_args
-    assert kwargs["json"]["to"] == ["kdabhadk@gmail.com"]
+    args, kwargs = mock_post.call_args
+    assert args[0].endswith("/inboxes/agent@example.org/messages/send")
+    assert kwargs["json"]["to"] == ["a@example.org", "b@example.org"]
+
+
+def test_agentmail_missing_address_is_recorded_by_scheduler(monkeypatch):
+    """Through the scheduler, the missing-address error propagates (run_job
+    records it as last_delivery_error) rather than being silently skipped."""
+    monkeypatch.setenv("AGENTMAIL_API_KEY", "test-key-123")
+    job = _job(deliver="agentmail", name="digest")
+    with patch("requests.post") as mock_post:
+        with pytest.raises(RuntimeError, match="no default addresses"):
+            scheduler_mod._deliver_output(job, "some output", None)
+    assert mock_post.call_count == 0
 
 
 def test_agentmail_deliverer_raises_on_4xx(monkeypatch):
@@ -127,7 +183,11 @@ def test_agentmail_deliverer_raises_on_4xx(monkeypatch):
     fake_resp = MagicMock(status_code=401, text='{"error": "unauthorized"}')
     with patch("requests.post", return_value=fake_resp):
         with pytest.raises(RuntimeError, match="HTTP 401"):
-            AgentMailDeliverer().deliver(_job(deliver="agentmail"), "body", output_path=None)
+            AgentMailDeliverer().deliver(
+                _job(deliver="agentmail", from_inbox="agent@example.org", deliver_to="you@example.org"),
+                "body",
+                output_path=None,
+            )
 
 
 # ── scheduler SILENT_MARKER integration ────────────────────────────

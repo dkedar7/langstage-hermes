@@ -46,7 +46,7 @@ esac
 
 N_CONCURRENT="${HERMES_BENCH_N_CONCURRENT:-4}"
 DATASET="${HERMES_BENCH_DATASET:-terminal-bench/terminal-bench-2}"
-REPO="${HERMES_BENCH_REPO:-/mnt/c/Users/Kedar/Documents/Code/deepagent-hermes}"
+REPO="${HERMES_BENCH_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
 VENV="${HERMES_BENCH_VENV:-$HOME/.venvs/dah-bench}"
 JOBS_DIR="${HERMES_BENCH_JOBS_DIR:-$HOME/hermes-bench/jobs}"
 

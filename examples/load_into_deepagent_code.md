@@ -57,7 +57,7 @@ and the agent loaded inside `deepagent-code` will pick it up.
 In `deepagent-code`'s venv:
 
 ```bash
-pip install -e "C:/Users/Kedar/Documents/Code/deepagent-hermes[dev]"
+pip install -e "<path-to>/langstage-hermes[dev]"
 ```
 
 Then either set the env var per-session as above, or bake it into your shell
