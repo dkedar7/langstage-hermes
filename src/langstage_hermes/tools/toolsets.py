@@ -132,10 +132,13 @@ assert len(TOOLSETS) == 33, f"TOOLSETS must contain exactly 33 entries (per SPEC
 # commands can reference them but won't actually surface any tools until a
 # v0.2+ release (or a plugin) registers their handlers.
 #
-# ``clarify`` and ``cronjob`` have tool modules (``tools/clarify.py``,
-# ``cron/tool.py``) but the agent factory doesn't bind them: clarify needs a
-# host that pauses for the answer, and an agent that schedules its own
-# unattended runs is a step the `cron` CLI keeps with the user (gh #205).
+# ``clarify`` has a tool module (``tools/clarify.py``) but the agent factory
+# doesn't bind it: it needs a host that pauses for the answer (gh #205).
+# ``cronjob`` (``cron/tool.py``) is opt-in. An agent that schedules its own
+# unattended runs used to be a step only the `cron` CLI took (gh #205); with
+# ``[cron] agent_tool = true`` the factory binds it, and the actions that start
+# or restart unattended runs (create / resume / run-now) pause for the user's
+# approval first. Cron runs never get it (``_CRON_ALWAYS_STRIPPED``).
 IMPLEMENTED_TOOLSETS: set[str] = {
     "file",
     "todo",
@@ -144,6 +147,7 @@ IMPLEMENTED_TOOLSETS: set[str] = {
     "session_search",
     "terminal",
     "delegation",
+    "cronjob",
 }
 
 # The tool names the model is actually given for each implemented toolset.
@@ -157,11 +161,13 @@ BOUND_TOOLS: dict[str, list[str]] = {
     "skills": ["skills_list", "skill_view", "skill_manage"],
     "memory": ["memory"],
     "session_search": ["session_search"],
+    "cronjob": ["cronjob"],
 }
 
 # A caveat printed next to a toolset by `tools` and `/tools`.
 TOOLSET_NOTES: dict[str, str] = {
     "terminal": "only with a sandbox backend (create_hermes_agent(backend=...)); the default workspace backend has no shell",
+    "cronjob": "off unless [cron] agent_tool = true; create, resume and run-now ask for your approval first",
 }
 
 

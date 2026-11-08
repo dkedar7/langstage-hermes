@@ -257,6 +257,17 @@ def create_hermes_agent(
     # FilesystemBackend tools come in via the FilesystemMiddleware (below).
     tools: list[Any] = [t for t in (*skill_tools, session_search_tool) if _allowed(t)]
 
+    # `cronjob` is opt-in (`[cron] agent_tool = true`) and gated: the actions that
+    # start or restart unattended runs pause for the user's approval (see
+    # cron/tool.py). A disabled `cronjob` toolset still wins, which is how a cron
+    # run's own agent never gets it (scheduler._CRON_ALWAYS_STRIPPED).
+    interrupt_on: dict[str, Any] = {}
+    if cfg.cron_agent_tool and "cronjob" in enabled_toolsets:
+        from langstage_hermes.cron.tool import cronjob, cronjob_interrupt_config
+
+        tools.append(cronjob)
+        interrupt_on["cronjob"] = cronjob_interrupt_config()
+
     # ── deepagents middleware (filesystem + subagents + todos) ───────────
     from deepagents.backends.filesystem import FilesystemBackend
     from deepagents.middleware.filesystem import FilesystemMiddleware
@@ -389,10 +400,12 @@ def create_hermes_agent(
     ]
 
     # Optional human-in-the-loop (only added if any tool is gated).
-    # Hosts can override via DEEPAGENT_HERMES_INTERRUPT_ON env (CSV of tool names).
+    # Hosts can gate more tools via LANGSTAGE_HERMES_INTERRUPT_ON (CSV of tool names);
+    # a name listed there is gated on every call, which for `cronjob` is stricter
+    # than its per-action default.
     interrupt_csv = os.getenv("LANGSTAGE_HERMES_INTERRUPT_ON") or os.getenv("DEEPAGENT_HERMES_INTERRUPT_ON", "")
-    if interrupt_csv:
-        interrupt_on = {name.strip(): True for name in interrupt_csv.split(",") if name.strip()}
+    interrupt_on.update({name.strip(): True for name in interrupt_csv.split(",") if name.strip()})
+    if interrupt_on:
         middleware.append(HumanInTheLoopMiddleware(interrupt_on=interrupt_on))
 
     if extra_middleware:

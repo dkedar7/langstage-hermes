@@ -12,6 +12,12 @@ tool, mirroring Hermes's ``tools/cronjob_tools.py`` shape:
     cronjob(action="run-now",  id="abc123")
 
 Returns a short markdown string the model can quote back to the user.
+
+The agent factory binds it only with ``[cron] agent_tool = true``, and gates it
+with :func:`cronjob_interrupt_config`: ``list`` / ``show`` / ``pause`` /
+``delete`` run straight away, while ``create`` / ``resume`` / ``run-now`` (and
+any other action) pause for the user's approval, because they start or restart
+unattended, recurring model runs.
 """
 
 from __future__ import annotations
@@ -25,6 +31,50 @@ try:
     from langchain_core.tools import tool
 except ImportError:  # pragma: no cover - langchain-core is required at runtime
     tool = None  # type: ignore[assignment]
+
+
+# Actions that only read jobs or stop them run without asking. Everything else
+# (create, resume, run-now and any action not listed here) pauses for approval:
+# the gate fails closed, so a new action is gated until someone lists it here.
+UNGATED_ACTIONS: frozenset[str] = frozenset({"list", "show", "pause", "delete"})
+
+
+def needs_approval(args: dict[str, Any] | None) -> bool:
+    """Whether a ``cronjob`` call with these arguments must be approved first."""
+    action = str((args or {}).get("action", "")).lower().strip()
+    return action not in UNGATED_ACTIONS
+
+
+def _approval_description(tool_call: Any, state: Any = None, runtime: Any = None) -> str:
+    """The line the reviewer sees: what the agent wants to schedule or run."""
+    args = dict(tool_call.get("args") or {})
+    action = str(args.get("action", "")).lower().strip() or "?"
+    if action == "create":
+        what = f"schedule a new cron job [{args.get('schedule') or '?'}]"
+        if args.get("prompt"):
+            what += f" that runs: {args['prompt']}"
+        if args.get("deliver") and args.get("deliver") != "local":
+            what += f" (delivers to {args['deliver']})"
+    elif action == "resume":
+        what = f"resume cron job `{args.get('id') or '?'}`, so it runs on its schedule again"
+    elif action in {"run-now", "run_now", "trigger"}:
+        what = f"run cron job `{args.get('id') or '?'}` now"
+    else:
+        what = f"run cronjob action {action!r}"
+    return f"The agent wants to {what}. Approve?"
+
+
+def cronjob_interrupt_config() -> dict[str, Any]:
+    """``HumanInTheLoopMiddleware`` config for the ``cronjob`` tool.
+
+    The ``when`` predicate gates by action, so one tool keeps the Hermes shape
+    while only the calls that start unattended runs wait for a person.
+    """
+    return {
+        "allowed_decisions": ["approve", "reject"],
+        "description": _approval_description,
+        "when": lambda request: needs_approval(request.tool_call.get("args")),
+    }
 
 
 def _format_job_summary(job: dict[str, Any]) -> str:
@@ -186,4 +236,4 @@ else:  # pragma: no cover - exercised only without langchain-core
     cronjob = _cronjob_impl  # type: ignore[assignment]
 
 
-__all__ = ["_cronjob_impl", "cronjob"]
+__all__ = ["UNGATED_ACTIONS", "_cronjob_impl", "cronjob", "cronjob_interrupt_config", "needs_approval"]
