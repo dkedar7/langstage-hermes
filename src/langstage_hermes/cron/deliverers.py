@@ -169,10 +169,9 @@ class StdoutDeliverer(Deliverer):
 
 @register_deliverer
 class AgentMailDeliverer(Deliverer):
-    """Send the output via Kedar's AgentMail inbox (``kzest@agentmail.to``).
+    """Send the output through an AgentMail inbox.
 
-    Mirrors ``C:\\kzest\\scripts\\Send-AgentMail.ps1`` — the canonical
-    kzest-side reference for AgentMail self-sends. The endpoint shape is:
+    The endpoint shape is:
 
         POST https://api.agentmail.to/v0/inboxes/{from_inbox}/messages/send
         Authorization: Bearer $AGENTMAIL_API_KEY
@@ -183,10 +182,14 @@ class AgentMailDeliverer(Deliverer):
 
     - ``AGENTMAIL_API_KEY`` (env)  — required; raises ``RuntimeError``
       if missing.
-    - ``job["deliver_to"]``        — recipient address. Defaults to
-      Kedar's known address (``kdabhadk@gmail.com``).
-    - ``job["from_inbox"]``        — sender inbox. Defaults to
-      ``kzest@agentmail.to``.
+    - ``job["from_inbox"]``        — required: the AgentMail inbox that
+      sends, e.g. ``"agent@example.org"``.
+    - ``job["deliver_to"]``        — required: the recipient address, or
+      a list of addresses, e.g. ``"you@example.org"``.
+
+    There are no default addresses. A job missing either field raises
+    ``RuntimeError`` naming the field, which the scheduler records as
+    the job's ``last_delivery_error``.
 
     Subject:  ``[langstage-hermes] {job.name}``
     Body:     the output as plain text (markdown rendering is the
@@ -200,11 +203,7 @@ class AgentMailDeliverer(Deliverer):
 
     name: ClassVar[str] = "agentmail"
 
-    # Known constants — matched to Send-AgentMail.ps1 so the
-    # AgentMail-side audit trail looks the same regardless of caller.
     API_BASE: ClassVar[str] = "https://api.agentmail.to/v0"
-    DEFAULT_FROM_INBOX: ClassVar[str] = "kzest@agentmail.to"
-    DEFAULT_RECIPIENT: ClassVar[str] = "kdabhadk@gmail.com"
 
     def deliver(
         self,
@@ -216,13 +215,26 @@ class AgentMailDeliverer(Deliverer):
         api_key = os.environ.get("AGENTMAIL_API_KEY")
         if not api_key:
             raise RuntimeError(
-                "AGENTMAIL_API_KEY is not set; cannot deliver via AgentMail. "
-                "Set it at user scope or pull from 1Password "
-                "(see C:\\kzest\\scripts\\Send-AgentMail.ps1)."
+                "AGENTMAIL_API_KEY is not set; cannot deliver via AgentMail. Set it in the environment the cron daemon runs in."
             )
 
-        recipient = job.get("deliver_to") or self.DEFAULT_RECIPIENT
-        from_inbox = job.get("from_inbox") or self.DEFAULT_FROM_INBOX
+        missing = [
+            f'"{field}" ({what})'
+            for field, what in (
+                ("from_inbox", "the sending AgentMail inbox, e.g. agent@example.org"),
+                ("deliver_to", "the recipient address, e.g. you@example.org"),
+            )
+            if not job.get(field)
+        ]
+        if missing:
+            raise RuntimeError(
+                f"agentmail delivery for job {job.get('name') or job.get('id', '?')!r} "
+                f"needs {' and '.join(missing)} set on the job in "
+                "<HERMES_HOME>/cron/jobs.json; there are no default addresses."
+            )
+
+        recipient = job["deliver_to"]
+        from_inbox = job["from_inbox"]
         subject = f"[langstage-hermes] {job.get('name', job.get('id', 'cron job'))}"
         recipients = [recipient] if isinstance(recipient, str) else list(recipient)
 

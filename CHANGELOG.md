@@ -2,6 +2,23 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.4.57] - 2026-11-08
+
+### Changed
+- **AgentMail delivery now needs the sender inbox and recipient set explicitly.** The `agentmail`
+  cron deliverer used to fall back to a built-in sender inbox and recipient address when a job
+  left `from_inbox` or `deliver_to` out. Those defaults are gone, along with the
+  `AgentMailDeliverer.DEFAULT_FROM_INBOX` and `DEFAULT_RECIPIENT` class attributes. A job whose
+  `deliver` is `agentmail` must set both fields in `<HERMES_HOME>/cron/jobs.json`. If either is
+  missing, delivery raises a `RuntimeError` that names the missing field, the scheduler records it
+  as the job's `last_delivery_error`, and nothing is sent. Jobs that already set both fields are
+  unaffected.
+
+### Docs
+- `SPEC.md` and the examples use placeholder paths (`<path-to>/langstage-hermes`) instead of a
+  developer's local paths. `examples/run_terminal_bench.sh` now defaults `HERMES_BENCH_REPO` to
+  the repo the script lives in.
+
 ## [0.4.56] - 2026-11-07
 
 ### Fixed

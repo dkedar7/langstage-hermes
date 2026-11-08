@@ -55,7 +55,7 @@ def test_snapshot_stays_byte_stable_after_add(tmp_hermes_home: Path) -> None:
         "MEMORY.md",
         ["Prefers concise responses.", "Uses Windows + PowerShell as primary shell."],
     )
-    _write_memory_file(tmp_hermes_home, "USER.md", ["Name is Kedar."])
+    _write_memory_file(tmp_hermes_home, "USER.md", ["Name is Alex."])
 
     mw = MemoryToolMiddleware()
 

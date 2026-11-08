@@ -14,10 +14,10 @@
 
 **Naming**: project = `deepagent-hermes` (fits the `deepagent-*` family — `lab`, `code`, `vscode`).
 
-**Repo layout target**: `C:\Users\Kedar\Documents\Code\deepagent-hermes`, central venv at `C:\Users\Kedar\.venvs\deepagent-hermes`, private GH remote, pins `langgraph-stream-parser>=0.2,<0.3` and `deepagents`.
+**Repo layout target**: `<path-to>/langstage-hermes`, central venv at `<path-to>/.venvs/langstage-hermes`, private GH remote, pins `langgraph-stream-parser>=0.2,<0.3` and `deepagents`.
 
 **Source-of-truth references**:
-- Hermes repo: `https://github.com/NousResearch/hermes-agent` (clone at `C:\Users\Kedar\Documents\Code\hermes-agent` for source consultation)
+- Hermes repo: `https://github.com/NousResearch/hermes-agent` (clone at `<path-to>/hermes-agent` for source consultation)
 - agentskills.io spec: `https://agentskills.io/specification.md`
 - `langgraph-stream-parser` v0.2.0 (substrate)
 - `deepagents` 0.6+ + `langchain.agents.middleware`
@@ -398,7 +398,7 @@ Implementation: `before_model` hook checks `_estimate_tokens(state.messages) > t
 2. **`cronjob` tool** registered to the agent: actions `create`, `list`, `show`, `delete`, `pause`, `resume`, `run-now`. Job JSON shape: **verbatim copy of Hermes's 30 fields** including `skills`, `script`, `no_agent`, `context_from`, `enabled_toolsets`, `workdir`, `profile`.
 3. **Job execution**: spawn `create_hermes_agent(config_with_overrides)` with `platform="cron"`, `enabled_toolsets=resolve_cron_disabled_toolsets()`, system prompt augmented with `PLATFORM_HINTS["cron"]` block (verbatim).
 4. **Output**: append to `~/.deepagent-hermes/cron/output/{job_id}/{timestamp}.md`. Deliver per `deliver` field (`origin | local | telegram | …`). v1 supports `local` only (writes to disk); other deliverers OUT OF SCOPE.
-5. **Windows note**: the long-running daemon process is cross-platform but Kedar's primary platform is Windows — document `Start-Process` + `Register-ScheduledTask` snippet for keeping it alive on logon, and document the Linux/macOS `systemd --user` / `launchd` equivalents.
+5. **Windows note**: the long-running daemon process is cross-platform but the primary target platform is Windows — document `Start-Process` + `Register-ScheduledTask` snippet for keeping it alive on logon, and document the Linux/macOS `systemd --user` / `launchd` equivalents.
 
 **Acceptance**: create a job with `schedule="1m"` + `prompt="say hi"`; daemon ticks; first output appears in cron output dir within 70s.
 
@@ -609,7 +609,7 @@ A v1 release is shippable when:
 
 Spec is complete enough to build from; these are choices that don't block but should be resolved before Phase 0:
 
-1. **Bundled-skill curation**: which subset of Hermes's 176 to ship in this repo? Recommend: ship 20-30 that align with Kedar's actual usage (data-science, software-development, github, research, devops); let the rest be `pip install deepagent-hermes-skills-extra`.
+1. **Bundled-skill curation**: which subset of Hermes's 176 to ship in this repo? Recommend: ship 20-30 that align with common usage (data-science, software-development, github, research, devops); let the rest be `pip install deepagent-hermes-skills-extra`.
 2. **Honcho dep — required or extras?** Recommend `extras = ["honcho-sdk"]` so the base install is light; `pip install deepagent-hermes[honcho]` to enable.
 3. **Terminal backends — bundle all 6 or just local?** Recommend bundle Local + LightDocker (subprocess-based, no Docker SDK) in core; ship Modal/Daytona/SSH/Singularity as extras.
 4. **Reflection spawn — threading vs. subagent (decision (A) vs (B) in §9)?** Recommend (B) for observability.

@@ -147,7 +147,7 @@ def test_search_skips_unreadable_files(notes_dir: Path, monkeypatch):
 def test_provider_recall_delegates_to_search_notes(notes_dir: Path):
     _write(notes_dir, "n.md", "## X\nglasswing telemetry\n")
     p = MarkdownProvider(notes_dir=notes_dir)
-    p.setup_session("sess-1", user_id="kedar")
+    p.setup_session("sess-1", user_id="alex")
     results = p.recall("glasswing")
     assert len(results) == 1
 
