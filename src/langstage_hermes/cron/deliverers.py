@@ -215,8 +215,7 @@ class AgentMailDeliverer(Deliverer):
         api_key = os.environ.get("AGENTMAIL_API_KEY")
         if not api_key:
             raise RuntimeError(
-                "AGENTMAIL_API_KEY is not set; cannot deliver via AgentMail. "
-                "Set it in the environment the cron daemon runs in."
+                "AGENTMAIL_API_KEY is not set; cannot deliver via AgentMail. Set it in the environment the cron daemon runs in."
             )
 
         missing = [

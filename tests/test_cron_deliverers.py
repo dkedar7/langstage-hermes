@@ -125,9 +125,7 @@ def test_agentmail_deliverer_requires_explicit_addresses(monkeypatch, fields, na
 
     with patch("requests.post") as mock_post:
         with pytest.raises(RuntimeError) as exc:
-            AgentMailDeliverer().deliver(
-                _job(deliver="agentmail", name="digest", **fields), "body", output_path=None
-            )
+            AgentMailDeliverer().deliver(_job(deliver="agentmail", name="digest", **fields), "body", output_path=None)
 
     assert mock_post.call_count == 0
     msg = str(exc.value)
