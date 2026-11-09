@@ -408,6 +408,13 @@ class PromptAssemblyMiddleware(AgentMiddleware):
             ``workspace_root`` (``/`` is the workspace), as with the backend
             ``create_hermes_agent`` builds. The environment hint then says so.
             Default ``False`` (paths are real host paths).
+        embedded: ``True`` when Hermes runs inside someone else's agent
+            (:func:`langstage_hermes.hermes_middleware`). The host's system
+            prompt is kept, verbatim and first; only the Hermes sections (the
+            guidance for the enabled Hermes toolsets, then the frozen memory and
+            user snapshots) are appended after it. No identity, task-completion,
+            environment, platform, context-file or date sections are added: those
+            belong to the host. Default ``False`` (Hermes owns the whole prompt).
     """
 
     def __init__(
@@ -418,7 +425,9 @@ class PromptAssemblyMiddleware(AgentMiddleware):
         system_message: str = "",
         workspace_root: Path | None = None,
         virtual_files: bool = False,
+        embedded: bool = False,
     ) -> None:
+        self.embedded = embedded
         self.enabled_toolsets: tuple[str, ...] = tuple(enabled_toolsets)
         self.platform = platform
         self.system_message = system_message
@@ -457,6 +466,39 @@ class PromptAssemblyMiddleware(AgentMiddleware):
         )
         return "\n\n".join(part for part in (stable, context, volatile) if part)
 
+    def assemble_embedded(self, *, state: Any = None) -> str:
+        """The Hermes sections appended after a host's own prompt (``embedded=True``).
+
+        Tool guidance for the enabled Hermes toolsets, then the frozen memory and
+        user snapshots. Byte-stable within a session, like :meth:`assemble`.
+        """
+        parts = _toolset_guidance_blocks(self.enabled_toolsets)
+        for key in ("memory_snapshot", "user_snapshot"):
+            if isinstance(state, dict):
+                value = state.get(key, "")
+            else:
+                value = getattr(state, key, "") if state is not None else ""
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+        return "\n\n".join(p for p in parts if p)
+
+    def _embedded_request(self, request: ModelRequest) -> ModelRequest:
+        """``request`` with the Hermes sections appended to the host's system message."""
+        addition = self.assemble_embedded(state=request.state)
+        if not addition:
+            return request
+        current = request.system_message
+        if current is None:
+            return request.override(system_message=SystemMessage(content=addition))
+        content = current.content
+        if isinstance(content, str):
+            text = f"{content}\n\n{addition}" if content.strip() else addition
+            return request.override(system_message=SystemMessage(content=text))
+        # Content blocks (e.g. a host prompt carrying cache_control): keep every
+        # block as it is and add ours as one more text block.
+        blocks = [*content, {"type": "text", "text": addition}]
+        return request.override(system_message=SystemMessage(content=blocks))
+
     # ── middleware hooks ─────────────────────────────────────────────
 
     def wrap_model_call(
@@ -464,6 +506,8 @@ class PromptAssemblyMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelResponse | AIMessage:
+        if self.embedded:
+            return handler(self._embedded_request(request))
         model_id = _model_id_lower(request)
         # Provider is rarely exposed cleanly on chat models — best-effort.
         provider = ""
@@ -485,6 +529,8 @@ class PromptAssemblyMiddleware(AgentMiddleware):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse | AIMessage:
         # Identical to sync path — assembly is pure / sync.
+        if self.embedded:
+            return await handler(self._embedded_request(request))
         model_id = _model_id_lower(request)
         provider = ""
         for attr in ("_llm_type", "provider", "_provider"):

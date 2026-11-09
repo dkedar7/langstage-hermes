@@ -163,11 +163,13 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
 
     state_schema = _RecorderStateExt
 
-    def __init__(self, store: SqliteFtsStore) -> None:
+    def __init__(self, store: SqliteFtsStore, *, tools: list[Any] | None = None) -> None:
         super().__init__()
         self.store = store
-        # tools attribute is required by the AgentMiddleware contract.
-        self.tools = []
+        # tools attribute is required by the AgentMiddleware contract. hermes_middleware()
+        # passes the session_search tool here, so searching what was recorded comes
+        # with the recorder; create_hermes_agent binds that tool itself.
+        self.tools = list(tools) if tools is not None else []
         # Per-(thread, session) dedupe set so re-streaming a graph
         # state doesn't insert the same AIMessage twice.
         self._seen_message_keys: set[tuple[str, str]] = set()

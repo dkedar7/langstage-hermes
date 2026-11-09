@@ -117,6 +117,80 @@ def _init_chat_model(model_id: str | None) -> Any:
     return init_chat_model(model_id)
 
 
+# ── shared construction (create_hermes_agent + hermes_middleware) ─────────
+#
+# Both entry points build the same store, skill library, models, toolset filter and
+# review subagent through these helpers, so the full agent and the embeddable
+# middleware (langstage_hermes.embed) can't drift apart.
+
+
+def _open_store(cfg: HermesConfig, store: Any = None) -> tuple[Any, Path]:
+    """The FTS5 store at ``<HERMES_HOME>/state.db`` (or the caller's), and its db path."""
+    if store is not None:
+        db_path = Path(getattr(store, "_db_path", None) or cfg.hermes_home / "state.db")
+        return store, db_path
+    db_path = cfg.hermes_home / "state.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return SqliteFtsStore(db_path=str(db_path)), db_path
+
+
+def _open_library(cfg: HermesConfig, sid: str, db_path: Path) -> SkillLibrary:
+    """The skill library with its audit log, scanned once so load errors show at build."""
+    # Audit log shares the state.db file with the store (separate table).
+    # We give every library the audit log so agent skill mutations are
+    # automatically recorded; the CLI's `audit rollback` reads from the
+    # same table.
+    from langstage_hermes.skills.audit import SkillAuditLog
+
+    audit_log = SkillAuditLog(db_path=str(db_path))
+    # Thread the disabled-skill config so skills.disabled / skills.platform_disabled
+    # actually exclude a skill from the loaded toolset — without config= the filter
+    # in SkillLibrary.list() is dead code and the knob is a silent no-op (gh #74).
+    library = SkillLibrary(_default_skill_dirs(cfg), config=cfg.skills_filter_config(), audit_log=audit_log)
+    library.set_mutation_context(session_id=sid, source="agent")
+    # Scan once, here, so a SKILL.md with broken frontmatter is reported while the
+    # agent is being built — before the REPL banner — rather than never. This is the
+    # worse half of gh #81: the skill vanishes from the *live agent* with no signal
+    # at all, and a user who never runs `skills list` has nothing to go on.
+    # SkillLoaderMiddleware re-scans on every model call, so warning from inside the
+    # scan would repeat the line for the whole session; warning once from the
+    # build path is the one place that is both early and non-repeating.
+    library.list()
+    for err in library.load_errors:
+        log.warning("%s", format_load_error(err))
+    return library
+
+
+def _enabled_toolsets(cfg: HermesConfig) -> set[str]:
+    """Toolsets left after ``[agent].disabled_toolsets``; warns about unknown names."""
+    enabled = resolve_enabled(
+        disabled_toolsets=set(cfg.agent_disabled_toolsets),
+        platform=os.getenv("HERMES_PLATFORM", "cli"),
+    )
+    unknown = unknown_toolsets(cfg.agent_disabled_toolsets)
+    if unknown:
+        log.warning("agent.disabled_toolsets: unknown toolset(s) %s ignored (see `langstage-hermes tools`)", unknown)
+    return enabled
+
+
+def _build_review(library: SkillLibrary, store: Any, aux_model: Any, review_tools: list[Any]) -> tuple[dict[str, Any], Any]:
+    """The review subagent spec and its compiled graph (the reflection target)."""
+    from langchain.agents import create_agent
+
+    review_subagent = build_review_subagent(library=library, store=store, aux_model=aux_model, tools=review_tools)
+    # Compile it once and use the same graph for both ways a review can run:
+    # ReflectionMiddleware runs it itself when a review is due (gh #179: before,
+    # nothing passed it a graph, so a due review was dropped), and the model can
+    # still ask for it with `task(subagent_type="review")`.
+    review_graph = create_agent(
+        review_subagent["model"],
+        system_prompt=review_subagent["system_prompt"],
+        tools=review_subagent["tools"],
+        name=review_subagent["name"],
+    )
+    return review_subagent, review_graph
+
+
 def create_hermes_agent(
     config: HermesConfig | None = None,
     *,
@@ -179,31 +253,8 @@ def create_hermes_agent(
     ws = Path(workspace).resolve() if workspace else workspace_root()
 
     # ── shared resources ─────────────────────────────────────────────────
-    db_path = cfg.hermes_home / "state.db"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    store = SqliteFtsStore(db_path=str(db_path))
-    # Audit log shares the state.db file with the store (separate table).
-    # We give every library the audit log so agent skill mutations are
-    # automatically recorded; the CLI's `audit rollback` reads from the
-    # same table.
-    from langstage_hermes.skills.audit import SkillAuditLog
-
-    audit_log = SkillAuditLog(db_path=str(db_path))
-    # Thread the disabled-skill config so skills.disabled / skills.platform_disabled
-    # actually exclude a skill from the loaded toolset — without config= the filter
-    # in SkillLibrary.list() is dead code and the knob is a silent no-op (gh #74).
-    library = SkillLibrary(_default_skill_dirs(cfg), config=cfg.skills_filter_config(), audit_log=audit_log)
-    library.set_mutation_context(session_id=sid, source="agent")
-    # Scan once, here, so a SKILL.md with broken frontmatter is reported while the
-    # agent is being built — before the REPL banner — rather than never. This is the
-    # worse half of gh #81: the skill vanishes from the *live agent* with no signal
-    # at all, and a user who never runs `skills list` has nothing to go on.
-    # SkillLoaderMiddleware re-scans on every model call, so warning from inside the
-    # scan would repeat the line for the whole session; warning once from the
-    # build path is the one place that is both early and non-repeating.
-    library.list()
-    for err in library.load_errors:
-        log.warning("%s", format_load_error(err))
+    store, db_path = _open_store(cfg)
+    library = _open_library(cfg, sid, db_path)
 
     # Bring-your-own-model: caller-supplied instances bypass init_chat_model
     # entirely so Azure / Bedrock / OpenAI-compatible proxies / anything
@@ -240,13 +291,7 @@ def create_hermes_agent(
     provider = provider_cls() if provider_cls else None
 
     # ── enabled toolsets (after disabled_toolsets filter) ────────────────
-    enabled_toolsets = resolve_enabled(
-        disabled_toolsets=set(cfg.agent_disabled_toolsets),
-        platform=os.getenv("HERMES_PLATFORM", "cli"),
-    )
-    unknown = unknown_toolsets(cfg.agent_disabled_toolsets)
-    if unknown:
-        log.warning("agent.disabled_toolsets: unknown toolset(s) %s ignored (see `langstage-hermes tools`)", unknown)
+    enabled_toolsets = _enabled_toolsets(cfg)
 
     def _allowed(t: Any) -> bool:
         return tool_allowed(getattr(t, "name", ""), enabled_toolsets)
@@ -302,17 +347,7 @@ def create_hermes_agent(
     )
     # A disabled toolset is off for the review fork too, or it would write what the agent can't.
     review_tools = [t for t in (*skill_tools, *_memory_mw_for_tools.tools) if _allowed(t)]
-    review_subagent = build_review_subagent(library=library, store=store, aux_model=aux_model, tools=review_tools)
-    # Compile it once and use the same graph for both ways a review can run:
-    # ReflectionMiddleware runs it itself when a review is due (gh #179: before,
-    # nothing passed it a graph, so a due review was dropped), and the model can
-    # still ask for it with `task(subagent_type="review")`.
-    review_graph = create_agent(
-        review_subagent["model"],
-        system_prompt=review_subagent["system_prompt"],
-        tools=review_subagent["tools"],
-        name=review_subagent["name"],
-    )
+    review_subagent, review_graph = _build_review(library, store, aux_model, review_tools)
 
     # ── compose the middleware stack (SPEC §4 order) ─────────────────────
     # Note: deepagents inserts TodoList + Filesystem + SubAgent earlier in

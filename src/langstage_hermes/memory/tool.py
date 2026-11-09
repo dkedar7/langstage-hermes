@@ -97,10 +97,16 @@ class MemoryStateExt(AgentState):
       ``memory`` tool — that's the invariant the prefix cache depends on.
     - ``turns_since_memory``: reset to 0 on every ``memory`` tool call so
       the reflection middleware can decide when to nudge.
+    - ``memory_snapshot_loaded``: set once the snapshot is frozen for this
+      thread. The snapshot keys can't say that themselves: a reducer channel on
+      a ``str`` field starts out as ``""``, so in a compiled graph both keys are
+      always present and the old "already loaded" check skipped the load on
+      every run. The memory and user profile never reached the prompt.
     """
 
     memory_snapshot: NotRequired[Annotated[str, lambda _a, b: b]]
     user_snapshot: NotRequired[Annotated[str, lambda _a, b: b]]
+    memory_snapshot_loaded: NotRequired[Annotated[bool, lambda _a, b: b]]
     turns_since_memory: NotRequired[Annotated[int, lambda _a, b: b]]
 
 
@@ -472,9 +478,11 @@ class MemoryToolMiddleware(AgentMiddleware):
         ``deepagents``/langgraph thread-resume case where ``before_agent`` runs
         again on the same compiled graph.
         """
-        # Idempotent — if a snapshot is already in state (resumed thread),
-        # don't reload. The snapshot is frozen by definition.
-        if "memory_snapshot" in state and "user_snapshot" in state:
+        # Idempotent: once this thread has its snapshot (a resumed thread, or the
+        # next turn of the same one), don't reload. The snapshot is frozen by
+        # definition. Check the flag, not the keys: a compiled graph pre-seeds the
+        # str channels with "" (see MemoryStateExt).
+        if state.get("memory_snapshot_loaded"):
             return None
 
         snapshot = build_snapshot(
@@ -484,6 +492,7 @@ class MemoryToolMiddleware(AgentMiddleware):
         # Seed turns_since_memory if absent — first turn after fresh start.
         return {
             **snapshot,
+            "memory_snapshot_loaded": True,
             "turns_since_memory": state.get("turns_since_memory", 0),
         }
 

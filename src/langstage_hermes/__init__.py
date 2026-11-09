@@ -21,6 +21,7 @@ __all__ = [
     "HermesState",
     "__version__",
     "create_hermes_agent",
+    "hermes_middleware",
 ]
 
 
@@ -30,6 +31,10 @@ def __getattr__(name: str):
         from langstage_hermes.agent import create_hermes_agent
 
         return create_hermes_agent
+    if name == "hermes_middleware":
+        from langstage_hermes.embed import hermes_middleware
+
+        return hermes_middleware
     if name == "HermesConfig":
         from langstage_hermes.config import HermesConfig
 

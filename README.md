@@ -209,6 +209,60 @@ printf '[agent]\nspec = "langstage_hermes.agent:graph"\n' >> langstage.toml
 langstage-jupyter
 ```
 
+## Add Hermes to an existing agent
+
+Already have a LangGraph agent? Keep your model, tools and system prompt, and add Hermes's learning loop as middleware with `hermes_middleware()`:
+
+```python
+from langchain.agents import create_agent
+from langchain.chat_models import init_chat_model
+from langchain_core.tools import tool
+from langgraph.checkpoint.memory import InMemorySaver
+
+from langstage_hermes import hermes_middleware
+
+
+@tool
+def lookup_order(order_id: str) -> str:
+    """Look up an order by id."""
+    return f"order {order_id}: shipped"
+
+
+model = init_chat_model("anthropic:claude-sonnet-4-6")
+agent = create_agent(
+    model,
+    tools=[lookup_order],
+    system_prompt="You are Acme's support agent.",
+    middleware=[*hermes_middleware(aux_model=model)],
+    checkpointer=InMemorySaver(),
+)
+agent.invoke(
+    {"messages": [{"role": "user", "content": "Where is order 42?"}]},
+    {"configurable": {"thread_id": "demo"}},
+)
+```
+
+What you get by default:
+
+| Component | What it adds |
+|---|---|
+| `reflection` | Every few turns a review subagent looks back over the conversation and saves what worked as a skill or a memory entry |
+| `skills` | The skill library (`skills_list`, `skill_view`, `skill_manage`) and its index in the prompt |
+| `memory` | The `memory` tool, plus your saved memory and user profile in the prompt |
+| `recorder` | Every turn written to `<HERMES_HOME>/state.db`, searchable with `session_search` |
+| `curator` | Archives skills nobody has used in a while |
+
+Opt in to more with `include=`: `compression` (summarise long contexts), `todo` (`write_todos`), `cronjob` (the agent manages its own scheduled jobs, and `create`, `resume` and `run-now` wait for your approval) and `budget` (cap tool-loop iterations). Leave a default out with `exclude=`, e.g. `hermes_middleware(include=["cronjob"], exclude=["curator"])`. An unknown name raises `ValueError`.
+
+- **Your prompt stays yours.** Hermes appends its sections (tool guidance, your memory and user profile, the skills index) after your system prompt and never replaces it.
+- **Tools come with the middleware.** `create_agent` binds `memory`, the skill tools and `session_search` from the middleware, so you don't list them.
+- **`aux_model`** is the model the review subagent uses. Pass your own model (as above) to keep Hermes on the same provider and key; otherwise it uses `model_aux` or `model_default` from your Hermes config.
+- **It also works with `deepagents.create_deep_agent(..., middleware=[*hermes_middleware()])`.** Don't include `todo` there, since deep agents already have it.
+- **Config** comes from `langstage-hermes.toml` and `LANGSTAGE_HERMES_*` as usual: `HERMES_HOME`, nudge intervals, memory limits and `[agent] disabled_toolsets` all apply. Pass `config=HermesConfig.resolve(overrides={...})` to set them in code.
+- The returned list also carries `.store`, `.library` and `.session_id`, and `.close()` closes its SQLite connections.
+
+Not included, because they belong to your agent: the filesystem tools, model switching, prompt caching and Hermes's own identity prompt. Use `create_hermes_agent()` when you want the whole Hermes agent.
+
 ## Configuration
 
 `langstage-hermes.toml` (project) or `$HERMES_HOME/config.toml` (global — default `~/.langstage-hermes/config.toml`, and it moves with a custom `HERMES_HOME`). Layered resolution: `defaults < TOML < LANGSTAGE_HERMES_* env < CLI overrides`. See [SPEC §2](./SPEC.md#2-configuration) for every field; `langstage-hermes --show-config` prints the resolved value + source of each, and `langstage-hermes --show-config --json` prints the same thing as one JSON object (`{"config": {<field>: {value, source, env, legacy_env, toml}}, "toml": {...}, "issues": [...]}`) for CI. The legacy project filename `deepagent-hermes.toml` is still read, with a one-time deprecation note on stderr (silence it with `LANGSTAGE_SUPPRESS_LEGACY_NOTICE=1`).
