@@ -66,9 +66,14 @@ class SkillLoaderMiddleware(AgentMiddleware):
 
     state_schema = _SkillLoaderStateExt
 
-    def __init__(self, library: SkillLibrary) -> None:
+    def __init__(self, library: SkillLibrary, *, tools: list[Any] | None = None) -> None:
         super().__init__()
         self.library = library
+        # The skill tools (skills_list / skill_view / skill_manage). create_hermes_agent
+        # binds them itself; hermes_middleware() hands them over here so a host's
+        # create_agent picks them up from the middleware.
+        if tools is not None:
+            self.tools = list(tools)
 
     # ------------------------------------------------------------------
     # AgentMiddleware hooks

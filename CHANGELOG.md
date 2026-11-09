@@ -2,6 +2,35 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.0] - 2026-11-09
+
+### Added
+- **`hermes_middleware()`: add Hermes's learning loop to an agent you already have.** It returns
+  a list of middleware for `langchain.agents.create_agent` or `deepagents.create_deep_agent`, so
+  you keep your own model, tools and system prompt. By default it adds reflection (a review
+  subagent saves what worked as skills and memory), the skill library, the `memory` tool and
+  snapshots, the session recorder with `session_search`, and the curator. `include=` adds
+  `compression`, `todo`, `cronjob` (approval-gated for `create`, `resume` and `run-now`) or
+  `budget`; `exclude=` drops a default; an unknown name raises `ValueError`. Hermes's sections are
+  appended after your system prompt, which is never replaced, and its tools ride on the
+  middleware so you don't list them. See "Add Hermes to an existing agent" in the README.
+- `PromptAssemblyMiddleware(embedded=True)` appends only the Hermes sections (tool guidance, then
+  the memory and user snapshots) to the host's system message, keeping content blocks as they are.
+- `SkillLoaderMiddleware` and `HermesStateRecorderMiddleware` take an optional `tools=` so they can
+  carry the skill tools and `session_search`.
+
+### Fixed
+- **Your saved memory and user profile now reach the prompt.** `MemoryToolMiddleware.before_agent`
+  skipped loading the snapshot when both snapshot keys were already in state. In a compiled graph
+  they always are (a reducer channel on a `str` field starts as `""`), so the load was skipped on
+  every run and the frozen snapshot was always empty, in `create_hermes_agent` too. The middleware
+  now records `memory_snapshot_loaded` and checks that instead. The snapshot is still frozen for
+  the rest of the thread.
+
+### Changed
+- `create_hermes_agent` builds its store, skill library, toolset filter and review subagent through
+  helpers it shares with `hermes_middleware`, so the two can't drift. Its behaviour is unchanged.
+
 ## [0.4.58] - 2026-11-08
 
 ### Added

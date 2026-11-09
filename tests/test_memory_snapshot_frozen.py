@@ -231,3 +231,70 @@ def test_before_agent_is_idempotent(tmp_hermes_home: Path) -> None:
     assert result is None  # idempotent
     assert state["memory_snapshot"] == snap_before
     assert "sister wrote this" not in state["memory_snapshot"]
+
+
+# ── in a compiled graph ──────────────────────────────────────────────────
+#
+# A compiled graph pre-seeds the snapshot channels with "" (a reducer channel on a
+# str field), so the old "both keys present" guard skipped the load on every run:
+# the memory and user profile never reached the model's prompt. These run the real
+# create_hermes_agent wiring with a keyless scripted model.
+
+
+def _prompt_recording_model():
+    from typing import ClassVar
+
+    from langchain_core.messages import AIMessage
+
+    from langstage_hermes.demo import _ScriptedModel
+
+    class _Recorder(_ScriptedModel):
+        prompts: ClassVar[list[str]] = []
+
+        def _generate(self, messages, *args, **kwargs):
+            type(self).prompts.append(messages[0].text if messages else "")
+            return self._result(AIMessage(content="ok"))
+
+    _Recorder.prompts = []
+    return _Recorder
+
+
+def _full_agent_turns(home: Path, texts: list[str], between=None) -> list[str]:
+    from langchain_core.messages import HumanMessage
+
+    from langstage_hermes import HermesConfig, create_hermes_agent
+    from langstage_hermes.demo import _close_agent_resources
+
+    model_cls = _prompt_recording_model()
+    ws = home / "ws"
+    ws.mkdir(exist_ok=True)
+    agent = create_hermes_agent(HermesConfig.resolve(), model=model_cls(), aux_model=model_cls(), workspace=ws)
+    thread = {"configurable": {"thread_id": agent.langstage_hermes_session_id}}
+    try:
+        for i, text in enumerate(texts):
+            if i and between:
+                between()
+            agent.invoke({"messages": [HumanMessage(text)]}, thread)
+    finally:
+        _close_agent_resources(agent)
+    return model_cls.prompts
+
+
+def test_the_snapshot_reaches_the_full_agents_prompt(tmp_hermes_home: Path) -> None:
+    _write_memory_file(tmp_hermes_home, "MEMORY.md", ["Deploys go out on Tuesdays."])
+    _write_memory_file(tmp_hermes_home, "USER.md", ["Name is Alex."])
+    prompts = _full_agent_turns(tmp_hermes_home, ["hi"])
+    assert "Deploys go out on Tuesdays." in prompts[0]
+    assert "Name is Alex." in prompts[0]
+
+
+def test_the_snapshot_stays_frozen_across_turns_of_a_thread(tmp_hermes_home: Path) -> None:
+    _write_memory_file(tmp_hermes_home, "USER.md", ["Name is Alex."])
+
+    def learn_mid_session() -> None:
+        _write_memory_file(tmp_hermes_home, "USER.md", ["Name is Alex.", "Prefers metric units."])
+
+    prompts = _full_agent_turns(tmp_hermes_home, ["hi", "and again"], between=learn_mid_session)
+    assert "Name is Alex." in prompts[0]
+    assert prompts[-1] == prompts[0]  # byte-stable: the new entry waits for the next session
+    assert "Prefers metric units." not in prompts[-1]
