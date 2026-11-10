@@ -36,9 +36,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Annotated, Any
 
 from langchain_core.tools import StructuredTool
+from langgraph.prebuilt import InjectedState
 
 from langstage_hermes.store.sqlite_fts import SqliteFtsStore
 
@@ -636,9 +637,16 @@ def make_session_search_tool(
         window: int = 5,
         sources_exclude: list[str] | None = None,
         _current_session_id: str = "",
+        state: Annotated[Any, InjectedState] = None,
     ) -> str:
-        # Prefer the explicit per-call override; fall back to the getter.
+        # Prefer the explicit per-call override, then the session the recorder
+        # wrote this run under (graph state), then the factory's getter. The
+        # state's id is the one actually recorded, so the live conversation is
+        # always the lineage left out, even when a host threads many
+        # conversations through one graph (gh #216).
         cur = _current_session_id
+        if not cur and isinstance(state, dict):
+            cur = str(state.get("session_id") or "")
         if not cur and current_session_id_getter is not None:
             try:
                 cur = current_session_id_getter() or ""

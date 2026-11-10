@@ -149,9 +149,13 @@ def hermes_middleware(
             string. Defaults to ``config.model_aux``, else ``config.model_default``.
             Pass your own model here to keep Hermes on the same provider and key
             as your agent.
-        session_id: The id skill changes are attributed to in the audit log, and
-            the session ``session_search`` treats as current. Auto-generated if
-            omitted.
+        session_id: The session conversations are recorded under in ``state.db``,
+            the id skill changes are attributed to in the audit log, and the
+            session ``session_search`` leaves out as current. Auto-generated if
+            omitted; ``.session_id`` reports it. Every thread run through this list
+            records into that one session unless the run's input state carries its
+            own ``session_id`` (e.g. ``{"messages": [...], "session_id": "chat-7"}``),
+            which then wins for that thread.
         include: Extra components to add: any of ``compression``, ``todo``,
             ``cronjob``, ``budget``. Default components may be named too (a no-op).
         exclude: Components to leave out, e.g. ``exclude=["curator"]``.
@@ -236,7 +240,7 @@ def hermes_middleware(
         out.append(memory_mw)
         built.append("memory")
     if "recorder" in wanted:
-        out.append(HermesStateRecorderMiddleware(store=store, tools=search_tools))
+        out.append(HermesStateRecorderMiddleware(store=store, tools=search_tools, session_id=sid))
         built.append("recorder")
     if "reflection" in wanted:
         # The review fork writes through the same skill and memory tools the agent has.

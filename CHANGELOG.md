@@ -2,6 +2,21 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.1] - 2026-11-10
+
+### Fixed
+- **`session_search` no longer returns the live conversation as a past session (gh #216).**
+  A host agent's state carries no `session_id`, so the recorder minted its own id per thread
+  while `session_search` left out a different one: the agent's recall fed its own current chat
+  back to it. This hit `hermes_middleware()` and also the full agent when a host (the web app,
+  `langstage-cli`) runs it. `session_search` now leaves out the session the run was actually
+  recorded under, read from graph state.
+- **`hermes_middleware(session_id=...)` and `.session_id` name the recorded session.** The
+  recorder falls back to the middleware's session id instead of minting one, so the id you pass
+  (or the one reported) is what `state.db`, `langstage-hermes search --browse` and the skill
+  audit log show. A `session_id` in a run's input state still wins for that thread; the README
+  says how to keep separate conversations as separate sessions.
+
 ## [0.5.0] - 2026-11-09
 
 ### Added
