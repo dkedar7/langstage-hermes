@@ -260,6 +260,7 @@ Opt in to more with `include=`: `compression` (summarise long contexts), `todo` 
 - **It also works with `deepagents.create_deep_agent(..., middleware=[*hermes_middleware()])`.** Don't include `todo` there, since deep agents already have it.
 - **Config** comes from `langstage-hermes.toml` and `LANGSTAGE_HERMES_*` as usual: `HERMES_HOME`, nudge intervals, memory limits and `[agent] disabled_toolsets` all apply. Pass `config=HermesConfig.resolve(overrides={...})` to set them in code.
 - The returned list also carries `.store`, `.library` and `.session_id`, and `.close()` closes its SQLite connections.
+- Conversations are recorded under `.session_id` (pass `session_id=` to choose it), and `session_search` leaves that live session out of its results. To keep separate conversations as separate sessions, build one list per conversation, or put a `session_id` in each run's input state: `agent.invoke({"messages": [...], "session_id": "chat-7"}, ...)`.
 
 Not included, because they belong to your agent: the filesystem tools, model switching, prompt caching and Hermes's own identity prompt. Use `create_hermes_agent()` when you want the whole Hermes agent.
 

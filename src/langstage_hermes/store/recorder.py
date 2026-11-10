@@ -65,12 +65,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _resolve_session_id(state: Any) -> str:
-    """Pull session_id out of state, manufacturing one if needed.
+def _resolve_session_id(state: Any, default: str | None = None) -> str:
+    """Pull session_id out of state, falling back to ``default``, then a fresh id.
 
     HermesState declares a ``session_id`` field; in tests / minimal
     agents the state may be a bare dict where the field is missing.
-    Returning a fresh uuid keeps the recorder usable in both cases.
+    ``default`` is the session the factory handed out (``hermes_middleware``'s
+    ``session_id``), so what gets recorded is the session the caller was told
+    about (gh #216). Without one, a fresh uuid keeps the recorder usable.
     """
     if isinstance(state, dict):
         sid = state.get("session_id")
@@ -80,6 +82,8 @@ def _resolve_session_id(state: Any) -> str:
         sid = getattr(state, "session_id", None)
         if sid:
             return str(sid)
+    if default:
+        return default
     return f"sess-{uuid.uuid4().hex[:12]}"
 
 
@@ -163,9 +167,19 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
 
     state_schema = _RecorderStateExt
 
-    def __init__(self, store: SqliteFtsStore, *, tools: list[Any] | None = None) -> None:
+    def __init__(
+        self,
+        store: SqliteFtsStore,
+        *,
+        tools: list[Any] | None = None,
+        session_id: str | None = None,
+    ) -> None:
         super().__init__()
         self.store = store
+        # The session to record under when the run's state carries none (a host
+        # agent's state has no session_id). hermes_middleware() passes its own
+        # session id so the recorded session is the one it reports (gh #216).
+        self.session_id = session_id
         # tools attribute is required by the AgentMiddleware contract. hermes_middleware()
         # passes the session_search tool here, so searching what was recorded comes
         # with the recorder; create_hermes_agent binds that tool itself.
@@ -180,7 +194,7 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
 
     def before_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
-        session_id = _resolve_session_id(state)
+        session_id = _resolve_session_id(state, self.session_id)
         source = os.environ.get("LANGSTAGE_HERMES_SESSION_SOURCE") or os.environ.get("DEEPAGENT_HERMES_SESSION_SOURCE", "user")
         parent = state.get("parent_session_id") if isinstance(state, dict) else getattr(state, "parent_session_id", None)
         try:
@@ -219,7 +233,7 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
 
     def after_model(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
-        session_id = _resolve_session_id(state)
+        session_id = _resolve_session_id(state, self.session_id)
         messages = state.get("messages") if isinstance(state, dict) else getattr(state, "messages", [])
         if not messages:
             return None
@@ -267,7 +281,7 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
     def _record_tool_result(self, request: Any, result: Any) -> None:
         # ToolCallRequest exposes .state, .tool_call, .tool
         state = getattr(request, "state", None)
-        session_id = _resolve_session_id(state)
+        session_id = _resolve_session_id(state, self.session_id)
         call = getattr(request, "tool_call", None) or {}
         tool_name = call.get("name") if isinstance(call, dict) else getattr(call, "name", None)
         tool_call_id = call.get("id") if isinstance(call, dict) else getattr(call, "id", None)
@@ -305,7 +319,7 @@ class HermesStateRecorderMiddleware(AgentMiddleware):
 
     def after_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         del runtime
-        session_id = _resolve_session_id(state)
+        session_id = _resolve_session_id(state, self.session_id)
         messages = state.get("messages") if isinstance(state, dict) else getattr(state, "messages", [])
         message_count = len(messages or [])
         tool_call_count = sum(len(getattr(m, "tool_calls", []) or []) for m in (messages or []) if isinstance(m, AIMessage))
