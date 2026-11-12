@@ -28,6 +28,7 @@ agent-build time.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -374,7 +375,8 @@ class ReflectionMiddleware(AgentMiddleware):
             self._warn_unwired(kind)
             return reset
         try:
-            self._review_graph.invoke(self._review_input(state, kind))
+            with self._review_session(state):
+                self._review_graph.invoke(self._review_input(state, kind))
         except Exception as exc:
             logger.warning("Reflection: review subagent failed: %s", exc)
         return reset
@@ -406,6 +408,19 @@ class ReflectionMiddleware(AgentMiddleware):
         )
 
     # ── helpers ──────────────────────────────────────────────────
+
+    def _review_session(self, state: Any) -> Any:
+        """Attribute the review's skill changes to the run's session (gh #218).
+
+        The review fork shares the parent's library but has no ``session_id`` of
+        its own in state, so without this its audit rows carried the id the
+        library was built with, a session state.db never recorded.
+        """
+        sid = self._get(state, "session_id")
+        scope = getattr(self.library, "mutation_session", None)
+        if callable(scope) and isinstance(sid, str) and sid:
+            return scope(sid)
+        return contextlib.nullcontext()
 
     @staticmethod
     def _messages(state: Any) -> list[Any]:
@@ -469,10 +484,11 @@ class ReflectionMiddleware(AgentMiddleware):
             return reset
         try:
             ainvoke = getattr(self._review_graph, "ainvoke", None)
-            if callable(ainvoke):
-                await ainvoke(self._review_input(state, kind))
-            else:
-                self._review_graph.invoke(self._review_input(state, kind))
+            with self._review_session(state):
+                if callable(ainvoke):
+                    await ainvoke(self._review_input(state, kind))
+                else:
+                    self._review_graph.invoke(self._review_input(state, kind))
         except Exception as exc:
             logger.warning("Reflection: review subagent failed: %s", exc)
         return reset

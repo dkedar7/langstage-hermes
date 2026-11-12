@@ -18,6 +18,7 @@ from typing import Annotated, Any, Literal
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolCallId, tool
+from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
 from langstage_hermes.skills.library import SkillLibrary
@@ -88,6 +89,7 @@ def skill_manage(
     new_str: str = "",
     frontmatter_data: dict[str, Any] | None = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
+    state: Annotated[Any, InjectedState] = None,
 ) -> Command:
     """Curate the skill library.
 
@@ -114,6 +116,7 @@ def skill_manage(
         new_str=new_str,
         frontmatter_data=frontmatter_data,
         tool_call_id=tool_call_id,
+        session_id=_state_session_id(state),
     )
 
 
@@ -166,6 +169,7 @@ def make_skill_tools(library: SkillLibrary, *, store: Any = None) -> list[BaseTo
         new_str: str = "",
         frontmatter_data: dict[str, Any] | None = None,
         tool_call_id: Annotated[str, InjectedToolCallId] = "",
+        state: Annotated[Any, InjectedState] = None,
     ) -> Command:
         """Curate the skill library (create/patch/write_file/delete/pin/unpin).
 
@@ -183,6 +187,7 @@ def make_skill_tools(library: SkillLibrary, *, store: Any = None) -> list[BaseTo
             frontmatter_data=frontmatter_data,
             tool_call_id=tool_call_id,
             store=store,
+            session_id=_state_session_id(state),
         )
 
     return [_skills_list, _skill_view, _skill_manage]
@@ -268,14 +273,53 @@ def _skill_manage_impl(
     frontmatter_data: dict[str, Any] | None,
     tool_call_id: str,
     store: Any = None,
+    session_id: str | None = None,
 ) -> Command:
     """Implement the five mutation actions and return a state-resetting Command."""
     # Stash provenance so the audit log records who made the change.
-    # The agent's compiled graph doesn't expose its session_id to a tool
-    # handler; the recorder middleware does, but its hook fires after
-    # the tool. Leaving session_id None here is fine — `list` can join
-    # on tool_call_id when needed.
     library.set_mutation_context(source="agent", tool_call_id=tool_call_id or None)
+    # The run's own session (the recorder puts it in state before the first model
+    # call), so the audit row names the session state.db recorded this run under,
+    # not the id the library was built with (gh #218). No session in state (a
+    # review fork, a host without the recorder) keeps the current attribution.
+    with library.mutation_session(session_id):
+        return _skill_manage_mutate(
+            library,
+            action=action,
+            name=name,
+            description=description,
+            body=body,
+            category=category,
+            old_str=old_str,
+            new_str=new_str,
+            frontmatter_data=frontmatter_data,
+            tool_call_id=tool_call_id,
+            store=store,
+        )
+
+
+def _state_session_id(state: Any) -> str | None:
+    """The run's ``session_id`` from injected graph state, if it has one."""
+    if state is None:
+        return None
+    sid = state.get("session_id") if isinstance(state, dict) else getattr(state, "session_id", None)
+    return sid if isinstance(sid, str) and sid else None
+
+
+def _skill_manage_mutate(
+    library: SkillLibrary,
+    *,
+    action: str,
+    name: str,
+    description: str,
+    body: str,
+    category: str,
+    old_str: str,
+    new_str: str,
+    frontmatter_data: dict[str, Any] | None,
+    tool_call_id: str,
+    store: Any = None,
+) -> Command:
     try:
         if action == "create":
             path = _action_create(library, name=name, description=description, body=body, category=category)

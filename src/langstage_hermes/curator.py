@@ -33,6 +33,7 @@ not mutate it (gh #154). Hide an unwanted bundled skill with ``skills.disabled``
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import time
@@ -430,7 +431,10 @@ class CuratorMiddleware(AgentMiddleware):
         if (now - last_user_activity) < idle:
             return None
 
-        self._run_pass(cstate, now)
+        # Changes this pass makes happen during this run, so the audit rows carry
+        # the run's session, the one state.db recorded it under (gh #218).
+        with _mutation_session(self.library, _state_session_id(state)):
+            self._run_pass(cstate, now)
         return None
 
     # ── after_agent: stamp last_user_activity ────────────────────
@@ -506,3 +510,15 @@ __all__ = [
     "read_skill_last_used",
     "record_skill_use",
 ]
+
+
+def _state_session_id(state: Any) -> str | None:
+    """The run's ``session_id`` from graph state, if it has one (gh #218)."""
+    sid = state.get("session_id") if isinstance(state, dict) else getattr(state, "session_id", None)
+    return sid if isinstance(sid, str) and sid else None
+
+
+def _mutation_session(library: Any, session_id: str | None) -> Any:
+    """``library.mutation_session(session_id)``, or a no-op for a stand-in library."""
+    scope = getattr(library, "mutation_session", None)
+    return scope(session_id) if callable(scope) else contextlib.nullcontext()

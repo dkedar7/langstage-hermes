@@ -2,6 +2,21 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.2] - 2026-11-12
+
+### Fixed
+- **Skill changes are audited under the run's own session (gh #218).** The skill library's
+  audit context was set once, when the agent was built. A run that passes its own
+  `session_id` in its input (the way the README says to keep conversations apart under
+  `hermes_middleware()`) still wrote the build-time id into `skill_mutations`, a session
+  `state.db` never recorded. So `audit log` couldn't lead back to the conversation, and
+  `search --session <id>` said the session didn't exist. `skill_manage` now reads the run's
+  `session_id` from graph state. The reflection review fork and the curator pass, which share
+  the library, use the run's session too. The per-run id is scoped to the run (a context
+  variable), so concurrent conversations sharing one library keep their own attribution. A
+  run without a `session_id` keeps the previous attribution. Applies to `create_hermes_agent`
+  as well.
+
 ## [0.5.1] - 2026-11-10
 
 ### Fixed
