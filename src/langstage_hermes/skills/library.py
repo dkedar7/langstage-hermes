@@ -18,6 +18,8 @@ import os
 import shutil
 import sys
 from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +35,14 @@ from langstage_hermes.skills.validator import (
 from langstage_hermes.skills.validator import (
     validate as validate_frontmatter,
 )
+
+# Per-call session id for the audit row (gh #218). A ContextVar, not an attribute,
+# because one library is shared by every conversation a host runs through the same
+# graph: concurrent runs must not see each other's session. Set by
+# ``SkillLibrary.mutation_session`` around a run's mutations (the agent's
+# ``skill_manage`` call, the reflection review, the curator); unset means the
+# library's own ``set_mutation_context`` default applies.
+_SESSION_OVERRIDE: ContextVar[str | None] = ContextVar("hermes_skill_mutation_session", default=None)
 
 logger = logging.getLogger(__name__)
 
@@ -426,6 +436,25 @@ class SkillLibrary:
         if tool_call_id is not None:
             self._mutation_tool_call_id = tool_call_id
 
+    @staticmethod
+    @contextmanager
+    def mutation_session(session_id: str | None) -> Iterator[None]:
+        """Attribute every mutation inside the block to ``session_id`` (gh #218).
+
+        ``None`` or ``""`` leaves the current attribution in place, so a caller
+        without a session (the review fork's own tool call) doesn't undo the one
+        its parent set. Scoped to the current context: concurrent runs that share
+        this library each keep their own session.
+        """
+        if not session_id:
+            yield
+            return
+        token = _SESSION_OVERRIDE.set(session_id)
+        try:
+            yield
+        finally:
+            _SESSION_OVERRIDE.reset(token)
+
     def _record_mutation(
         self,
         *,
@@ -452,7 +481,7 @@ class SkillLibrary:
                 before_content=before_content,
                 after_content=after_content,
                 source=self._mutation_source,
-                session_id=self._mutation_session_id,
+                session_id=_SESSION_OVERRIDE.get() or self._mutation_session_id,
                 tool_call_id=self._mutation_tool_call_id,
                 skill_path=skill_path,
             )
