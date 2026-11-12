@@ -16,6 +16,10 @@ All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be 
   variable), so concurrent conversations sharing one library keep their own attribution. A
   run without a `session_id` keeps the previous attribution. Applies to `create_hermes_agent`
   as well.
+- **The skill audit log no longer drops rows under concurrent writes.** Its single SQLite
+  connection is shared across worker threads, and two threads writing at once interleaved
+  `execute()`/`commit()` ("cannot commit - no transaction is active"), so a mutation went
+  unrecorded. Every use of the connection now holds a lock.
 
 ## [0.5.1] - 2026-11-10
 

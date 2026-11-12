@@ -30,6 +30,7 @@ import logging
 import re
 import shutil
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -201,8 +202,12 @@ class SkillAuditLog:
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = str(db_path)
         # check_same_thread=False so sync tool handlers on worker threads
-        # can call record(). SQLite serialises writes internally; we don't
-        # need our own lock as long as every write is a single statement.
+        # can call record(). One connection shared across threads is not safe
+        # on its own: two threads' execute()/commit() interleave on the same
+        # transaction ("cannot commit - no transaction is active") and a row is
+        # lost. Conversations sharing one library (gh #218) write concurrently,
+        # so every use of the connection holds this lock.
+        self._lock = threading.RLock()
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         # Make sure the schema is there even if the audit log is the
@@ -273,28 +278,29 @@ class SkillAuditLog:
         ts = timestamp if timestamp is not None else time.time()
         before_hash = _sha256(before_content)
         after_hash = _sha256(after_content)
-        cur = self._conn.execute(
-            """
-            INSERT INTO skill_mutations
-                (timestamp, skill_name, action, source, session_id, tool_call_id,
-                 skill_path, before_hash, after_hash, before_content, after_content)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                ts,
-                skill_name,
-                action,
-                source,
-                session_id,
-                tool_call_id,
-                str(skill_path) if skill_path is not None else None,
-                before_hash,
-                after_hash,
-                before_content,
-                after_content,
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                INSERT INTO skill_mutations
+                    (timestamp, skill_name, action, source, session_id, tool_call_id,
+                     skill_path, before_hash, after_hash, before_content, after_content)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ts,
+                    skill_name,
+                    action,
+                    source,
+                    session_id,
+                    tool_call_id,
+                    str(skill_path) if skill_path is not None else None,
+                    before_hash,
+                    after_hash,
+                    before_content,
+                    after_content,
+                ),
+            )
+            self._conn.commit()
         row_id = cur.lastrowid
         assert row_id is not None
         return int(row_id)
@@ -332,12 +338,14 @@ class SkillAuditLog:
         # order. Without this, "most recent" is non-deterministic on ties.
         sql += " ORDER BY timestamp DESC, id DESC LIMIT ?"
         params.append(int(limit))
-        rows = self._conn.execute(sql, params).fetchall()
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
         return [MutationRow.from_row(r) for r in rows]
 
     def get(self, mutation_id: int) -> MutationRow | None:
         """Fetch a single mutation by id."""
-        row = self._conn.execute("SELECT * FROM skill_mutations WHERE id = ?", (mutation_id,)).fetchone()
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM skill_mutations WHERE id = ?", (mutation_id,)).fetchone()
         return MutationRow.from_row(row) if row else None
 
     def latest_for(self, skill_name: str) -> MutationRow | None:

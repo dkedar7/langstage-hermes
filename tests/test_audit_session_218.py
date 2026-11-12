@@ -224,3 +224,36 @@ def test_full_agent_audits_under_the_per_run_session(home: Path) -> None:
         assert row.session_id == "chat-9"
     finally:
         log.close()
+
+
+def test_audit_log_survives_concurrent_writers(tmp_path: Path) -> None:
+    """One audit connection shared by threads must not drop rows.
+
+    Two conversations sharing a library write concurrently; before the lock,
+    interleaved execute()/commit() raised "cannot commit - no transaction is
+    active" and a row was lost (found by the concurrency test above in CI).
+    """
+    from langstage_hermes.skills.audit import SkillAuditLog
+
+    log = SkillAuditLog(tmp_path / "state.db")
+    barrier = threading.Barrier(8)
+    errors: list[BaseException] = []
+
+    def write(n: int) -> None:
+        barrier.wait()
+        try:
+            for i in range(25):
+                log.record(skill_name=f"s{n}", action="create", before_content=None, after_content=b"x", session_id=f"t{n}-{i}")
+        except BaseException as exc:  # pragma: no cover - the failure being guarded
+            errors.append(exc)
+
+    threads = [threading.Thread(target=write, args=(n,)) for n in range(8)]
+    try:
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert not errors
+        assert len(log.list(limit=1000)) == 200
+    finally:
+        log.close()
