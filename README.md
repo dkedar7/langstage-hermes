@@ -316,7 +316,7 @@ See [SPEC.md](./SPEC.md) for the full 21-section requirements doc. Top-level lay
 | Iteration budget middleware | ✅ working |
 | Compression middleware (13-section template) | ✅ working |
 | Anthropic `system_and_3` caching strategy | ✅ working |
-| Tool registry + 33-toolset enum | ✅ working — `langstage-hermes tools` lists the tool names the model is actually given; `clarify` is declared but not bound, and `cronjob` is bound only with `[cron] agent_tool = true` |
+| Tool registry + 33-toolset enum | ✅ working — `langstage-hermes tools` lists the tool names the model is actually given, marking toolsets your config turns off (`[agent] disabled_toolsets`, or `cronjob` without `[cron] agent_tool = true`) with `✗`; `clarify` is declared but not bound |
 | `LocalEnvironment` terminal backend | ✅ working (Git Bash on Windows); the agent gets the `execute` shell tool only when built with a sandbox `backend=` — the default workspace backend has no shell |
 | `DockerEnvironment` | ✅ working (gated on `docker info` reachability) |
 | `SshEnvironment` | ✅ working (paramiko-backed, behind `[ssh]` extra) |

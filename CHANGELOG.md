@@ -2,6 +2,18 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.3] - 2026-11-13
+
+### Fixed
+- **`tools` shows what your config actually binds (gh #220).** The README says `tools` lists
+  the tool names the model is given, but it never read the config: with
+  `[agent] disabled_toolsets = ["file", "memory"]` it still marked both `●` and listed their
+  tools, and `cronjob` showed `●` even with `[cron] agent_tool` off. `tools` now resolves the
+  config the way `--show-config` does and marks a toolset the config turns off with `✗` and
+  the reason (`disabled by agent.disabled_toolsets`, or `off: [cron] agent_tool = false`).
+  `/tools` in chat does the same with the session's config, including `/toolsets` changes. A
+  config that fails to resolve falls back to the static list, with a note.
+
 ## [0.5.2] - 2026-11-12
 
 ### Fixed
