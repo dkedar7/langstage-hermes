@@ -229,6 +229,20 @@ def unknown_toolsets(names: list[str] | tuple[str, ...] | set[str] | None) -> li
     return sorted({n for n in (names or ()) if n not in TOOLSETS})
 
 
+def config_off_reason(toolset: str, cfg) -> str | None:
+    """Why the resolved config keeps ``toolset`` from the model, or ``None`` (gh #220).
+
+    Mirrors what ``create_hermes_agent`` binds: a toolset named in
+    ``agent.disabled_toolsets`` is off, and ``cronjob`` is also off unless
+    ``[cron] agent_tool = true``. ``cfg`` is a resolved ``HermesConfig``.
+    """
+    if toolset in set(getattr(cfg, "agent_disabled_toolsets", None) or ()):
+        return "disabled by agent.disabled_toolsets"
+    if toolset == "cronjob" and not getattr(cfg, "cron_agent_tool", False):
+        return "off: [cron] agent_tool = false"
+    return None
+
+
 def resolve_enabled(
     *,
     disabled_toolsets: list[str] | tuple[str, ...] | set[str] | None = None,

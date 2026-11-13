@@ -930,10 +930,21 @@ def _slash_yolo(args: str, state: dict[str, Any]) -> bool:
 
 def _slash_tools(args: str, state: dict[str, Any]) -> bool:
     """Inline summary of implemented toolsets — full taxonomy via `tools` subcommand."""
-    from langstage_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, TOOLSET_NOTES, TOOLSETS, bound_tools_for
+    from langstage_hermes.tools.toolsets import (
+        IMPLEMENTED_TOOLSETS,
+        TOOLSET_NOTES,
+        TOOLSETS,
+        bound_tools_for,
+        config_off_reason,
+    )
 
+    cfg = state.get("cfg")
     click.echo(click.style("Toolsets (implemented):", fg="cyan"))
     for ts in sorted(IMPLEMENTED_TOOLSETS):
+        off = config_off_reason(ts, cfg) if cfg is not None else None
+        if off:
+            click.echo(click.style(f"  ✗ {ts:<18}  ({off})", fg="bright_black"))
+            continue
         click.echo(f"  ● {ts:<18}  {', '.join(bound_tools_for(ts))}")
         if ts in TOOLSET_NOTES:
             click.echo(click.style(f"      ({TOOLSET_NOTES[ts]})", fg="bright_black"))
@@ -1955,25 +1966,48 @@ def tools(toolset_filter: str | None, implemented_only: bool) -> None:
 
     Shows the toolset taxonomy from SPEC §11 — both implemented sets
     (file, skills, memory, etc.) and stubbed-but-declared sets
-    (homeassistant, spotify, etc.). For live check-status info, run
+    (homeassistant, spotify, etc.). Implemented sets the resolved config
+    turns off (``agent.disabled_toolsets``, or ``cronjob`` without
+    ``[cron] agent_tool = true``) are marked ✗, matching what the model is
+    actually given (gh #220). For live check-status info, run
     ``langstage-hermes doctor``.
     """
-    from langstage_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, TOOLSET_NOTES, TOOLSETS, bound_tools_for
+    from langstage_hermes.tools.toolsets import (
+        IMPLEMENTED_TOOLSETS,
+        TOOLSET_NOTES,
+        TOOLSETS,
+        bound_tools_for,
+        config_off_reason,
+    )
+
+    try:
+        cfg = _load_config()
+    except Exception as e:  # a broken config shouldn't hide the taxonomy
+        cfg = None
+        click.echo(click.style(f"  (config not resolved, showing the static taxonomy: {e})", fg="yellow"))
 
     declared = sorted(TOOLSETS.keys())
     shown = 0
+    any_off = False
     for ts in declared:
         if toolset_filter and ts != toolset_filter:
             continue
         is_impl = ts in IMPLEMENTED_TOOLSETS
         if implemented_only and not is_impl:
             continue
-        mark = "●" if is_impl else "○"
+        off = config_off_reason(ts, cfg) if (is_impl and cfg is not None) else None
+        any_off = any_off or bool(off)
+        mark = ("✗" if off else "●") if is_impl else "○"
         # An implemented toolset lists the names the model is given, which for
         # deepagents' tools differ from the Hermes names in TOOLSETS (gh #205).
         names = bound_tools_for(ts) if is_impl else TOOLSETS[ts]
-        header_color = "cyan" if is_impl else "bright_black"
-        suffix = "" if is_impl else "  (declared, not bound into the agent)"
+        header_color = "cyan" if (is_impl and not off) else "bright_black"
+        if not is_impl:
+            suffix = "  (declared, not bound into the agent)"
+        elif off:
+            suffix = f"  ({off}; not given to the model)"
+        else:
+            suffix = ""
         click.echo(
             click.style(f"  {mark} {ts:<20}", fg=header_color) + click.style(f" {len(names)} tool(s){suffix}", fg="bright_black")
         )
@@ -1995,6 +2029,8 @@ def tools(toolset_filter: str | None, implemented_only: bool) -> None:
         return
     click.echo("")
     click.echo(click.style(f"  ● implemented  ({len(IMPLEMENTED_TOOLSETS)} of {len(TOOLSETS)})", fg="cyan"))
+    if any_off:
+        click.echo(click.style("  ✗ implemented but turned off by your config", fg="bright_black"))
     click.echo(click.style("  ○ declared but stubbed", fg="bright_black"))
 
 
