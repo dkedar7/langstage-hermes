@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from click.testing import CliRunner
@@ -89,7 +89,7 @@ def test_slash_tools_uses_session_config(capsys: pytest.CaptureFixture[str], ws:
 
 
 class _Rec(GenericFakeChatModel):
-    seen: list[str] = []
+    seen: ClassVar[list[str]] = []
 
     def bind_tools(self, tools: Any, **kw: Any) -> Any:
         type(self).seen = sorted(t.name for t in tools)
