@@ -1831,7 +1831,13 @@ def memory_notes(query: tuple[str, ...], limit: int, as_json: bool) -> None:
 @click.option("--user", "only_user", is_flag=True, help="Show only USER.md (what the agent has learned about you).")
 @click.option("--session", "only_session", is_flag=True, help="Show only MEMORY.md (the current session snapshot).")
 @click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
-def memory_show(only_user: bool, only_session: bool, as_json: bool) -> None:
+@click.option(
+    "--history",
+    is_flag=True,
+    help="Show what changed instead of the current text (same as `audit log --memory`).",
+)
+@click.pass_context
+def memory_show(ctx: click.Context, only_user: bool, only_session: bool, as_json: bool, history: bool) -> None:
     """Print the frozen-snapshot memory (MEMORY.md + USER.md) — keyless, offline, no model.
 
     The frozen-snapshot memory is the README's *first* headline bullet, yet its only
@@ -1848,6 +1854,7 @@ def memory_show(only_user: bool, only_session: bool, as_json: bool) -> None:
       langstage-hermes memory show --user          # just USER.md
       langstage-hermes memory show --session       # just MEMORY.md
       langstage-hermes memory show --json          # {"user": {...}, "memory": {...}}
+      langstage-hermes memory show --history       # what changed, and when (audit log --memory)
 
     A missing/empty layer prints a clear one-line message, never a traceback — the
     same graceful-empty contract as `memory notes`. `--json` emits stable keys
@@ -1856,6 +1863,15 @@ def memory_show(only_user: bool, only_session: bool, as_json: bool) -> None:
     import json as _json
 
     from langstage_hermes.config import HermesConfig, hermes_home
+
+    if history:
+        # A thin alias for the audit log, so "what changed?" sits next to
+        # "what is there?" (gh #222).
+        layer = None
+        if only_user != only_session:
+            layer = "memory:user" if only_user else "memory:memory"
+        ctx.invoke(audit_log_cmd, skill_name=layer, memory_only=True, as_json=as_json, limit=20, full=False)
+        return
 
     try:
         cfg = HermesConfig.resolve()
@@ -2521,11 +2537,12 @@ def skills_validate(path: Path, as_json: bool) -> None:
 
 @cli.group()
 def audit() -> None:
-    """Inspect / roll back the skill mutation log.
+    """Inspect / roll back the skill and memory mutation log.
 
-    Every ``skill_manage`` action the agent runs and every CLI skill
-    mutation appends a row to ``<HERMES_HOME>/state.db``. Use this group
-    to see what changed and to revert.
+    Every ``skill_manage`` action the agent runs, every CLI skill mutation,
+    and every change the agent makes to USER.md / MEMORY.md appends a row to
+    ``<HERMES_HOME>/state.db``. Use this group to see what changed and to
+    revert. Memory rows are named ``memory:user`` and ``memory:memory``.
     """
 
 
@@ -2536,9 +2553,19 @@ def _format_mutation_row(row: Any, *, full: bool = False) -> str:
     ts = datetime.fromtimestamp(row.timestamp).strftime("%Y-%m-%d %H:%M:%S")
     source = row.source or "?"
     head = f"#{row.id}  {ts}  {row.action:<10s}  {row.skill_name}  ({source})"
-    if not full:
-        return head
     lines = [head]
+    if getattr(row, "kind", "skill") == "memory":
+        # A memory row is only useful with the text that changed: one clipped
+        # line per entry here, the whole layer in `audit show` (gh #222).
+        from langstage_hermes.memory.audit import _short, describe_change
+
+        removed, added = describe_change(row)
+        lines.extend(f"    - {_short(e)}" for e in removed)
+        lines.extend(f"    + {_short(e)}" for e in added)
+        if row.session_id and not full:
+            lines.append(f"    session: {row.session_id}")
+    if not full:
+        return "\n".join(lines)
     if row.skill_path:
         lines.append(f"    path: {row.skill_path}")
     if row.session_id:
@@ -2553,14 +2580,52 @@ def _format_mutation_row(row: Any, *, full: bool = False) -> str:
 
 
 @audit.command("log")
-@click.option("--skill", "skill_name", default=None, help="Restrict to one skill.")
+@click.option(
+    "--skill",
+    "skill_name",
+    default=None,
+    help="Restrict to one skill, or one memory layer (memory:user / memory:memory).",
+)
+@click.option("--memory", "memory_only", is_flag=True, help="Only memory changes (USER.md / MEMORY.md).")
+@click.option("--skills", "skills_only", is_flag=True, help="Only skill changes.")
 @click.option("--limit", type=int, default=20, show_default=True, help="Max rows to show.")
 @click.option("--full", is_flag=True, help="Show full row details (path, hashes, session).")
 @click.option("--json", "as_json", is_flag=True, help="Emit structured JSON for scripting / CI.")
-def audit_log_cmd(skill_name: str | None, limit: int, full: bool, as_json: bool) -> None:
-    """Print recent skill mutations, most recent first."""
+def audit_log_cmd(
+    skill_name: str | None,
+    limit: int,
+    full: bool,
+    as_json: bool,
+    memory_only: bool = False,
+    skills_only: bool = False,
+) -> None:
+    """Print recent skill and memory mutations, most recent first.
+
+    A memory row shows the entry that was taken out (``-``) and the entry that
+    was written (``+``), and the session that did it (``search`` prints the
+    session id next to each hit). Undo one with
+    ``audit rollback memory:user <MUTATION_ID>``.
+    """
+    if memory_only and skills_only:
+        raise click.UsageError("--memory and --skills are mutually exclusive.")
+    kind = "memory" if memory_only else "skill" if skills_only else None
     log = _audit_log()
-    rows = log.list(skill_name=skill_name, limit=limit)
+    rows = log.list(skill_name=skill_name, limit=limit, kind=kind)
+    # An edit made in an editor bypasses the log; say so when a layer on disk no
+    # longer matches its newest recorded change (gh #222).
+    drift: list[tuple[str, Any]] = []
+    if not skills_only:
+        from langstage_hermes.memory.audit import audit_name, disk_drift
+
+        for target in ("user", "memory"):
+            if skill_name is not None and skill_name != audit_name(target):
+                continue
+            try:
+                latest = disk_drift(log, target)
+            except Exception:  # never fail the listing over the drift check
+                latest = None
+            if latest is not None:
+                drift.append((target, latest))
     if as_json:
         # Structured mutation log for CI — diff skill state across runs (gh #90).
         # One object on stdout, exit 0, mirroring `search --json`. Honors --skill /
@@ -2582,21 +2647,37 @@ def audit_log_cmd(skill_name: str | None, limit: int, full: bool, as_json: bool)
                     "skill_path": r.skill_path,
                     "before_hash": r.before_hash,
                     "after_hash": r.after_hash,
+                    # Memory rows carry two more keys; a skill row's keys are
+                    # unchanged. Entry text stays out, as SKILL.md does (gh #222).
+                    **({"kind": "memory", "target": r.memory_target} if r.kind == "memory" else {}),
                 }
                 for r in rows
             ],
             "count": len(rows),
         }
+        if drift:
+            payload["memory_drift"] = [{"target": t, "last_mutation_id": latest.id} for t, latest in drift]
         click.echo(_json.dumps(payload, default=str))
         return
     if not rows:
         if skill_name:
             click.echo(f"No mutations recorded for {skill_name!r}.")
+        elif memory_only:
+            click.echo("No memory mutations recorded yet.")
         else:
             click.echo("No skill mutations recorded yet.")
-        return
     for r in rows:
         click.echo(_format_mutation_row(r, full=full))
+    for target, latest in drift:
+        fname = "USER.md" if target == "user" else "MEMORY.md"
+        click.echo(
+            click.style(
+                f"note: {fname} on disk differs from its last recorded change (#{latest.id}); it was edited "
+                f"outside the agent. See `langstage-hermes audit diff memory:{target} {latest.id}`.",
+                fg="yellow",
+            ),
+            err=True,
+        )
 
 
 @audit.command("show")
@@ -2635,12 +2716,20 @@ def audit_show_cmd(mutation_id: int, show_diff: bool) -> None:
 @click.argument("skill_name")
 @click.argument("mutation_id", type=int)
 def audit_diff_cmd(skill_name: str, mutation_id: int) -> None:
-    """Diff the SKILL.md on disk against the recorded ``after_content`` of MUTATION_ID."""
+    """Diff the SKILL.md on disk against the recorded ``after_content`` of MUTATION_ID.
+
+    SKILL_NAME may be a memory layer (``memory:user`` / ``memory:memory``): the
+    diff then shows what changed in USER.md / MEMORY.md since that mutation.
+    """
+    from langstage_hermes.memory import audit as memory_audit
     from langstage_hermes.skills.audit import RollbackError
 
     log = _audit_log()
     try:
-        diff_text = log.diff_against_disk(skill_name, mutation_id)
+        if memory_audit.is_memory_name(skill_name):
+            diff_text = memory_audit.diff_against_disk(log, skill_name, mutation_id)
+        else:
+            diff_text = log.diff_against_disk(skill_name, mutation_id)
     except RollbackError as exc:
         click.echo(click.style(str(exc), fg="red"))
         sys.exit(1)
@@ -2648,6 +2737,49 @@ def audit_diff_cmd(skill_name: str, mutation_id: int) -> None:
         click.echo(f"No drift — disk matches mutation #{mutation_id}.")
         return
     click.echo(diff_text)
+
+
+def _audit_rollback_memory(log: Any, name: str, mutation_id: int, yes: bool) -> None:
+    """``audit rollback memory:<target> <id>``: undo one memory change (gh #222)."""
+    from langstage_hermes.memory import audit as memory_audit
+    from langstage_hermes.skills.audit import RollbackError
+
+    try:
+        plan = memory_audit.preview_revert(log, name, mutation_id)
+    except RollbackError as exc:
+        click.echo(click.style(str(exc), fg="red"))
+        sys.exit(1)
+
+    def _show(plan: Any) -> None:
+        for e in plan.taken_out:
+            click.echo(f"    - {e}")
+        for e in plan.put_back:
+            click.echo(f"    + {e}")
+        for e in plan.already_present:
+            click.echo(click.style(f"    = already there: {e}", fg="bright_black"))
+
+    fname = memory_audit.filename_for(plan.target)
+    if not yes:
+        click.echo(_format_mutation_row(log.get(mutation_id), full=True))
+        click.echo(click.style(f"\nThis will change {plan.path}:", fg="yellow"))
+        _show(plan)
+        click.echo("Every other entry stays as it is.")
+        if not click.confirm("Proceed?", default=False):
+            click.echo("Cancelled.")
+            return
+    try:
+        plan, new_id = memory_audit.rollback_memory(log, name, mutation_id, source="cli")
+    except RollbackError as exc:
+        click.echo(click.style(str(exc), fg="red"))
+        sys.exit(1)
+    click.echo(click.style(f"✓ undid mutation #{mutation_id} in {fname} ({plan.path})", fg="green"))
+    if yes:
+        _show(plan)
+    if new_id is not None:
+        click.echo(f"  recorded as #{new_id}; `langstage-hermes audit rollback {name} {new_id}` undoes this rollback.")
+    else:
+        click.echo(click.style("  note: the rollback itself could not be recorded in the audit log.", fg="yellow"))
+    click.echo("  It reaches the agent's prompt from the next session on.")
 
 
 @audit.command("rollback")
@@ -2660,10 +2792,20 @@ def audit_rollback_cmd(skill_name: str, mutation_id: int, yes: bool) -> None:
     The rollback itself is logged as a new mutation (action=``rollback``),
     so the audit history remains complete. Get the MUTATION_ID from
     ``hermes audit log``.
+
+    For a memory layer (``memory:user`` / ``memory:memory``) the rollback undoes
+    that one change and leaves every other entry alone: the entry the mutation
+    removed or replaced comes back, and the entry it wrote goes. If that entry
+    has been changed since, or the result would not fit the layer's char limit,
+    nothing is changed and the reason is printed. Keyless and offline.
     """
+    from langstage_hermes.memory import audit as memory_audit
     from langstage_hermes.skills.audit import RollbackError
 
     log = _audit_log()
+    if memory_audit.is_memory_name(skill_name):
+        _audit_rollback_memory(log, skill_name, mutation_id, yes)
+        return
     target = log.get(mutation_id)
     if target is None:
         click.echo(click.style(f"mutation #{mutation_id} not found", fg="red"))

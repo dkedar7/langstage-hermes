@@ -2,6 +2,37 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.4] - 2026-11-16
+
+### Added
+- **Memory changes are in the audit log and can be undone (gh #222).** `USER.md` and
+  `MEMORY.md` go into every later session's prompt, and the agent rewrites them on its own.
+  A `replace` or `remove` used to overwrite the file in place: the earlier text was gone,
+  and nothing said when it changed or which conversation changed it. Every `add` / `replace`
+  / `remove` now appends a row to the audit log in `state.db`, under the name `memory:user`
+  or `memory:memory`, with the layer before and after, the source (`agent`, or `review` for
+  the review that runs after a turn), the run's `session_id` and the tool call id.
+  - `audit log` lists memory changes next to skill changes and shows the entry that was
+    taken out and the entry that was written. `--memory` shows only memory changes,
+    `--skills` only skill changes, and `memory show --history` is the same list.
+  - `audit rollback memory:user <id>` undoes one change, keyless and offline. It reverts
+    only what that change did and keeps every other entry, including ones added later. If
+    the entry has been changed again since, or the result would exceed the layer's char
+    limit, it changes nothing and says why. The rollback is recorded, so it can be undone.
+  - `audit log` notes when `USER.md` / `MEMORY.md` was edited outside the agent, and
+    `audit diff memory:user <id>` shows the difference.
+  - `audit log --json`: memory rows carry two extra keys, `kind` and `target`; skill rows
+    and the empty output are unchanged. Entry text is never in the listing.
+  - Memory rows share the existing table, so an existing `state.db` needs no migration.
+    Recording never fails a memory write: if the row can't be written, the tool's reply
+    says so in `audit_note`. The frozen prompt snapshot is not touched.
+  - The before and after text is stored in `state.db`, next to your recorded conversations.
+    Removing an entry from memory does not remove it from the log.
+
+### Changed
+- A `memory` `replace` whose new text equals the current entry no longer rewrites the file;
+  it reports that the entry already says that.
+
 ## [0.5.3] - 2026-11-13
 
 ### Fixed

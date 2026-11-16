@@ -196,6 +196,32 @@ langstage-hermes memory show --json          # {"user": {...}, "memory": {...}} 
 
 Each layer prints its char count against the configured char budget (`memory_char_limit` = 2200, `memory_user_char_limit` = 1375) so you can see when a snapshot is near or over budget. Nothing is truncated: an over-budget layer (e.g. a hand-edited `USER.md`) is still injected in full every turn, and the agent's `memory` tool rejects new entries for it until it is trimmed back under budget. A missing/empty layer prints a clear one-line message, never a traceback (`memory dump` is an alias for `memory show`).
 
+## See and undo memory changes
+
+The agent edits `USER.md` and `MEMORY.md` on its own: the `memory` tool's `add` / `replace` / `remove`, called by the agent or by the review that runs after a turn. Every one of those changes is recorded in the audit log, next to skill changes, with the text it replaced, when it happened, who made it (`agent` or `review`) and in which session. All of it is **keyless and offline**:
+
+```bash
+langstage-hermes audit log --memory                  # memory changes only (--skills for skills only)
+langstage-hermes memory show --history               # the same list
+langstage-hermes audit show 12                       # the whole layer before and after change #12
+langstage-hermes audit rollback memory:user 12       # undo change #12 in USER.md (memory:memory for MEMORY.md)
+```
+
+```text
+#12  2026-11-16 09:14:02  replace     memory:user  (review)
+    - Prod DB failover: page the on-call DBA; never run migrations on Fridays.
+    + Prefers concise answers.
+    session: chat-7
+```
+
+The `session` line is the conversation that caused the change. `langstage-hermes search "failover"` prints each hit with its session id and message id, and `langstage-hermes search --session chat-7 --around <msg_id>` scrolls that conversation.
+
+**What a rollback does.** A memory layer is a list of separate entries, so a rollback undoes that one change and leaves every other entry alone: the entry the change removed or replaced comes back, and the entry it wrote goes. Entries added later are kept. If the entry it would revert has been changed again since (by a later change, or by hand), the rollback changes nothing and names the change to undo first. It also refuses a restore that would put the layer over its char limit. The rollback is itself recorded, so it can be undone the same way, and it reaches the agent's prompt from the next session on.
+
+**Hand edits.** An edit you make in an editor is not recorded. `audit log` prints a note when a layer on disk no longer matches its last recorded change, and `audit diff memory:user <id>` shows the difference.
+
+**Where the text lives.** The before and after text of each change is stored in `<HERMES_HOME>/state.db`, the same file that holds your recorded conversations. Removing an entry from memory does not remove it from that log. `audit log --json` lists memory rows with two extra keys (`kind`, `target`) and never includes the text; skill rows are unchanged.
+
 ## Load into an existing host
 
 Any LangStage host can run this agent:
@@ -310,7 +336,7 @@ See [SPEC.md](./SPEC.md) for the full 21-section requirements doc. Top-level lay
 | Skill library + agentskills.io validator | ✅ working |
 | Skill loader (system-prompt injection + progressive disclosure) | ✅ working |
 | `skill_view` / `skill_manage` / `skills_list` tools | ✅ working |
-| Frozen-snapshot memory (MEMORY.md / USER.md) | ✅ working — verified live (702 bytes written autonomously); also a keyless `langstage-hermes memory show` CLI (`--user` / `--session` / `--json`) |
+| Frozen-snapshot memory (MEMORY.md / USER.md) | ✅ working — verified live (702 bytes written autonomously); also a keyless `langstage-hermes memory show` CLI (`--user` / `--session` / `--json`); every change the agent makes is in `audit log` and can be undone with `audit rollback memory:user <id>` |
 | SQLite FTS5 store + `session_search` (3 modes) | ✅ working — also a keyless `langstage-hermes search` CLI (DISCOVERY / SCROLL / BROWSE, `--json`) |
 | `MarkdownProvider` (bundled, opt-in via `memory.provider="markdown"`; the default is no-op) | ✅ keyword search over `<HERMES_HOME>/memories/notes/*.md` — zero deps; also a keyless `langstage-hermes memory notes` CLI (`--json`) |
 | Iteration budget middleware | ✅ working |

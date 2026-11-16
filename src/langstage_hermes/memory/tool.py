@@ -45,6 +45,16 @@ memory(
 - ``read``: return the **live** disk contents (not the snapshot) so the user
   can see what's actually there, including anything the snapshot blocked.
 
+Audit log
+---------
+
+Every ``add`` / ``replace`` / ``remove`` that changes the file appends a row to
+the audit log in ``<HERMES_HOME>/state.db`` (see ``memory/audit.py``): the layer
+before and after, the source (``agent``, or ``review`` for the reflection fork)
+and the run's ``session_id``. ``langstage-hermes audit log`` lists them and
+``audit rollback memory:<target> <id>`` undoes one. Recording is best-effort and
+never fails the write; it does not touch the snapshot.
+
 Char limits (defaults match SPEC §2): ``memory_char_limit=2200`` for MEMORY.md,
 ``user_char_limit=1375`` for USER.md. Limits apply to the joined byte length
 of all entries — exceeding them returns a helpful error instead of silently
@@ -63,8 +73,10 @@ from typing import Annotated, Any, Literal, NotRequired
 from langchain.agents.middleware import AgentMiddleware, AgentState
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
+from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
+from langstage_hermes.memory import audit as memory_audit
 from langstage_hermes.memory import threat_patterns
 
 logger = logging.getLogger(__name__)
@@ -188,6 +200,43 @@ def _char_count(entries: list[str]) -> int:
     return len(ENTRY_DELIMITER.join(entries))
 
 
+def _state_session_id(state: Any) -> str | None:
+    """The run's ``session_id`` from injected graph state, if it has one."""
+    if state is None:
+        return None
+    sid = state.get("session_id") if isinstance(state, dict) else getattr(state, "session_id", None)
+    return sid if isinstance(sid, str) and sid else None
+
+
+def _write_and_record(
+    path: Path,
+    entries: list[str],
+    *,
+    target: Target,
+    action: str,
+    session_id: str | None,
+    tool_call_id: str | None,
+) -> str | None:
+    """Write *entries* to *path* and append the change to the audit log (gh #222).
+
+    Returns a note when the write succeeded but the audit row could not be
+    written, else ``None``. The audit log never fails the write.
+    """
+    before = memory_audit.read_bytes(path)
+    _write_entries_atomic(path, entries)
+    _id, note = memory_audit.record_memory_mutation(
+        target=target,
+        action=action,
+        path=path,
+        before=before,
+        after=memory_audit.read_bytes(path),
+        source="agent",
+        session_id=session_id,
+        tool_call_id=tool_call_id,
+    )
+    return note
+
+
 # ── Snapshot rendering ───────────────────────────────────────────────
 
 
@@ -273,21 +322,22 @@ def _make_memory_tool(*, memory_char_limit: int, user_char_limit: int):
     def _limit_for(target: Target) -> int:
         return user_char_limit if target == "user" else memory_char_limit
 
-    def _format_response(target: Target, entries: list[str], message: str) -> str:
+    def _format_response(target: Target, entries: list[str], message: str, audit_note: str | None = None) -> str:
         current = _char_count(entries)
         limit = _limit_for(target)
         pct = min(100, int((current / limit) * 100)) if limit > 0 else 0
-        return json.dumps(
-            {
-                "success": True,
-                "target": target,
-                "message": message,
-                "entries": entries,
-                "entry_count": len(entries),
-                "usage": f"{pct}% — {current:,}/{limit:,} chars",
-            },
-            ensure_ascii=False,
-        )
+        body: dict[str, Any] = {
+            "success": True,
+            "target": target,
+            "message": message,
+            "entries": entries,
+            "entry_count": len(entries),
+            "usage": f"{pct}% — {current:,}/{limit:,} chars",
+        }
+        if audit_note:
+            # The write is on disk; only its audit row is missing (gh #222).
+            body["audit_note"] = audit_note
+        return json.dumps(body, ensure_ascii=False)
 
     def _format_error(message: str, **extra: Any) -> str:
         return json.dumps({"success": False, "error": message, **extra}, ensure_ascii=False)
@@ -319,8 +369,24 @@ def _make_memory_tool(*, memory_char_limit: int, user_char_limit: int):
         entry: str = "",
         index: int | None = None,
         tool_call_id: Annotated[str, InjectedToolCallId] = "",
+        state: Annotated[Any, InjectedState] = None,
     ) -> Command:
         """Single entry-point for memory mutations + reads."""
+        # The run's own session, so the audit row leads back to the conversation
+        # that caused the change. A review fork has none in its state; its parent
+        # sets one through ``memory_mutation_context``.
+        session_id = _state_session_id(state)
+
+        def _commit(new_entries: list[str], audit_action: str) -> str | None:
+            return _write_and_record(
+                path,
+                new_entries,
+                target=target,
+                action=audit_action,
+                session_id=session_id,
+                tool_call_id=tool_call_id or None,
+            )
+
         # Validate target up front — anything else is a programming bug,
         # not a recoverable user error.
         if target not in ("memory", "user"):
@@ -366,8 +432,8 @@ def _make_memory_tool(*, memory_char_limit: int, user_char_limit: int):
                             usage=f"{_char_count(entries):,}/{limit:,}",
                         )
                     else:
-                        _write_entries_atomic(path, new_entries)
-                        payload = _format_response(target, new_entries, "Entry added.")
+                        note = _commit(new_entries, "add")
+                        payload = _format_response(target, new_entries, "Entry added.", note)
 
         elif action == "replace":
             clean = (entry or "").strip()
@@ -393,9 +459,11 @@ def _make_memory_tool(*, memory_char_limit: int, user_char_limit: int):
                             f"Replacement would put memory at {new_total:,}/{limit:,} "
                             f"chars. Shorten the new content or remove other entries first."
                         )
+                    elif test_entries == entries:
+                        payload = _format_response(target, entries, f"Entry at index {index} already says that.")
                     else:
-                        _write_entries_atomic(path, test_entries)
-                        payload = _format_response(target, test_entries, f"Entry at index {index} replaced.")
+                        note = _commit(test_entries, "replace")
+                        payload = _format_response(target, test_entries, f"Entry at index {index} replaced.", note)
 
         elif action == "remove":
             if index is None:
@@ -408,13 +476,14 @@ def _make_memory_tool(*, memory_char_limit: int, user_char_limit: int):
             else:
                 new_entries = list(entries)
                 removed = new_entries.pop(index)
-                _write_entries_atomic(path, new_entries)
+                note = _commit(new_entries, "remove")
                 payload = _format_response(
                     target,
                     new_entries,
                     f"Removed entry at index {index}: {removed[:60]}…"
                     if len(removed) > 60
                     else f"Removed entry at index {index}: {removed}",
+                    note,
                 )
 
         else:
