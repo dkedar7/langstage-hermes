@@ -416,11 +416,18 @@ class ReflectionMiddleware(AgentMiddleware):
         its own in state, so without this its audit rows carried the id the
         library was built with, a session state.db never recorded.
         """
+        from langstage_hermes.memory.audit import memory_mutation_context
+
         sid = self._get(state, "session_id")
+        sid = sid if isinstance(sid, str) and sid else None
+        stack = contextlib.ExitStack()
+        # The review's memory writes are the ones nobody asked for: label them
+        # ``review`` in the audit log, under the run's session (gh #222).
+        stack.enter_context(memory_mutation_context(source="review", session_id=sid))
         scope = getattr(self.library, "mutation_session", None)
-        if callable(scope) and isinstance(sid, str) and sid:
-            return scope(sid)
-        return contextlib.nullcontext()
+        if callable(scope) and sid:
+            stack.enter_context(scope(sid))
+        return stack
 
     @staticmethod
     def _messages(state: Any) -> list[Any]:

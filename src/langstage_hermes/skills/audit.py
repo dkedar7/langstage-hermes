@@ -1,4 +1,4 @@
-"""Skill mutation log + rollback.
+"""Skill mutation log + rollback (memory mutations share the table, see ``memory/audit.py``).
 
 The agent and the CLI both mutate skills (``skill_manage`` tool actions,
 ``skills install`` / ``audit rollback`` commands). Without a log, a
@@ -42,7 +42,14 @@ logger = logging.getLogger(__name__)
 __all__ = ["MutationRow", "RollbackError", "SkillAuditLog", "render_unified_diff"]
 
 
-VALID_ACTIONS: frozenset[str] = frozenset({"create", "patch", "write_file", "delete", "pin", "unpin", "rollback"})
+# ``add`` / ``replace`` / ``remove`` are memory mutations (gh #222). They share
+# this table under the names ``memory:user`` / ``memory:memory``; a skill name
+# can't contain a colon, so the two never collide. See ``memory/audit.py``.
+VALID_ACTIONS: frozenset[str] = frozenset(
+    {"create", "patch", "write_file", "delete", "pin", "unpin", "rollback", "add", "replace", "remove"}
+)
+
+_MEMORY_PREFIX = "memory:"
 
 
 _NO_NEWLINE_MARKER = "\\ No newline at end of file\n"
@@ -142,6 +149,16 @@ class MutationRow:
     after_hash: str | None
     before_content: bytes | None
     after_content: bytes | None
+
+    @property
+    def kind(self) -> str:
+        """``"memory"`` for a ``memory:user`` / ``memory:memory`` row, else ``"skill"``."""
+        return "memory" if self.skill_name.startswith(_MEMORY_PREFIX) else "skill"
+
+    @property
+    def memory_target(self) -> str | None:
+        """``"user"`` / ``"memory"`` for a memory row, ``None`` for a skill row."""
+        return self.skill_name[len(_MEMORY_PREFIX) :] if self.kind == "memory" else None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row | tuple) -> MutationRow:
@@ -315,12 +332,14 @@ class SkillAuditLog:
         skill_name: str | None = None,
         limit: int = 50,
         since: float | None = None,
+        kind: str | None = None,
     ) -> list[MutationRow]:
         """Most-recent-first list of mutations.
 
-        Filter by ``skill_name`` to scope to one skill. ``since`` is a
-        unix timestamp; only rows with ``timestamp >= since`` are
-        returned.
+        Filter by ``skill_name`` to scope to one skill (or one memory layer,
+        ``memory:user`` / ``memory:memory``). ``since`` is a unix timestamp;
+        only rows with ``timestamp >= since`` are returned. ``kind`` narrows
+        to ``"memory"`` or ``"skill"`` rows; ``None`` returns both.
         """
         sql = "SELECT * FROM skill_mutations"
         clauses: list[str] = []
@@ -328,6 +347,14 @@ class SkillAuditLog:
         if skill_name is not None:
             clauses.append("skill_name = ?")
             params.append(skill_name)
+        if kind == "memory":
+            clauses.append("substr(skill_name, 1, ?) = ?")
+            params.extend([len(_MEMORY_PREFIX), _MEMORY_PREFIX])
+        elif kind == "skill":
+            clauses.append("substr(skill_name, 1, ?) != ?")
+            params.extend([len(_MEMORY_PREFIX), _MEMORY_PREFIX])
+        elif kind is not None:
+            raise ValueError(f"unknown kind {kind!r}; use 'memory' or 'skill'")
         if since is not None:
             clauses.append("timestamp >= ?")
             params.append(since)
@@ -405,6 +432,13 @@ class SkillAuditLog:
                 (i.e. it was a ``create`` — there's no pre-state to
                 restore to; use ``delete`` instead).
         """
+        if skill_name.startswith(_MEMORY_PREFIX):
+            # A memory layer is a list of entries, not one document: undo only
+            # what the mutation changed instead of rewriting the file (gh #222).
+            from langstage_hermes.memory.audit import rollback_memory
+
+            plan, _new_id = rollback_memory(self, skill_name, mutation_id, source=source, session_id=session_id)
+            return plan.path
         target = self.get(mutation_id)
         if target is None:
             raise RollbackError(f"mutation #{mutation_id} not found")
