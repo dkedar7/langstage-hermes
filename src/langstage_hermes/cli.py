@@ -2562,8 +2562,10 @@ def _format_mutation_row(row: Any, *, full: bool = False) -> str:
         removed, added = describe_change(row)
         lines.extend(f"    - {_short(e)}" for e in removed)
         lines.extend(f"    + {_short(e)}" for e in added)
-        if row.session_id and not full:
-            lines.append(f"    session: {row.session_id}")
+    # Which conversation made the change, for skills as for memory (gh #224);
+    # `--full` prints it below with the rest of the row.
+    if row.session_id and not full:
+        lines.append(f"    session: {row.session_id}")
     if not full:
         return "\n".join(lines)
     if row.skill_path:
@@ -2601,9 +2603,11 @@ def audit_log_cmd(
 ) -> None:
     """Print recent skill and memory mutations, most recent first.
 
-    A memory row shows the entry that was taken out (``-``) and the entry that
-    was written (``+``), and the session that did it (``search`` prints the
-    session id next to each hit). Undo one with
+    Each row names who made the change, ``agent``, ``review`` (the review that
+    runs after a turn, which writes skills and memory on its own) or ``cli``, and
+    the session it happened in (``search`` prints the session id next to each
+    hit). A memory row also shows the entry that was taken out (``-``) and the
+    entry that was written (``+``). Undo one with
     ``audit rollback memory:user <MUTATION_ID>``.
     """
     if memory_only and skills_only:

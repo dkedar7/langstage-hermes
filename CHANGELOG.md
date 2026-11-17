@@ -2,6 +2,23 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.5] - 2026-11-17
+
+### Fixed
+- **A skill the review writes is labelled `review` in the audit log (gh #224).** The
+  review that runs after a turn can create or patch a skill on its own. `audit log`
+  recorded those as `agent`, the same label as a skill the agent saved because you asked,
+  while the same review's memory changes said `review`. Skill changes the review makes are
+  now recorded as `review`. A skill the agent saves during a turn is still `agent`, also
+  when a review is running at the same moment in another conversation, and a change made
+  from the CLI is still `cli`.
+- **`audit log` prints the `session:` line for skill rows too.** It was printed for memory
+  rows only, so finding the conversation behind a skill change took `audit log --full` or
+  `--json`. A row with no session prints no line.
+- Rows already in `state.db` are not rewritten, so skills an earlier version's review wrote
+  keep the `agent` label. `audit log --json` is unchanged apart from the new `source` value
+  on new rows.
+
 ## [0.5.4] - 2026-11-16
 
 ### Added
