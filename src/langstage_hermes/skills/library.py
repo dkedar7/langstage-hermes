@@ -44,6 +44,13 @@ from langstage_hermes.skills.validator import (
 # library's own ``set_mutation_context`` default applies.
 _SESSION_OVERRIDE: ContextVar[str | None] = ContextVar("hermes_skill_mutation_session", default=None)
 
+# Per-call source label for the audit row (gh #224), scoped the same way and for
+# the same reason. Set by ``SkillLibrary.mutation_source`` around the reflection
+# review, whose ``skill_manage`` calls are the ones nobody asked for. While set it
+# wins over ``set_mutation_context``; a turn the main agent runs concurrently, or
+# straight after, is in another context and keeps ``agent``.
+_SOURCE_OVERRIDE: ContextVar[str | None] = ContextVar("hermes_skill_mutation_source", default=None)
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["BundledSkillError", "Skill", "SkillLibrary", "SkillLoadError", "format_load_error", "is_pinned"]
@@ -455,6 +462,27 @@ class SkillLibrary:
         finally:
             _SESSION_OVERRIDE.reset(token)
 
+    @staticmethod
+    @contextmanager
+    def mutation_source(source: str | None) -> Iterator[None]:
+        """Label every mutation inside the block ``source`` in the audit log (gh #224).
+
+        For a caller that runs someone else's ``skill_manage`` calls, such as the
+        reflection review: the tool stamps ``agent`` on the shared library, and
+        this says who is really behind the call. ``None`` or ``""`` leaves the
+        current label in place. Scoped to the current context, like
+        :meth:`mutation_session`, so it can't leak into another run or outlive
+        the block.
+        """
+        if not source:
+            yield
+            return
+        token = _SOURCE_OVERRIDE.set(source)
+        try:
+            yield
+        finally:
+            _SOURCE_OVERRIDE.reset(token)
+
     def _record_mutation(
         self,
         *,
@@ -480,7 +508,7 @@ class SkillLibrary:
                 action=action,
                 before_content=before_content,
                 after_content=after_content,
-                source=self._mutation_source,
+                source=_SOURCE_OVERRIDE.get() or self._mutation_source,
                 session_id=_SESSION_OVERRIDE.get() or self._mutation_session_id,
                 tool_call_id=self._mutation_tool_call_id,
                 skill_path=skill_path,

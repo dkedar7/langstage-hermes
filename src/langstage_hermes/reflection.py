@@ -410,7 +410,7 @@ class ReflectionMiddleware(AgentMiddleware):
     # ── helpers ──────────────────────────────────────────────────
 
     def _review_session(self, state: Any) -> Any:
-        """Attribute the review's skill changes to the run's session (gh #218).
+        """Attribute the review's skill and memory changes to the review, under the run's session (gh #218, #224).
 
         The review fork shares the parent's library but has no ``session_id`` of
         its own in state, so without this its audit rows carried the id the
@@ -427,6 +427,12 @@ class ReflectionMiddleware(AgentMiddleware):
         scope = getattr(self.library, "mutation_session", None)
         if callable(scope) and sid:
             stack.enter_context(scope(sid))
+        # The same goes for its skill writes: ``skill_manage`` stamps ``agent``,
+        # which would file a skill the review wrote on its own next to the ones
+        # the user asked for (gh #224). Scoped to this review's context.
+        label = getattr(self.library, "mutation_source", None)
+        if callable(label):
+            stack.enter_context(label("review"))
         return stack
 
     @staticmethod

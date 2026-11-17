@@ -216,6 +216,8 @@ langstage-hermes audit rollback memory:user 12       # undo change #12 in USER.m
 
 The `session` line is the conversation that caused the change. `langstage-hermes search "failover"` prints each hit with its session id and message id, and `langstage-hermes search --session chat-7 --around <msg_id>` scrolls that conversation.
 
+Skill rows read the same way. A skill the review created or patched on its own is marked `(review)`, one the agent saved during a turn is `(agent)`, and both show the `session` line, so `audit log --skills` tells you which skills nobody asked for and which conversation each came from.
+
 **What a rollback does.** A memory layer is a list of separate entries, so a rollback undoes that one change and leaves every other entry alone: the entry the change removed or replaced comes back, and the entry it wrote goes. Entries added later are kept. If the entry it would revert has been changed again since (by a later change, or by hand), the rollback changes nothing and names the change to undo first. It also refuses a restore that would put the layer over its char limit. The rollback is itself recorded, so it can be undone the same way, and it reaches the agent's prompt from the next session on.
 
 **Hand edits.** An edit you make in an editor is not recorded. `audit log` prints a note when a layer on disk no longer matches its last recorded change, and `audit diff memory:user <id>` shows the difference.
