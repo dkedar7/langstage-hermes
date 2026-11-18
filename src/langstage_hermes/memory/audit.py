@@ -20,7 +20,11 @@ restoring the whole file to an old state would silently drop every entry added
 since. :func:`rollback_memory` therefore reverts only what the chosen mutation
 changed: it puts back the entry that mutation removed or replaced and takes out
 the entry it wrote, leaving every other entry alone. When nothing has changed
-since the mutation, that is exactly "the layer as it was before the mutation".
+since the mutation, that is exactly "the layer as it was before the mutation",
+order included. The undo works on positions, not texts (gh #226): a layer can
+hold the same text twice (0.5.4 and 0.5.5 let ``replace`` write a repeat, and a
+hand edit still can), and "the first entry that says this" is then the wrong
+one to take out.
 When the entry the mutation wrote is no longer on disk (a later mutation or a
 hand edit changed it), the rollback refuses and changes nothing rather than
 guess. It also refuses a restore that would put the layer over its char limit.
@@ -37,6 +41,7 @@ Nothing here touches the frozen snapshot in graph state.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -255,6 +260,43 @@ def _char_count(entries: list[str]) -> int:
     return len(ENTRY_DELIMITER.join(entries)) if entries else 0
 
 
+class _Locator:
+    """Where each entry of the recorded ``after`` layer sits in the layer on disk.
+
+    A memory layer may hold the same text more than once (0.5.4 and 0.5.5 let
+    ``replace`` write a repeat, and a hand edit still can), so "the entry the
+    mutation wrote" has to be a position, not a text (gh #226). The recorded
+    ``after`` is lined up with the current entries; an entry that kept its place
+    relative to its neighbours is found that way. One that did not (the file was
+    reordered by hand) is found by its text, but only among the current entries
+    nothing else lines up with, and only when exactly one of them says it.
+    """
+
+    def __init__(self, after: list[str], current: list[str]) -> None:
+        self.after = after
+        self.aligned: dict[int, int] = {}
+        for a, b, size in SequenceMatcher(a=after, b=current, autojunk=False).get_matching_blocks():
+            for k in range(size):
+                self.aligned[a + k] = b + k
+        lined_up = set(self.aligned.values())
+        # text -> current positions that no recorded entry lines up with.
+        self.loose: dict[str, list[int]] = {}
+        for pos, entry in enumerate(current):
+            if pos not in lined_up:
+                self.loose.setdefault(entry, []).append(pos)
+
+    def find(self, j: int, *, claim: bool = False) -> int | None:
+        """The current position of ``after[j]``; ``None`` if gone, ``-1`` if it can't be told apart."""
+        if j in self.aligned:
+            return self.aligned[j]
+        spots = self.loose.get(self.after[j], [])
+        if not spots:
+            return None
+        if len(spots) > 1:
+            return -1
+        return spots.pop() if claim else spots[0]
+
+
 def plan_revert(
     row: MutationRow,
     current: list[str],
@@ -264,10 +306,16 @@ def plan_revert(
 ) -> RevertPlan:
     """Work out the per-entry undo of *row* against the layer's *current* entries.
 
+    The undo is by position (gh #226): the recorded before/after give the edit
+    the mutation made, and each step is reversed where that entry sits now. With
+    nothing changed since, the result is the recorded ``before``, entry for entry
+    and in the same order, whether or not the layer repeats an entry.
+
     Raises:
-        RollbackError: the entry the mutation wrote is no longer on disk, there
-            is nothing left to undo, or the result would exceed *limit*. Nothing
-            is written in any of those cases.
+        RollbackError: the entry the mutation wrote is no longer on disk (or
+            can't be told from a copy of it), there is nothing left to undo, or
+            the result would exceed *limit*. Nothing is written in any of those
+            cases.
     """
     from langstage_hermes.skills.audit import RollbackError
 
@@ -278,54 +326,91 @@ def plan_revert(
     before = entries_of(row.before_content)
     after = entries_of(row.after_content)
     path = Path(row.skill_path) if row.skill_path else Path(fname)
-    plan = RevertPlan(target=target, mutation_id=row.id, path=path, current=list(current), result=list(current))
-    result = plan.result
+    current = list(current)
+    plan = RevertPlan(target=target, mutation_id=row.id, path=path, current=current, result=list(current))
 
-    for _tag, i1, i2, j1, j2 in _opcodes(before, after):
-        gone = before[i1:i2]  # what the mutation took out
-        came = after[j1:j2]  # what the mutation wrote
-        missing = [e for e in came if e not in result]
-        if missing:
-            # The newest later mutation that took this entry out is the one to undo first.
-            culprit = next((r for r in later or [] if missing[0] in describe_change(r)[0]), None)
-            if culprit is not None:
-                hint = (
-                    f" Mutation #{culprit.id} ({culprit.action}) changed it; undo that one first: "
-                    f"`langstage-hermes audit rollback {row.skill_name} {culprit.id}`."
+    script = SequenceMatcher(a=before, b=after, autojunk=False).get_opcodes()
+    changes = [op for op in script if op[0] != "equal"]
+    # before index -> after index, for the entries the mutation left alone.
+    kept = {i1 + k: j1 + k for tag, i1, i2, j1, _j2 in script if tag == "equal" for k in range(i2 - i1)}
+    where = _Locator(after, current)
+
+    # 1. Find every entry the mutation wrote. All of them must still be there.
+    taken: set[int] = set()  # current positions the rollback takes out
+    written: dict[int, int] = {}  # after index -> current position
+    for _tag, _i1, _i2, j1, j2 in changes:
+        for j in range(j1, j2):
+            pos = where.find(j, claim=True)
+            if pos is None:
+                # The newest later mutation that took this entry out is the one to undo first.
+                culprit = next((r for r in later or [] if after[j] in describe_change(r)[0]), None)
+                if culprit is not None:
+                    hint = (
+                        f" Mutation #{culprit.id} ({culprit.action}) changed it; undo that one first: "
+                        f"`langstage-hermes audit rollback {row.skill_name} {culprit.id}`."
+                    )
+                else:
+                    hint = f" No recorded change accounts for it, so {fname} was probably edited by hand."
+                raise RollbackError(
+                    f"mutation #{row.id} wrote the entry “{_short(after[j])}”, which is no longer in {fname}: "
+                    f"it has been changed since. Nothing was changed.{hint} "
+                    f"`langstage-hermes audit show {row.id}` prints the earlier text."
                 )
-            else:
-                hint = f" No recorded change accounts for it, so {fname} was probably edited by hand."
-            raise RollbackError(
-                f"mutation #{row.id} wrote the entry “{_short(missing[0])}”, which is no longer in {fname}: "
-                f"it has been changed since. Nothing was changed.{hint} "
-                f"`langstage-hermes audit show {row.id}` prints the earlier text."
-            )
-        if came:
-            pos = result.index(came[0])
-            for e in came:
-                result.remove(e)
-                plan.taken_out.append(e)
-            pos = min(pos, len(result))
+            if pos < 0:
+                raise RollbackError(
+                    f"mutation #{row.id} wrote the entry “{_short(after[j])}”, and {fname} now holds that entry more "
+                    f"than once, in a different order than the mutation left it, so it is not clear which copy to "
+                    f"take out. Nothing was changed. Remove the extra copy from {fname} first, then retry. "
+                    f"`langstage-hermes audit diff {row.skill_name} {row.id}` shows what changed since."
+                )
+            taken.add(pos)
+            written[j] = pos
+            plan.taken_out.append(after[j])
+
+    # 2. Put back what the mutation took out, where it was. ``inserts[p]`` goes
+    #    in just before current position ``p`` (``len(current)`` is the end).
+    have = Counter(current)
+    for pos in taken:
+        have[current[pos]] -= 1
+    had = Counter(before)
+    inserts: dict[int, list[str]] = {}
+    for _tag, i1, i2, j1, j2 in changes:
+        if j2 > j1:
+            # A replacement: the earlier text goes where the new text is.
+            anchor = written[j1]
         else:
-            # A pure removal: put the entry back after its nearest surviving
-            # earlier neighbour, else before its nearest later one, else at the end.
-            pos = len(result)
-            for neighbour in reversed(before[:i1]):
-                if neighbour in result:
-                    pos = result.index(neighbour) + 1
+            # A pure removal: after its nearest surviving earlier neighbour, else
+            # before its nearest later one, else at the end.
+            anchor = len(current)
+            for i in range(i1 - 1, -1, -1):
+                pos = where.find(kept[i]) if i in kept else None
+                if pos is not None and pos >= 0:
+                    anchor = pos + 1
                     break
             else:
-                for neighbour in before[i2:]:
-                    if neighbour in result:
-                        pos = result.index(neighbour)
+                for i in range(i2, len(before)):
+                    pos = where.find(kept[i]) if i in kept else None
+                    if pos is not None and pos >= 0:
+                        anchor = pos
                         break
-        for e in gone:
-            if e in result:
-                plan.already_present.append(e)
+        for entry in before[i1:i2]:
+            # Already back (a later change re-added it): the layer holds as many
+            # copies as it did before the mutation. Putting another in would
+            # leave it with a repeat it never had.
+            if have[entry] >= had[entry]:
+                plan.already_present.append(entry)
                 continue
-            result.insert(pos, e)
-            pos += 1
-            plan.put_back.append(e)
+            inserts.setdefault(anchor, []).append(entry)
+            have[entry] += 1
+            plan.put_back.append(entry)
+
+    result: list[str] = []
+    for pos, entry in enumerate(current):
+        result.extend(inserts.get(pos, ()))
+        if pos not in taken:
+            result.append(entry)
+    result.extend(inserts.get(len(current), ()))
+    plan.result = result
 
     if not plan.put_back and not plan.taken_out:
         raise RollbackError(

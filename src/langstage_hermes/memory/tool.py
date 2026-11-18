@@ -350,7 +350,8 @@ def _make_memory_tool(*, memory_char_limit: int, user_char_limit: int):
             "that will still matter later.\n\n"
             "Actions:\n"
             "  add     — append a new entry (rejects if char-limit would overflow).\n"
-            "  replace — overwrite the entry at `index` with `entry`.\n"
+            "  replace — overwrite the entry at `index` with `entry` (refused if another entry "
+            "already says exactly that; `remove` the one you no longer need instead).\n"
             "  remove  — drop the entry at `index`.\n"
             "  read    — return current on-disk entries (NOT the system-prompt snapshot, "
             "             which is frozen for the session).\n\n"
@@ -448,8 +449,22 @@ def _make_memory_tool(*, memory_char_limit: int, user_char_limit: int):
                 )
             else:
                 reason = threat_patterns.scan(clean, scope="memory")
+                # The test ``add`` uses (``clean in entries``), minus the entry being
+                # replaced: replacing an entry with its own text is the no-op below.
+                twin = None if entries[index] == clean else next((j for j, e in enumerate(entries) if e == clean), None)
                 if reason:
                     payload = _format_error(f"Rejected: replacement entry {reason}.")
+                elif twin is not None:
+                    # gh #226: ``add`` refuses a repeat, and ``replace`` used to write
+                    # one. Refuse rather than merge: a ``replace`` that quietly became
+                    # a removal would shift every later index under the caller, and
+                    # the entry at ``index`` should go only when the caller says so.
+                    payload = _format_error(
+                        f"Entry {twin} already says that, so replacing entry {index} with it would store the same "
+                        f"entry twice. Nothing was changed. To merge the two, drop this one instead: "
+                        f"memory(action='remove', target='{target}', index={index}).",
+                        entries=entries,
+                    )
                 else:
                     test_entries = list(entries)
                     test_entries[index] = clean

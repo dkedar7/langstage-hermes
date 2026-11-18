@@ -2,6 +2,29 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.6] - 2026-11-18
+
+### Fixed
+- **The `memory` tool's `replace` no longer stores an entry twice (gh #226).** `add` refuses
+  text the layer already holds, but `replace` did not check: replacing entry 1 with the text
+  of entry 0 left the same entry in `USER.md` / `MEMORY.md` twice, counted twice against the
+  char budget. `replace` now refuses that, changes nothing, and tells the model how to get
+  the merge it was after (`remove` the entry it no longer needs). It refuses rather than
+  turning the call into a removal, so no index shifts under the caller and an entry only
+  goes when a `remove` says so. Replacing an entry with its own text is still a no-op. The
+  review that runs after a turn writes through the same tool and gets the same answer.
+- **`audit rollback memory:<layer> <id>` restores the order, also when a layer repeats an
+  entry (gh #226).** The rollback found the entry to take out by its text and took the first
+  match. After a `replace` that had stored a repeat, undoing it took out the wrong copy and
+  the layer came back with the right entries in the wrong order. The rollback now works on
+  positions: with nothing changed since, it gives back the layer exactly as it was before
+  the change. This holds for rows recorded by 0.5.4 and 0.5.5 and for layers that already
+  repeat an entry (written by those versions, or by hand).
+- Undoing a `remove` on a layer that held the same entry twice puts the removed copy back.
+  It used to answer "nothing to undo" because another copy was still there.
+- When a layer holds the entry a change wrote more than once and has been reordered by hand,
+  so the copies can't be told apart, the rollback changes nothing and says so.
+
 ## [0.5.5] - 2026-11-17
 
 ### Fixed
