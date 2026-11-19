@@ -965,7 +965,13 @@ def _slash_toolsets(args: str, state: dict[str, Any]) -> bool:
     the conversation, so a disabled toolset's tools are really gone (gh #206). It
     lasts for this chat (``/reload`` keeps it) and is not written to the config.
     """
-    from langstage_hermes.tools.toolsets import IMPLEMENTED_TOOLSETS, TOOLSETS, resolve_enabled, unknown_toolsets
+    from langstage_hermes.tools.toolsets import (
+        IMPLEMENTED_TOOLSETS,
+        TOOLSETS,
+        config_off_reason,
+        resolve_enabled,
+        unknown_toolsets,
+    )
 
     parts = args.split()
     if parts:
@@ -1008,10 +1014,14 @@ def _slash_toolsets(args: str, state: dict[str, Any]) -> bool:
 
     disabled = set(cfg.agent_disabled_toolsets or [])
     enabled = resolve_enabled(disabled_toolsets=disabled, platform=os.getenv("HERMES_PLATFORM", "cli"))
+    # Both memory layers off leaves no memory tool (gh #228); say why.
+    memory_off = config_off_reason("memory", cfg)
 
     click.echo(click.style("Toolsets (this session):", fg="cyan"))
     for ts in sorted(IMPLEMENTED_TOOLSETS):
-        if ts in enabled:
+        if ts == "memory" and ts in enabled and memory_off:
+            click.echo(click.style(f"  ✗ {ts}  ({memory_off})", fg="bright_black"))
+        elif ts in enabled:
             click.echo(click.style(f"  ✓ {ts}", fg="green"))
         else:
             click.echo(click.style(f"  ✗ {ts}  (disabled)", fg="bright_black"))

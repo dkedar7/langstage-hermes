@@ -44,7 +44,7 @@ from langstage_hermes.memory.provider import (
     ensure_builtin_providers,
     get_provider,
 )
-from langstage_hermes.memory.tool import MemoryToolMiddleware
+from langstage_hermes.memory.tool import MemoryToolMiddleware, enabled_targets
 from langstage_hermes.model_override import ModelOverrideMiddleware
 from langstage_hermes.plugins.event_bus import PluginEventBus
 from langstage_hermes.prompts import PromptAssemblyMiddleware
@@ -170,6 +170,10 @@ def _enabled_toolsets(cfg: HermesConfig) -> set[str]:
     unknown = unknown_toolsets(cfg.agent_disabled_toolsets)
     if unknown:
         log.warning("agent.disabled_toolsets: unknown toolset(s) %s ignored (see `langstage-hermes tools`)", unknown)
+    # With both memory layers off there is nothing for the memory toolset to do:
+    # no tool, no guidance, no memory review (gh #228).
+    if not enabled_targets(cfg):
+        enabled.discard("memory")
     return enabled
 
 
@@ -341,10 +345,7 @@ def create_hermes_agent(
     # Wire the memory + skill_manage tools so the review fork can actually
     # write — without these, the subagent runs but has no way to act on its
     # conclusions, and the closed loop never closes.
-    _memory_mw_for_tools = MemoryToolMiddleware(
-        memory_char_limit=cfg.memory_char_limit,
-        user_char_limit=cfg.memory_user_char_limit,
-    )
+    _memory_mw_for_tools = MemoryToolMiddleware.from_config(cfg)
     # A disabled toolset is off for the review fork too, or it would write what the agent can't.
     review_tools = [t for t in (*skill_tools, *_memory_mw_for_tools.tools) if _allowed(t)]
     review_subagent, review_graph = _build_review(library, store, aux_model, review_tools)
@@ -368,16 +369,15 @@ def create_hermes_agent(
         ),
         SkillLoaderMiddleware(library),
         # Memory snapshot loader / writer.
-        MemoryToolMiddleware(
-            memory_char_limit=cfg.memory_char_limit,
-            user_char_limit=cfg.memory_user_char_limit,
-        ),
+        # memory.memory_enabled / user_profile_enabled gate each layer (gh #228).
+        MemoryToolMiddleware.from_config(cfg),
         # FTS5 recorder — writes every turn to the SQLite store.
         HermesStateRecorderMiddleware(store=store),
         # Reflection — counts tool calls, spawns review subagent on threshold.
         ReflectionMiddleware(
             skill_nudge_interval=cfg.skills_creation_nudge_interval,
             memory_nudge_interval=cfg.memory_nudge_interval,
+            memory_toolset_enabled="memory" in enabled_toolsets,
             library=library,
             store=store,
             model=main_model,

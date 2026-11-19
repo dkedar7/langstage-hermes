@@ -212,6 +212,7 @@ class ReflectionMiddleware(AgentMiddleware):
         aux_model: Any = None,
         skills_toolset_enabled: bool = True,
         review_graph: Any | None = None,
+        memory_toolset_enabled: bool = True,
     ) -> None:
         """Construct the middleware.
 
@@ -229,6 +230,9 @@ class ReflectionMiddleware(AgentMiddleware):
                 ``model`` if ``None``.
             skills_toolset_enabled: When ``False``, ``iters_since_skill`` is
                 never bumped (no review will fire for skills).
+            memory_toolset_enabled: When ``False`` (no ``memory`` tool, e.g. both
+                memory layers turned off, gh #228), no memory review is ever
+                scheduled: the review fork would have nothing to write with.
             review_graph: The compiled review subagent graph that
                 ``after_agent`` runs when a review is due.
                 ``create_hermes_agent`` always passes one (gh #179). If
@@ -243,6 +247,7 @@ class ReflectionMiddleware(AgentMiddleware):
         self.model = model
         self.aux_model = aux_model or model
         self.skills_toolset_enabled = skills_toolset_enabled
+        self.memory_toolset_enabled = memory_toolset_enabled
         self._review_graph = review_graph
         # No extra tools registered by this middleware itself — the `task`
         # tool that dispatches to the review subagent is owned by
@@ -346,7 +351,7 @@ class ReflectionMiddleware(AgentMiddleware):
         iters_since_skill = self._read_int(state, "iters_since_skill")
         turns_since_memory = self._read_int(state, "turns_since_memory")
         skill_due = self.skills_toolset_enabled and (iters_since_skill >= self.skill_nudge_interval)
-        memory_due = turns_since_memory >= self.memory_nudge_interval
+        memory_due = self.memory_toolset_enabled and (turns_since_memory >= self.memory_nudge_interval)
 
         if not (skill_due or memory_due):
             return None

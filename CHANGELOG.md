@@ -2,6 +2,30 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.7] - 2026-11-19
+
+### Fixed
+- **`memory.memory_enabled = false` and `memory.user_profile_enabled = false` now do what
+  they say (gh #228).** Both switches (env `LANGSTAGE_HERMES_MEMORY_ENABLED` /
+  `LANGSTAGE_HERMES_MEMORY_USER_PROFILE_ENABLED`) were resolved and shown by `--show-config`
+  but read by nothing, so the agent kept putting `USER.md` and `MEMORY.md` in its prompt and
+  writing to them. Now:
+  - `memory_enabled = false`: `MEMORY.md` is not put in the system prompt, and the `memory`
+    tool refuses `target="memory"` for every action, `read` included, with a message naming
+    the switch.
+  - `user_profile_enabled = false`: the same for `USER.md` and `target="user"`. The tool's
+    description also tells the model not to keep personal facts about the user under
+    `memory` instead.
+  - Both off: the `memory` tool is not bound at all, for the agent or the review that runs
+    after a turn; the prompt's memory guidance is left out; no memory review is scheduled;
+    and `langstage-hermes tools` (and `/tools`) marks the `memory` toolset ✗ with the reason.
+  - The same holds for `hermes_middleware()` inside your own agent.
+  - Turning a layer off never deletes or edits its file. What's on disk stays there, unread,
+    until you turn the layer back on or remove the file yourself.
+- A memory review is no longer scheduled when the agent has no `memory` tool (it is also
+  off via `agent.disabled_toolsets = ["memory"]`); the review would have had nothing to
+  write with.
+
 ## [0.5.6] - 2026-11-18
 
 ### Fixed

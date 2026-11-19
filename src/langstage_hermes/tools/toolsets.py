@@ -240,6 +240,9 @@ def config_off_reason(toolset: str, cfg) -> str | None:
         return "disabled by agent.disabled_toolsets"
     if toolset == "cronjob" and not getattr(cfg, "cron_agent_tool", False):
         return "off: [cron] agent_tool = false"
+    if toolset == "memory" and not getattr(cfg, "memory_enabled", True) and not getattr(cfg, "memory_user_profile_enabled", True):
+        # gh #228: both layers off leaves the memory tool unbound.
+        return "off: memory.memory_enabled and memory.user_profile_enabled = false"
     return None
 
 
