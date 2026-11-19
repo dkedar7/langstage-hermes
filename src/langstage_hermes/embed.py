@@ -202,11 +202,7 @@ def hermes_middleware(
         aux_model = _agent._init_chat_model(aux_model or cfg.model_aux or cfg.model_default)
 
     skill_tools = _allowed(make_skill_tools(library, store=store)) if "skills" in wanted else []
-    memory_mw = (
-        MemoryToolMiddleware(memory_char_limit=cfg.memory_char_limit, user_char_limit=cfg.memory_user_char_limit)
-        if "memory" in wanted
-        else None
-    )
+    memory_mw = MemoryToolMiddleware.from_config(cfg) if "memory" in wanted else None
     if memory_mw is not None:
         memory_mw.tools = _allowed(memory_mw.tools)
     search_tools = (
@@ -255,6 +251,7 @@ def hermes_middleware(
                 model=aux_model,
                 aux_model=aux_model,
                 skills_toolset_enabled=bool(skill_tools),
+                memory_toolset_enabled=bool(memory_mw is not None and memory_mw.tools),
                 review_graph=review_graph,
             )
         )

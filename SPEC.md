@@ -95,8 +95,8 @@ tool_use_enforcement = "auto"
 disabled_toolsets = []
 
 [memory]
-memory_enabled = true
-user_profile_enabled = true
+memory_enabled = true            # false: MEMORY.md is not read or written (gh #228)
+user_profile_enabled = true      # false: USER.md is not read or written; both false: no memory tool
 nudge_interval = 10              # turns since last memory review
 memory_char_limit = 2200
 user_char_limit = 1375

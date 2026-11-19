@@ -55,6 +55,16 @@ and the run's ``session_id``. ``langstage-hermes audit log`` lists them and
 ``audit rollback memory:<target> <id>`` undoes one. Recording is best-effort and
 never fails the write; it does not touch the snapshot.
 
+Turning a layer off (gh #228)
+-----------------------------
+
+``memory.memory_enabled = false`` turns MEMORY.md off and
+``memory.user_profile_enabled = false`` turns USER.md off. An off layer is not
+read into the snapshot, and the ``memory`` tool refuses every action on it
+(``read`` too) without touching the file; existing files stay on disk as they
+are. With both off the middleware binds no tool at all. ``enabled_targets``
+maps a ``HermesConfig`` to the layers that are on.
+
 Char limits (defaults match SPEC §2): ``memory_char_limit=2200`` for MEMORY.md,
 ``user_char_limit=1375`` for USER.md. Limits apply to the joined byte length
 of all entries — exceeding them returns a helpful error instead of silently
@@ -90,6 +100,36 @@ DEFAULT_USER_CHAR_LIMIT = 1375
 
 Target = Literal["memory", "user"]
 Action = Literal["add", "replace", "remove", "read"]
+
+# Which config flag turns each layer off (gh #228), for the refusal message.
+_TARGET_SWITCH: dict[str, tuple[str, str]] = {
+    "memory": ("MEMORY.md", "memory.memory_enabled"),
+    "user": ("USER.md", "memory.user_profile_enabled"),
+}
+
+
+def enabled_targets(cfg: Any) -> tuple[Target, ...]:
+    """The memory layers a resolved ``HermesConfig`` leaves on (gh #228).
+
+    ``memory.memory_enabled`` gates MEMORY.md (``"memory"``) and
+    ``memory.user_profile_enabled`` gates USER.md (``"user"``). An empty tuple
+    means the ``memory`` toolset is off as a whole.
+    """
+    out: list[Target] = []
+    if getattr(cfg, "memory_enabled", True):
+        out.append("memory")
+    if getattr(cfg, "memory_user_profile_enabled", True):
+        out.append("user")
+    return tuple(out)
+
+
+def _disabled_message(target: str) -> str:
+    filename, key = _TARGET_SWITCH[target]
+    layer = "user profile" if target == "user" else "memory"
+    return (
+        f"The {layer} layer ({filename}) is turned off ({key} = false), so target={target!r} "
+        f"can't be read or written. Nothing was changed."
+    )
 
 
 # ── State schema ─────────────────────────────────────────────────────
@@ -285,15 +325,18 @@ def build_snapshot(
     *,
     memory_char_limit: int = DEFAULT_MEMORY_CHAR_LIMIT,
     user_char_limit: int = DEFAULT_USER_CHAR_LIMIT,
+    memory_enabled: bool = True,
+    user_profile_enabled: bool = True,
 ) -> dict[str, str]:
     """Return ``{"memory_snapshot": ..., "user_snapshot": ...}`` from disk.
 
     Pure function — useful for tests and for the prompt-assembly middleware to
-    rebuild the snapshot on demand (e.g. ``/reload`` slash command).
+    rebuild the snapshot on demand (e.g. ``/reload`` slash command). A layer
+    that is turned off (gh #228) is not read and its snapshot is ``""``.
     """
     _memory_dir().mkdir(parents=True, exist_ok=True)
-    mem_entries = _read_entries(_file_for("memory"))
-    usr_entries = _read_entries(_file_for("user"))
+    mem_entries = _read_entries(_file_for("memory")) if memory_enabled else []
+    usr_entries = _read_entries(_file_for("user")) if user_profile_enabled else []
 
     # Dedupe before sanitizing — keeps placeholders deterministic in tests.
     mem_entries = list(dict.fromkeys(mem_entries))
@@ -311,12 +354,55 @@ def build_snapshot(
 # ── Tool factory ─────────────────────────────────────────────────────
 
 
-def _make_memory_tool(*, memory_char_limit: int, user_char_limit: int):
+_TARGET_LINES = {
+    "memory": "  memory — your own notes (environment facts, conventions, tool quirks).\n",
+    "user": "  user   — who the user is (preferences, role, communication style).\n",
+}
+
+
+def _tool_description(targets: tuple[str, ...]) -> str:
+    """The ``memory`` tool's description, naming only the layers that are on (gh #228)."""
+    lines = "".join(_TARGET_LINES[t] for t in ("memory", "user") if t in targets)
+    off = ""
+    if "user" not in targets:
+        off = (
+            "The user profile is turned off (memory.user_profile_enabled = false): target 'user' is refused, "
+            "and personal facts about the user (name, preferences, role) must not be saved under 'memory' either.\n"
+        )
+    elif "memory" not in targets:
+        off = "Your own notes are turned off (memory.memory_enabled = false): target 'memory' is refused.\n"
+    return (
+        "Save durable information to persistent memory that survives across sessions. "
+        "Memory is injected into future turns, so keep it compact and focused on facts "
+        "that will still matter later.\n\n"
+        "Actions:\n"
+        "  add     — append a new entry (rejects if char-limit would overflow).\n"
+        "  replace — overwrite the entry at `index` with `entry` (refused if another entry "
+        "already says exactly that; `remove` the one you no longer need instead).\n"
+        "  remove  — drop the entry at `index`.\n"
+        "  read    — return current on-disk entries (NOT the system-prompt snapshot, "
+        "             which is frozen for the session).\n\n"
+        "Targets:\n"
+        f"{lines}{off}\n"
+        "IMPORTANT: writes update disk immediately and are visible to future sessions, "
+        "but the CURRENT session's system prompt is FROZEN — that's intentional, it "
+        "preserves the prefix cache. Don't write the same fact twice expecting the "
+        "second turn to see it."
+    )
+
+
+def _make_memory_tool(
+    *,
+    memory_char_limit: int,
+    user_char_limit: int,
+    targets: tuple[str, ...] = ("memory", "user"),
+):
     """Build the ``memory`` tool bound to the configured char limits.
 
     The tool is built as a closure (not a module-level function) so the
     char limits travel with the middleware instance — letting two
-    differently-configured middlewares coexist in tests.
+    differently-configured middlewares coexist in tests. ``targets`` names the
+    layers that are on; the tool refuses the others (gh #228).
     """
 
     def _limit_for(target: Target) -> int:
@@ -342,28 +428,7 @@ def _make_memory_tool(*, memory_char_limit: int, user_char_limit: int):
     def _format_error(message: str, **extra: Any) -> str:
         return json.dumps({"success": False, "error": message, **extra}, ensure_ascii=False)
 
-    @tool(
-        "memory",
-        description=(
-            "Save durable information to persistent memory that survives across sessions. "
-            "Memory is injected into future turns, so keep it compact and focused on facts "
-            "that will still matter later.\n\n"
-            "Actions:\n"
-            "  add     — append a new entry (rejects if char-limit would overflow).\n"
-            "  replace — overwrite the entry at `index` with `entry` (refused if another entry "
-            "already says exactly that; `remove` the one you no longer need instead).\n"
-            "  remove  — drop the entry at `index`.\n"
-            "  read    — return current on-disk entries (NOT the system-prompt snapshot, "
-            "             which is frozen for the session).\n\n"
-            "Targets:\n"
-            "  memory — your own notes (environment facts, conventions, tool quirks).\n"
-            "  user   — who the user is (preferences, role, communication style).\n\n"
-            "IMPORTANT: writes update disk immediately and are visible to future sessions, "
-            "but the CURRENT session's system prompt is FROZEN — that's intentional, it "
-            "preserves the prefix cache. Don't write the same fact twice expecting the "
-            "second turn to see it."
-        ),
-    )
+    @tool("memory", description=_tool_description(targets))
     def memory(
         action: Action,
         target: Target,
@@ -397,6 +462,12 @@ def _make_memory_tool(*, memory_char_limit: int, user_char_limit: int):
                     "messages": [ToolMessage(content=payload, tool_call_id=tool_call_id)],
                 }
             )
+
+        if target not in targets:
+            # gh #228: the layer is turned off. Refuse before touching the file,
+            # reads included: an off layer must not reach the model at all.
+            payload = _format_error(_disabled_message(target))
+            return Command(update={"messages": [ToolMessage(content=payload, tool_call_id=tool_call_id)]})
 
         path = _file_for(target)
         limit = _limit_for(target)
@@ -537,6 +608,8 @@ class MemoryToolMiddleware(AgentMiddleware):
         *,
         memory_char_limit: int = DEFAULT_MEMORY_CHAR_LIMIT,
         user_char_limit: int = DEFAULT_USER_CHAR_LIMIT,
+        memory_enabled: bool = True,
+        user_profile_enabled: bool = True,
     ) -> None:
         """Initialize the middleware.
 
@@ -544,16 +617,32 @@ class MemoryToolMiddleware(AgentMiddleware):
             memory_char_limit: Joined-byte limit for MEMORY.md (default 2200,
                 per SPEC §2 and Hermes verbatim).
             user_char_limit: Joined-byte limit for USER.md (default 1375).
+            memory_enabled: ``memory.memory_enabled``. ``False`` keeps MEMORY.md
+                out of the snapshot and makes the tool refuse ``target="memory"``.
+            user_profile_enabled: ``memory.user_profile_enabled``. The same for
+                USER.md and ``target="user"``. With both off no tool is bound.
         """
         self.memory_char_limit = memory_char_limit
         self.user_char_limit = user_char_limit
+        self.memory_enabled = memory_enabled
+        self.user_profile_enabled = user_profile_enabled
+        targets = tuple(t for t, on in (("memory", memory_enabled), ("user", user_profile_enabled)) if on)
         # Tools attribute is read by `create_agent` at compile time.
-        self.tools = [
-            _make_memory_tool(
-                memory_char_limit=memory_char_limit,
-                user_char_limit=user_char_limit,
-            )
-        ]
+        self.tools = (
+            [_make_memory_tool(memory_char_limit=memory_char_limit, user_char_limit=user_char_limit, targets=targets)]
+            if targets
+            else []
+        )
+
+    @classmethod
+    def from_config(cls, cfg: Any) -> MemoryToolMiddleware:
+        """Build from a resolved ``HermesConfig``: char limits and both layer switches (gh #228)."""
+        return cls(
+            memory_char_limit=cfg.memory_char_limit,
+            user_char_limit=cfg.memory_user_char_limit,
+            memory_enabled=bool(cfg.memory_enabled),
+            user_profile_enabled=bool(cfg.memory_user_profile_enabled),
+        )
 
     def before_agent(self, state: Any, runtime: Any) -> dict[str, Any] | None:
         """Build the frozen snapshot from disk and seat it in state.
@@ -572,6 +661,8 @@ class MemoryToolMiddleware(AgentMiddleware):
         snapshot = build_snapshot(
             memory_char_limit=self.memory_char_limit,
             user_char_limit=self.user_char_limit,
+            memory_enabled=self.memory_enabled,
+            user_profile_enabled=self.user_profile_enabled,
         )
         # Seed turns_since_memory if absent — first turn after fresh start.
         return {
@@ -588,4 +679,5 @@ __all__ = [
     "MemoryStateExt",
     "MemoryToolMiddleware",
     "build_snapshot",
+    "enabled_targets",
 ]
