@@ -57,8 +57,11 @@ def _files(home: Path) -> tuple[str, str]:
 
 
 def _call(tool: Any, **args: Any) -> dict[str, Any]:
-    cmd = tool.invoke({"args": args, "name": "memory", "type": "tool_call", "id": "c1"})
-    return json.loads(cmd.update["messages"][0].content)
+    out = tool.invoke({"args": args, "name": "memory", "type": "tool_call", "id": "c1"})
+    # A call naming an off layer fails the tool's schema and comes back as a plain
+    # ToolMessage (the schema offers only the layers that are on); the rest are Commands.
+    msg = out.update["messages"][0] if hasattr(out, "update") else out
+    return json.loads(msg.content)
 
 
 class _Recorder(GenericFakeChatModel):
