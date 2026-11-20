@@ -1163,6 +1163,26 @@ def _slash_curator(args: str, state: dict[str, Any]) -> bool:
     return False
 
 
+def _memory_layer_off(key: str, cfg: Any) -> str | None:
+    """Why a memory layer is off, or ``None`` when it's live (gh #231).
+
+    ``key`` is ``"user"`` (USER.md) or ``"memory"`` (MEMORY.md). The files stay on
+    disk when a layer is switched off (gh #228), so readers still show them, but
+    they must say the agent doesn't see them.
+    """
+    if cfg is None:
+        return None
+    if key == "user" and not getattr(cfg, "memory_user_profile_enabled", True):
+        return "memory.user_profile_enabled = false"
+    if key == "memory" and not getattr(cfg, "memory_enabled", True):
+        return "memory.memory_enabled = false"
+    return None
+
+
+def _memory_off_note(reason: str) -> str:
+    return f"OFF ({reason}): not in the agent's prompt, and the memory tool can't change it"
+
+
 def _slash_memory(args: str, state: dict[str, Any]) -> bool:
     """Show MEMORY.md + USER.md current contents (live disk, not snapshot)."""
     from langstage_hermes.config import hermes_home
@@ -1170,17 +1190,22 @@ def _slash_memory(args: str, state: dict[str, Any]) -> bool:
     home = hermes_home()
     memory_md = home / "memories" / "MEMORY.md"
     user_md = home / "memories" / "USER.md"
+    cfg = state.get("cfg")
     shown_anything = False
-    for label, path in (("USER.md", user_md), ("MEMORY.md", memory_md)):
+    for key, label, path in (("user", "USER.md", user_md), ("memory", "MEMORY.md", memory_md)):
+        off = _memory_layer_off(key, cfg)
         if path.exists() and path.stat().st_size > 0:
             shown_anything = True
             content = path.read_text(encoding="utf-8")
-            click.echo(click.style(f"{label}  ({path.stat().st_size} bytes)", fg="cyan", bold=True))
+            heading = click.style(f"{label}  ({path.stat().st_size} bytes)", fg="cyan", bold=True)
+            if off:
+                heading += click.style(f"  {_memory_off_note(off)}", fg="yellow")
+            click.echo(heading)
             click.echo(click.style(f"  {path}", fg="bright_black"))
             click.echo(content)
             click.echo()
         else:
-            click.echo(click.style(f"{label}: empty", fg="bright_black"))
+            click.echo(click.style(f"{label}: empty" + (f"  ({off})" if off else ""), fg="bright_black"))
     if not shown_anything:
         click.echo(
             click.style(
@@ -1868,7 +1893,8 @@ def memory_show(ctx: click.Context, only_user: bool, only_session: bool, as_json
 
     A missing/empty layer prints a clear one-line message, never a traceback — the
     same graceful-empty contract as `memory notes`. `--json` emits stable keys
-    (`path`, `exists`, `chars`, `limit`, `over_limit`, `content`) per layer. (gh #101)
+    (`path`, `exists`, `chars`, `limit`, `over_limit`, `enabled`, `content`) per layer
+    (gh #101). A layer switched off in config is still printed, marked OFF (gh #231).
     """
     import json as _json
 
@@ -1883,6 +1909,7 @@ def memory_show(ctx: click.Context, only_user: bool, only_session: bool, as_json
         ctx.invoke(audit_log_cmd, skill_name=layer, memory_only=True, as_json=as_json, limit=20, full=False)
         return
 
+    cfg: Any = None
     try:
         cfg = HermesConfig.resolve()
         user_limit = cfg.memory_user_char_limit
@@ -1890,6 +1917,7 @@ def memory_show(ctx: click.Context, only_user: bool, only_session: bool, as_json
     except Exception:
         # A malformed config must never turn an offline read into a traceback;
         # fall back to the documented defaults (SPEC §2).
+        cfg = None
         user_limit, session_limit = 1375, 2200
 
     mem_dir = hermes_home() / "memories"
@@ -1921,6 +1949,8 @@ def memory_show(ctx: click.Context, only_user: bool, only_session: bool, as_json
                 "chars": len(text),
                 "limit": limit,
                 "over_limit": len(text) > limit,
+                # False when the layer is switched off: on disk, but not what the agent sees (gh #231).
+                "enabled": _memory_layer_off(key, cfg) is None,
                 "content": text,
             }
         click.echo(_json.dumps(out))
@@ -1941,13 +1971,17 @@ def memory_show(ctx: click.Context, only_user: bool, only_session: bool, as_json
                     "  (over budget — injected in full; the memory tool rejects new entries until it is trimmed)",
                     fg="yellow",
                 )
+            off = _memory_layer_off(key, cfg)
+            if off:
+                budget += click.style(f"  {_memory_off_note(off)}", fg="yellow")
             click.echo(click.style(f"{fname}  ", fg="cyan", bold=True) + budget)
             click.echo(click.style(f"  {path}", fg="bright_black"))
             click.echo(text.rstrip("\n"))
             click.echo()
         else:
             noun = "user memory" if key == "user" else "session memory"
-            click.echo(click.style(f"no {noun} yet at {path}", fg="bright_black"))
+            off = _memory_layer_off(key, cfg)
+            click.echo(click.style(f"no {noun} yet at {path}" + (f"  ({off})" if off else ""), fg="bright_black"))
 
     if not shown_anything:
         click.echo(

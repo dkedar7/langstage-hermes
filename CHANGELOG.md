@@ -2,6 +2,17 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.9] - 2026-11-20
+
+### Fixed
+- **`memory show` and `/memory` say when a memory layer is off (gh #231).** Since 0.5.7,
+  `memory.user_profile_enabled = false` or `memory.memory_enabled = false` keeps that layer
+  out of the agent's prompt, but both readers still printed it like a live one. They still
+  show the file (it's left untouched on disk), now with
+  `OFF (memory.user_profile_enabled = false): not in the agent's prompt, and the memory
+  tool can't change it`. `memory show --json` gains an `enabled` key per layer, so a script
+  can tell what's on disk from what the agent sees.
+
 ## [0.5.8] - 2026-11-19
 
 ### Fixed

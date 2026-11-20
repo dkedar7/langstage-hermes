@@ -86,7 +86,8 @@ def test_show_json_shape(home_with_memory: Path):
     data = json.loads(res.output)
     assert set(data) == {"user", "memory"}
     user = data["user"]
-    assert set(user) == {"path", "exists", "chars", "limit", "over_limit", "content"}
+    assert set(user) == {"path", "exists", "chars", "limit", "over_limit", "enabled", "content"}
+    assert user["enabled"] is True
     assert user["exists"] is True
     assert user["chars"] == len("Prefers a profiling-driven investigation procedure over guesswork.")
     assert user["limit"] == 1375
