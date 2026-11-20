@@ -2,6 +2,26 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.8] - 2026-11-19
+
+### Fixed
+- **With one memory layer off, the memory review asks only for the other (gh #228,
+  follow-up to 0.5.7).** 0.5.7 made the `memory` tool refuse an off layer, but the review
+  that runs after a turn still used prompts written for both. With the user profile off,
+  it was asked to save "things the user revealed about themselves" and could only reach
+  `MEMORY.md`. Now:
+  - The `memory` tool's schema offers only the layers that are on, so the model can't pick
+    an off one. A call that names it anyway still gets the same refusal, and nothing is
+    written.
+  - The review's system prompt and its memory prompt follow the switches. With the user
+    profile off, "who the user is" becomes "your own notes", personal facts about the user
+    are ruled out everywhere, and the paragraph that filed user preferences under memory is
+    dropped. With your own notes off, the review saves to the user profile only and keeps
+    environment details out of it. With both off, the review's system prompt is the
+    skills-only one.
+  - The agent's own memory guidance carries the same note when one layer is off, in
+    `create_hermes_agent` and `hermes_middleware()` alike.
+
 ## [0.5.7] - 2026-11-19
 
 ### Fixed

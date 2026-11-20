@@ -85,6 +85,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
+from pydantic import WithJsonSchema
 
 from langstage_hermes.memory import audit as memory_audit
 from langstage_hermes.memory import threat_patterns
@@ -130,6 +131,35 @@ def _disabled_message(target: str) -> str:
         f"The {layer} layer ({filename}) is turned off ({key} = false), so target={target!r} "
         f"can't be read or written. Nothing was changed."
     )
+
+
+# What to say when exactly one layer is on (gh #228): the prompts that steer what
+# gets saved (the agent's memory guidance, the review fork's prompts) must not
+# send the off layer's kind of fact into the layer that is still on.
+_USER_OFF_NOTE = (
+    "The user profile (USER.md) is turned off (memory.user_profile_enabled = false), so only your own "
+    "notes are kept: save with target='memory' only. Do not save personal facts about the user (name, "
+    "preferences, role, communication style, how they want you to work) anywhere, including under 'memory'."
+)
+_MEMORY_OFF_NOTE = (
+    "Your own notes (MEMORY.md) are turned off (memory.memory_enabled = false), so only the user profile "
+    "is kept: save with target='user' only. Do not put environment details, conventions or tool quirks "
+    "in the user profile."
+)
+
+
+def layer_note(targets: tuple[str, ...] | list[str]) -> str:
+    """The note for prompts when exactly one memory layer is on, else ``""`` (gh #228).
+
+    It names the layer that is on, the target to use, and the kind of fact that
+    must not move into it now that its own layer is off.
+    """
+    on = set(targets)
+    if on == {"memory"}:
+        return _USER_OFF_NOTE
+    if on == {"user"}:
+        return _MEMORY_OFF_NOTE
+    return ""
 
 
 # ── State schema ─────────────────────────────────────────────────────
@@ -428,7 +458,6 @@ def _make_memory_tool(
     def _format_error(message: str, **extra: Any) -> str:
         return json.dumps({"success": False, "error": message, **extra}, ensure_ascii=False)
 
-    @tool("memory", description=_tool_description(targets))
     def memory(
         action: Action,
         target: Target,
@@ -586,7 +615,30 @@ def _make_memory_tool(
             }
         )
 
-    return memory
+    # Offer only the layers that are on (gh #228): the schema the model sees lists
+    # just those targets, so a turned-off layer isn't something it can pick. The
+    # annotation is set on the function itself because this module uses
+    # ``from __future__ import annotations`` and a local alias wouldn't resolve.
+    offered = tuple(t for t in ("memory", "user") if t in targets)
+    # ``enum`` even for one value: pydantic writes a one-value Literal as ``const``,
+    # which not every provider's tool schema accepts.
+    memory.__annotations__["target"] = Annotated[
+        Literal[offered],  # type: ignore[valid-type]
+        WithJsonSchema({"type": "string", "enum": list(offered)}),
+    ]
+
+    def _on_invalid(err: Any) -> str:
+        # A call that names an off layer anyway fails the schema. Answer with the
+        # same refusal the body gives, not a raw validation error.
+        for problem in getattr(err, "errors", list)():
+            value = problem.get("input")
+            if tuple(problem.get("loc") or ())[:1] == ("target",) and value in _TARGET_SWITCH and value not in targets:
+                return _format_error(_disabled_message(value))
+        return _format_error(f"Invalid arguments for memory: {err}")
+
+    memory_tool = tool("memory", description=_tool_description(targets))(memory)
+    memory_tool.handle_validation_error = _on_invalid
+    return memory_tool
 
 
 # ── Middleware ───────────────────────────────────────────────────────
@@ -680,4 +732,5 @@ __all__ = [
     "MemoryToolMiddleware",
     "build_snapshot",
     "enabled_targets",
+    "layer_note",
 ]

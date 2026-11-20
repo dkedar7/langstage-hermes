@@ -112,6 +112,85 @@ def load_prompt(name: str) -> str:
         raise FileNotFoundError(msg) from None
 
 
+# ── review prompts follow the memory switches (gh #228) ─────────────
+
+_BOTH_LAYERS: tuple[str, ...] = ("memory", "user")
+
+_USER_SECTION_HEADING = "## Memory — who the user is"
+
+# Takes the place of the "who the user is" section when the user profile is off.
+_NOTES_SECTION = (
+    "## Memory — your own notes\n\n"
+    "Did you learn durable facts about the environment: where things live, the tools, libraries and "
+    "conventions in use, quirks you had to work around? Save them with the `memory` tool "
+    "(target='memory') as declarative facts (\"The repo uses pytest with xdist\") rather than imperatives "
+    '("Run tests with pytest -n 4") so they do not get re-read as fresh directives later. Skip transient '
+    "session state — PR numbers, completion logs, anything stale in a week.\n"
+)
+
+
+def _memory_section_span(text: str) -> tuple[int, int]:
+    """Where the combined prompt's memory section starts and ends (up to the next ``## ``)."""
+    start = text.index(_USER_SECTION_HEADING)
+    end = text.find("\n## ", start + len(_USER_SECTION_HEADING))
+    return start, (len(text) if end == -1 else end + 1)
+
+
+def review_system_prompt(memory_targets: tuple[str, ...] | list[str] = _BOTH_LAYERS) -> str:
+    """The review fork's system prompt for the memory layers that are on (gh #228).
+
+    Both on: ``combined_review.md`` as shipped. Only the user profile on: the same,
+    with a note that the agent's own notes are off. Only the agent's notes on: the
+    "who the user is" section becomes a notes section and personal facts are ruled
+    out. Neither on: ``skill_review.md``, since there is nothing to save to memory.
+    """
+    from langstage_hermes.memory.tool import layer_note
+
+    on = tuple(t for t in _BOTH_LAYERS if t in memory_targets)
+    if not on:
+        return load_prompt("skill_review.md")
+    text = load_prompt("combined_review.md")
+    if on == _BOTH_LAYERS:
+        return text
+    start, end = _memory_section_span(text)
+    section = text[start:end].rstrip("\n")
+    rest = text[end:].lstrip()
+    if on == ("memory",):
+        section = _NOTES_SECTION.rstrip("\n")
+        # Its skills half says memory is "who the user is" and that both should
+        # carry user-preference lessons. Neither holds with the profile off.
+        rest = _drop_subsection(rest, _USER_PREFERENCE_HEADING)
+    return f"{text[:start]}{section}\n\n{layer_note(on)}\n\n{rest}"
+
+
+_USER_PREFERENCE_HEADING = "### User-preference embedding"
+
+
+def _drop_subsection(text: str, heading: str) -> str:
+    """Remove ``heading`` and the one paragraph under it; ``text`` unchanged if absent."""
+    start = text.find(heading)
+    if start == -1:
+        return text
+    body = text.find("\n\n", start + len(heading))  # end of the heading line
+    end = text.find("\n\n", body + 2) if body != -1 else -1  # end of its paragraph
+    return text[:start] + (text[end + 2 :] if end != -1 else "")
+
+
+def review_prompt(kind: str, memory_targets: tuple[str, ...] | list[str] = _BOTH_LAYERS) -> str:
+    """The message that starts a review of ``kind`` ("memory", "skills" or "combined")."""
+    from langstage_hermes.memory.tool import layer_note
+
+    if kind == "skills":
+        return load_prompt("skill_review.md")
+    if kind == "memory":
+        on = tuple(t for t in _BOTH_LAYERS if t in memory_targets)
+        if on == _BOTH_LAYERS or not on:
+            return load_prompt("memory_review.md")
+        base = load_prompt("memory_review_notes.md" if on == ("memory",) else "memory_review.md")
+        return f"{base.rstrip()}\n\n{layer_note(on)}\n"
+    return review_system_prompt(memory_targets)
+
+
 # ── review subagent factory ──────────────────────────────────────────
 
 
@@ -121,6 +200,7 @@ def build_review_subagent(
     store: Any,
     aux_model: Any,
     tools: list[Any] | None = None,
+    memory_targets: tuple[str, ...] | list[str] = _BOTH_LAYERS,
 ) -> dict[str, Any]:
     """Return a ``SubAgent`` spec for the background review fork.
 
@@ -142,6 +222,8 @@ def build_review_subagent(
             agent makes available via the ``task`` dispatch (Hermes narrows to
             ``memory`` + ``skill_manage`` — wiring that whitelist is the
             caller's responsibility at agent-build time).
+        memory_targets: The memory layers that are on (``enabled_targets(cfg)``).
+            The system prompt asks only for what those layers keep (gh #228).
 
     Returns:
         A dict matching ``deepagents.middleware.subagents.SubAgent`` shape so
@@ -157,7 +239,7 @@ def build_review_subagent(
             "<nudge_interval> tool iterations or user turns. Do not call directly "
             "from user input — the middleware schedules it."
         ),
-        "system_prompt": load_prompt("combined_review.md"),
+        "system_prompt": review_system_prompt(memory_targets),
         "tools": tools or [],
     }
     if aux_model is not None:
@@ -213,6 +295,7 @@ class ReflectionMiddleware(AgentMiddleware):
         skills_toolset_enabled: bool = True,
         review_graph: Any | None = None,
         memory_toolset_enabled: bool = True,
+        memory_targets: tuple[str, ...] | list[str] = _BOTH_LAYERS,
     ) -> None:
         """Construct the middleware.
 
@@ -233,6 +316,8 @@ class ReflectionMiddleware(AgentMiddleware):
             memory_toolset_enabled: When ``False`` (no ``memory`` tool, e.g. both
                 memory layers turned off, gh #228), no memory review is ever
                 scheduled: the review fork would have nothing to write with.
+            memory_targets: The memory layers that are on. The review prompt asks
+                only for what those layers keep (gh #228).
             review_graph: The compiled review subagent graph that
                 ``after_agent`` runs when a review is due.
                 ``create_hermes_agent`` always passes one (gh #179). If
@@ -248,6 +333,7 @@ class ReflectionMiddleware(AgentMiddleware):
         self.aux_model = aux_model or model
         self.skills_toolset_enabled = skills_toolset_enabled
         self.memory_toolset_enabled = memory_toolset_enabled
+        self.memory_targets = tuple(memory_targets)
         self._review_graph = review_graph
         # No extra tools registered by this middleware itself — the `task`
         # tool that dispatches to the review subagent is owned by
@@ -458,13 +544,8 @@ class ReflectionMiddleware(AgentMiddleware):
             return value
         return 0
 
-    @staticmethod
-    def _prompt_for(kind: str) -> str:
-        if kind == "memory":
-            return load_prompt("memory_review.md")
-        if kind == "skills":
-            return load_prompt("skill_review.md")
-        return load_prompt("combined_review.md")
+    def _prompt_for(self, kind: str) -> str:
+        return review_prompt(kind, self.memory_targets)
 
     # ── async parity ─────────────────────────────────────────────
 
@@ -516,4 +597,6 @@ __all__ = [
     "ReflectionMiddleware",
     "build_review_subagent",
     "load_prompt",
+    "review_prompt",
+    "review_system_prompt",
 ]

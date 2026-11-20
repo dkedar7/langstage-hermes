@@ -178,7 +178,7 @@ def hermes_middleware(
     # Shared construction lives in agent.py so this and create_hermes_agent agree.
     from langstage_hermes import agent as _agent
     from langstage_hermes.curator import CuratorMiddleware
-    from langstage_hermes.memory.tool import MemoryToolMiddleware
+    from langstage_hermes.memory.tool import MemoryToolMiddleware, enabled_targets
     from langstage_hermes.prompts import PromptAssemblyMiddleware
     from langstage_hermes.reflection import ReflectionMiddleware
     from langstage_hermes.search.session_search import make_session_search_tool
@@ -209,6 +209,9 @@ def hermes_middleware(
         _allowed([make_session_search_tool(store, current_session_id_getter=lambda: sid)]) if "recorder" in wanted else []
     )
 
+    # The memory layers that are on (gh #228); the guidance and the review ask only for those.
+    memory_targets = enabled_targets(cfg) if memory_mw is not None and memory_mw.tools else ()
+
     # Prompt guidance only for the Hermes toolsets that are actually bound.
     guidance: list[str] = []
     if memory_mw is not None and memory_mw.tools:
@@ -228,7 +231,7 @@ def hermes_middleware(
         built.append("budget")
     # Appends after the host's prompt; the skill loader then adds the skills index.
     if guidance or memory_mw is not None:
-        out.append(PromptAssemblyMiddleware(enabled_toolsets=guidance, embedded=True))
+        out.append(PromptAssemblyMiddleware(enabled_toolsets=guidance, embedded=True, memory_targets=memory_targets))
     if "skills" in wanted:
         out.append(SkillLoaderMiddleware(library, tools=skill_tools))
         built.append("skills")
@@ -241,7 +244,7 @@ def hermes_middleware(
     if "reflection" in wanted:
         # The review fork writes through the same skill and memory tools the agent has.
         review_tools = [*skill_tools, *(memory_mw.tools if memory_mw is not None else [])]
-        _, review_graph = _agent._build_review(library, store, aux_model, review_tools)
+        _, review_graph = _agent._build_review(library, store, aux_model, review_tools, memory_targets)
         out.append(
             ReflectionMiddleware(
                 skill_nudge_interval=cfg.skills_creation_nudge_interval,
@@ -252,6 +255,7 @@ def hermes_middleware(
                 aux_model=aux_model,
                 skills_toolset_enabled=bool(skill_tools),
                 memory_toolset_enabled=bool(memory_mw is not None and memory_mw.tools),
+                memory_targets=memory_targets,
                 review_graph=review_graph,
             )
         )

@@ -177,11 +177,19 @@ def _enabled_toolsets(cfg: HermesConfig) -> set[str]:
     return enabled
 
 
-def _build_review(library: SkillLibrary, store: Any, aux_model: Any, review_tools: list[Any]) -> tuple[dict[str, Any], Any]:
+def _build_review(
+    library: SkillLibrary,
+    store: Any,
+    aux_model: Any,
+    review_tools: list[Any],
+    memory_targets: tuple[str, ...] = ("memory", "user"),
+) -> tuple[dict[str, Any], Any]:
     """The review subagent spec and its compiled graph (the reflection target)."""
     from langchain.agents import create_agent
 
-    review_subagent = build_review_subagent(library=library, store=store, aux_model=aux_model, tools=review_tools)
+    review_subagent = build_review_subagent(
+        library=library, store=store, aux_model=aux_model, tools=review_tools, memory_targets=memory_targets
+    )
     # Compile it once and use the same graph for both ways a review can run:
     # ReflectionMiddleware runs it itself when a review is due (gh #179: before,
     # nothing passed it a graph, so a due review was dropped), and the model can
@@ -348,7 +356,9 @@ def create_hermes_agent(
     _memory_mw_for_tools = MemoryToolMiddleware.from_config(cfg)
     # A disabled toolset is off for the review fork too, or it would write what the agent can't.
     review_tools = [t for t in (*skill_tools, *_memory_mw_for_tools.tools) if _allowed(t)]
-    review_subagent, review_graph = _build_review(library, store, aux_model, review_tools)
+    # The review asks only for what the memory layers that are on keep (gh #228).
+    memory_targets = enabled_targets(cfg) if "memory" in enabled_toolsets else ()
+    review_subagent, review_graph = _build_review(library, store, aux_model, review_tools, memory_targets)
 
     # ── compose the middleware stack (SPEC §4 order) ─────────────────────
     # Note: deepagents inserts TodoList + Filesystem + SubAgent earlier in
@@ -366,6 +376,7 @@ def create_hermes_agent(
             platform=os.getenv("HERMES_PLATFORM", "cli"),
             workspace_root=ws,
             virtual_files=backend is None,
+            memory_targets=memory_targets,
         ),
         SkillLoaderMiddleware(library),
         # Memory snapshot loader / writer.
@@ -378,6 +389,7 @@ def create_hermes_agent(
             skill_nudge_interval=cfg.skills_creation_nudge_interval,
             memory_nudge_interval=cfg.memory_nudge_interval,
             memory_toolset_enabled="memory" in enabled_toolsets,
+            memory_targets=memory_targets,
             library=library,
             store=store,
             model=main_model,

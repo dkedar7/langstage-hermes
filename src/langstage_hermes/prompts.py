@@ -269,13 +269,24 @@ def _model_family_blocks(model_id: str) -> list[str]:
     return out
 
 
-def _toolset_guidance_blocks(enabled_toolsets: tuple[str, ...]) -> list[str]:
+def _toolset_guidance_blocks(
+    enabled_toolsets: tuple[str, ...],
+    memory_targets: tuple[str, ...] = ("memory", "user"),
+) -> list[str]:
+    from langstage_hermes.memory.tool import layer_note
+
     out: list[str] = []
     for toolset in enabled_toolsets:
         fname = _TOOLSET_GUIDANCE_FILES.get(toolset)
         if not fname:
             continue
-        _append_nonempty(out, load_prompt(fname).strip())
+        text = load_prompt(fname).strip()
+        note = layer_note(memory_targets) if toolset == "memory" else ""
+        if note:
+            # One layer is off (gh #228): the guidance's priorities cover both
+            # layers, so say which one is kept and what not to save in it.
+            text = f"{text}\n\n{note} This overrides the priorities above."
+        _append_nonempty(out, text)
     return out
 
 
@@ -286,12 +297,13 @@ def _build_stable_layer(
     platform: str,
     workspace_root: Path | None,
     virtual_files: bool = False,
+    memory_targets: tuple[str, ...] = ("memory", "user"),
 ) -> str:
     """Assemble the stable layer (identity + guidance + env hints + platform hint)."""
     parts: list[str] = []
 
     _append_nonempty(parts, _load_identity())
-    parts.extend(_toolset_guidance_blocks(enabled_toolsets))
+    parts.extend(_toolset_guidance_blocks(enabled_toolsets, memory_targets))
     _append_nonempty(parts, load_prompt("task_completion.md").strip())
 
     if "computer_use" in enabled_toolsets:
@@ -415,6 +427,9 @@ class PromptAssemblyMiddleware(AgentMiddleware):
             user snapshots) are appended after it. No identity, task-completion,
             environment, platform, context-file or date sections are added: those
             belong to the host. Default ``False`` (Hermes owns the whole prompt).
+        memory_targets: The memory layers that are on (``enabled_targets(cfg)``).
+            With one off, the memory guidance says which layer is kept and what
+            not to save in it (gh #228). Default: both.
     """
 
     def __init__(
@@ -426,8 +441,10 @@ class PromptAssemblyMiddleware(AgentMiddleware):
         workspace_root: Path | None = None,
         virtual_files: bool = False,
         embedded: bool = False,
+        memory_targets: tuple[str, ...] | list[str] = ("memory", "user"),
     ) -> None:
         self.embedded = embedded
+        self.memory_targets: tuple[str, ...] = tuple(memory_targets)
         self.enabled_toolsets: tuple[str, ...] = tuple(enabled_toolsets)
         self.platform = platform
         self.system_message = system_message
@@ -454,6 +471,7 @@ class PromptAssemblyMiddleware(AgentMiddleware):
             platform=self.platform,
             workspace_root=self.workspace_root,
             virtual_files=self.virtual_files,
+            memory_targets=self.memory_targets,
         )
         context = _build_context_layer(
             system_message=self.system_message,
@@ -472,7 +490,7 @@ class PromptAssemblyMiddleware(AgentMiddleware):
         Tool guidance for the enabled Hermes toolsets, then the frozen memory and
         user snapshots. Byte-stable within a session, like :meth:`assemble`.
         """
-        parts = _toolset_guidance_blocks(self.enabled_toolsets)
+        parts = _toolset_guidance_blocks(self.enabled_toolsets, self.memory_targets)
         for key in ("memory_snapshot", "user_snapshot"):
             if isinstance(state, dict):
                 value = state.get(key, "")
