@@ -291,13 +291,53 @@ def _count_cjk(text: str) -> int:
 # ---------------------------------------------------------------------------
 
 
+class FtsQueryError(ValueError):
+    """A search query FTS5 could not run, even after the plain-words retry.
+
+    Raised by :meth:`SqliteFtsStore.search_messages` so callers can tell "the
+    query was rejected" apart from "nothing matched" (gh #233). Before, a
+    rejected query was logged at debug level and returned ``[]``, which every
+    caller showed as "no match".
+    """
+
+
+_FTS5_OPERATORS = frozenset({"AND", "OR", "NOT"})
+_BAREWORD_RE = re.compile(r"\w+")
+_HAS_WORD_RE = re.compile(r"\w")
+_PLACEHOLDER_RE = re.compile(r"(\x00Q\d+\x00\*?)")
+
+
+def _fts5_string(text: str) -> str:
+    return '"' + text.replace('"', '""') + '"'
+
+
+def _drop_stray_operators(tokens: list[str]) -> list[str]:
+    """Remove AND/OR/NOT that start or end the query or follow another operator."""
+    out: list[str] = []
+    for tok in tokens:
+        if tok in _FTS5_OPERATORS and (not out or out[-1] in _FTS5_OPERATORS):
+            continue
+        out.append(tok)
+    while out and out[-1] in _FTS5_OPERATORS:
+        out.pop()
+    return out
+
+
 def _sanitize_fts5_query(query: str) -> str:
     """Make a user-typed query safe for FTS5 MATCH.
 
-    - Preserve balanced double-quoted phrases.
-    - Strip unmatched FTS5-special characters.
-    - Wrap dotted/hyphenated tokens in quotes so the unicode61 tokenizer
-      doesn't split them into separate AND-joined terms.
+    The documented syntax keeps working: balanced ``"phrases"``, the
+    upper-case operators ``AND`` / ``OR`` / ``NOT``, and a trailing ``*`` for a
+    prefix. Everything else is treated as plain text:
+
+    - a word made only of letters, digits and ``_`` passes through as is;
+    - any other word (``python's``, ``localhost:8080``, ``slow,``, ``-m``,
+      ``~/scripts``) becomes an FTS5 string, so its punctuation acts as a
+      separator, as the unicode61 tokenizer already treats it when indexing.
+      Before gh #233 those characters reached MATCH raw and raised a syntax
+      error, which read as "no match";
+    - a word with no letters or digits at all (``?``, ``-``, ``,``) is dropped;
+    - stray operators (leading, trailing, doubled) are dropped.
     """
     if not query:
         return ""
@@ -309,25 +349,41 @@ def _sanitize_fts5_query(query: str) -> str:
         return f"\x00Q{len(quoted_parts) - 1}\x00"
 
     sanitized = re.sub(r'"[^"]*"', _preserve_quoted, query)
+    # Unmatched quotes and the FTS5 grouping/boost characters become separators.
+    sanitized = re.sub(r'[+{}()"^]', " ", sanitized)
 
-    # Drop unmatched FTS5-special chars
-    sanitized = re.sub(r"[+{}()\"^]", " ", sanitized)
+    tokens: list[str] = []
+    for segment in _PLACEHOLDER_RE.split(sanitized):
+        if not segment:
+            continue
+        ph = re.fullmatch(r"\x00Q(\d+)\x00(\*?)", segment)
+        if ph:
+            phrase = quoted_parts[int(ph.group(1))]
+            if _HAS_WORD_RE.search(phrase):
+                tokens.append(phrase + ph.group(2))
+            continue
+        for word in segment.split():
+            if word in _FTS5_OPERATORS:
+                tokens.append(word)
+                continue
+            # A prefix star may be followed by punctuation (``prof*?``, ``kube*,``).
+            trail = re.search(r"\W*$", word).group()
+            prefix = "*" if "*" in trail else ""
+            core = word[: len(word) - len(trail)] if prefix else word
+            if not _HAS_WORD_RE.search(core):
+                continue
+            if _BAREWORD_RE.fullmatch(core):
+                tokens.append(core + prefix)
+            else:
+                tokens.append(_fts5_string(core) + prefix)
 
-    # Collapse repeated * and drop leading *
-    sanitized = re.sub(r"\*+", "*", sanitized)
-    sanitized = re.sub(r"(^|\s)\*", r"\1", sanitized)
+    return " ".join(_drop_stray_operators(tokens))
 
-    # Drop dangling boolean operators
-    sanitized = re.sub(r"(?i)^(AND|OR|NOT)\b\s*", "", sanitized.strip())
-    sanitized = re.sub(r"(?i)\s+(AND|OR|NOT)\s*$", "", sanitized.strip())
 
-    # Quote dotted/hyphenated tokens
-    sanitized = re.sub(r"\b(\w+(?:[._-]\w+)+)\b", r'"\1"', sanitized)
-
-    for i, quoted in enumerate(quoted_parts):
-        sanitized = sanitized.replace(f"\x00Q{i}\x00", quoted)
-
-    return sanitized.strip()
+def _plain_words_query(query: str) -> str:
+    """The retry query: every non-word character becomes a space, operators go."""
+    words = re.sub(r"[^\w\s]", " ", query).split()
+    return " ".join(w for w in words if w not in _FTS5_OPERATORS)
 
 
 # ---------------------------------------------------------------------------
@@ -845,16 +901,47 @@ class SqliteFtsStore(BaseStore):
         excl = list(exclude_sources) if exclude_sources else []
         roles = list(role_filter) if role_filter else []
 
+        # Try the sanitized query; if FTS5 still rejects it, retry once with plain
+        # words. If that fails too, say so (FtsQueryError) rather than returning
+        # [] and letting the caller report "no match" (gh #233).
+        candidates = [cleaned]
+        fallback = _plain_words_query(query)
+        if fallback and fallback != cleaned:
+            candidates.append(fallback)
+        last_exc: sqlite3.OperationalError | None = None
+        for candidate in candidates:
+            sql, params = self._search_sql(candidate, excl, roles, highlight, limit)
+            with self._lock:
+                try:
+                    rows = self._conn.execute(sql, params).fetchall()
+                except sqlite3.OperationalError as exc:
+                    logger.debug("FTS5 search failed for %r: %s", candidate, exc)
+                    last_exc = exc
+                    continue
+            return [dict(r) for r in rows]
+        raise FtsQueryError(f"FTS5 could not run the query {query!r}: {last_exc}")
+
+    def _search_sql(
+        self,
+        cleaned: str,
+        excl: list[str],
+        roles: list[str],
+        highlight: tuple[str, str],
+        limit: int,
+    ) -> tuple[str, list[Any]]:
         use_trigram = self._trigram_enabled and contains_cjk(cleaned) and _count_cjk(cleaned) >= 3
         if use_trigram:
-            # Quote each non-operator token so % and * are literal
-            tokens = cleaned.split()
+            # Quote each non-operator token so % and * are literal. A token the
+            # sanitizer already made an FTS5 string is unwrapped first, so its
+            # quotes aren't searched for literally.
             parts: list[str] = []
-            for tok in tokens:
-                if tok.upper() in {"AND", "OR", "NOT"}:
+            for tok in re.findall(r'"(?:[^"]|"")*"\*?|\S+', cleaned):
+                if tok in _FTS5_OPERATORS:
                     parts.append(tok)
-                else:
-                    parts.append('"' + tok.replace('"', '""') + '"')
+                    continue
+                m = re.fullmatch(r'"((?:[^"]|"")*)"(\*?)', tok)
+                text = m.group(1).replace('""', '"') + m.group(2) if m else tok
+                parts.append(_fts5_string(text))
             match_query = " ".join(parts)
             fts_table = "messages_fts_trigram"
             snippet_table = "messages_fts_trigram"
@@ -889,13 +976,7 @@ class SqliteFtsStore(BaseStore):
             LIMIT ?
         """
         params.append(limit)
-        with self._lock:
-            try:
-                rows = self._conn.execute(sql, params).fetchall()
-            except sqlite3.OperationalError as exc:
-                logger.debug("FTS5 search failed: %s", exc)
-                return []
-        return [dict(r) for r in rows]
+        return sql, params
 
     # ====================================================================
     # BaseStore — Op dispatch
@@ -1085,11 +1166,17 @@ class SqliteFtsStore(BaseStore):
             return [_row_to_search_item(row, namespace_prefix, score=None) for row in rows]
 
         # FTS5 query path
-        matches = self.search_messages(
-            op.query,
-            limit=op.limit + op.offset,
-            role_filter=([namespace_prefix[2]] if len(namespace_prefix) >= 3 else None),
-        )
+        try:
+            matches = self.search_messages(
+                op.query,
+                limit=op.limit + op.offset,
+                role_filter=([namespace_prefix[2]] if len(namespace_prefix) >= 3 else None),
+            )
+        except FtsQueryError as exc:
+            # BaseStore.search has no error channel; keep its [] contract but
+            # don't hide the rejection at debug level.
+            logger.warning("%s", exc)
+            matches = []
         # Filter by session_id if present in the prefix.
         if len(namespace_prefix) >= 2:
             session_filter = namespace_prefix[1]

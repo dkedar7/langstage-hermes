@@ -41,7 +41,7 @@ from typing import Annotated, Any
 from langchain_core.tools import StructuredTool
 from langgraph.prebuilt import InjectedState
 
-from langstage_hermes.store.sqlite_fts import SqliteFtsStore
+from langstage_hermes.store.sqlite_fts import FtsQueryError, SqliteFtsStore
 
 logger = logging.getLogger(__name__)
 
@@ -277,6 +277,13 @@ def _discover(
             exclude_sources=exclude_sources,
             role_filter=["user", "assistant"],
         )
+    except FtsQueryError:
+        # A rejected query is not "no history on this topic" (gh #233).
+        return (
+            f"## session_search (discover)\n\n**Query**: `{query}`\n\n"
+            "The search query could not be run (FTS5 rejected it, even as plain words). "
+            'This is not a "no match": rephrase it as plain words and search again.\n'
+        )
     except Exception as exc:  # pragma: no cover
         logger.exception("session_search discover failed")
         return f"## session_search (discover)\n\nFTS5 query failed: {exc}\n"
@@ -488,12 +495,16 @@ def _discover_structured(
     # real session — including the tool-role rows where crystallised-skill and
     # session summaries land (the issue's own "profile slow python" example is
     # one). Reflection-fork *sessions* (source=tool) are still excluded. (gh #79)
-    raw_hits = store.search_messages(
-        query,
-        limit=50,
-        exclude_sources=exclude_sources,
-        highlight=(_HL_OPEN, _HL_CLOSE),
-    )
+    try:
+        raw_hits = store.search_messages(
+            query,
+            limit=50,
+            exclude_sources=exclude_sources,
+            highlight=(_HL_OPEN, _HL_CLOSE),
+        )
+    except FtsQueryError as exc:
+        # Rejected, not empty: the CLI reports it and exits 1 (gh #233).
+        return {"mode": "discovery", "query": query, "count": 0, "results": [], "error": str(exc)}
     current_root = store.resolve_to_lineage_root(current_session_id) if current_session_id else ""
 
     seen: dict[str, dict[str, Any]] = {}

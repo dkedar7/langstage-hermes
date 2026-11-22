@@ -1583,6 +1583,10 @@ def _render_search_human(result: dict[str, Any]) -> None:
     mode = result.get("mode")
     if mode == "discovery":
         results = result.get("results", [])
+        if result.get("error"):
+            click.echo(click.style(f'search: the query "{result.get("query", "")}" could not be run', fg="yellow"))
+            click.echo(click.style(f"  ({result['error']}; try plain words)", fg="bright_black"))
+            return
         if not results:
             click.echo(f'No sessions match "{result.get("query", "")}".')
             return
@@ -1754,6 +1758,9 @@ def search(
     # not-found (gh #99, #134). The correct message / JSON `error` was already
     # emitted above; only the exit code was wrong.
     if _scroll_target_not_found(result):
+        sys.exit(1)
+    # A query FTS5 rejected is a failure, not "no match" (gh #233).
+    if result.get("mode") == "discovery" and result.get("error"):
         sys.exit(1)
 
 
