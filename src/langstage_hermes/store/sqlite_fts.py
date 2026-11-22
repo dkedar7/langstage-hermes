@@ -304,6 +304,7 @@ class FtsQueryError(ValueError):
 _FTS5_OPERATORS = frozenset({"AND", "OR", "NOT"})
 _BAREWORD_RE = re.compile(r"\w+")
 _HAS_WORD_RE = re.compile(r"\w")
+_TRAILING_S_RE = re.compile(r"(?<=\w)['\u2019][sS](?=\W*$)")
 _PLACEHOLDER_RE = re.compile(r"(\x00Q\d+\x00\*?)")
 
 
@@ -370,6 +371,9 @@ def _sanitize_fts5_query(query: str) -> str:
             trail = re.search(r"\W*$", word).group()
             prefix = "*" if "*" in trail else ""
             core = word[: len(word) - len(trail)] if prefix else word
+            # A possessive or "is" ('s) adds nothing searchable: `python's` should
+            # find "python", not only the literal two-token phrase "python s".
+            core = _TRAILING_S_RE.sub("", core)
             if not _HAS_WORD_RE.search(core):
                 continue
             if _BAREWORD_RE.fullmatch(core):
