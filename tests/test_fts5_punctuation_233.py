@@ -172,3 +172,20 @@ def test_cli_search_rejected_query_exits_1(store: SqliteFtsStore, monkeypatch) -
     assert r.exit_code == 1
     payload = json.loads(r.output)
     assert payload["error"] and payload["results"] == []
+
+
+@pytest.mark.parametrize("query", ["python's", "Python\u2019s", "python's?", "kubernetes's rollback"])
+def test_trailing_apostrophe_s_matches_the_bare_word(tmp_hermes_home: Path, query: str) -> None:
+    # The issue's repro: the demo text says "Python script", never "python's".
+    s = SqliteFtsStore()
+    try:
+        s.ensure_session("s1", source="user")
+        s.record_message("s1", "user", "my Python script is slow; kubernetes rollback failed")
+        assert {h["session_id"] for h in s.search_messages(query)} == {"s1"}
+    finally:
+        s.close()
+
+
+def test_other_apostrophes_stay_a_phrase() -> None:
+    assert _sanitize_fts5_query("don't") == '"don\'t"'
+    assert _sanitize_fts5_query("python's") == "python"

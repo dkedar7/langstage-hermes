@@ -2,6 +2,14 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.11] - 2026-11-22
+
+### Fixed
+- **A search word ending in `'s` finds the bare word (gh #233 follow-up).** 0.5.10 searched
+  `python's` as the phrase "python s", so it found only text with that exact spelling. A
+  possessive or "is" `'s` is now dropped first: `python's` finds "Python script", as the issue's
+  repro expects. Other apostrophes (`don't`) still search as written.
+
 ## [0.5.10] - 2026-11-22
 
 ### Fixed
