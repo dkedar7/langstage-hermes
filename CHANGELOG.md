@@ -2,6 +2,18 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.10] - 2026-11-22
+
+### Fixed
+- **`search` and the agent's `session_search` find queries with ordinary punctuation (gh #233).**
+  A `?`, `'`, `,`, `:` or similar reached SQLite's full-text MATCH unchanged and raised a syntax
+  error, which was reported as "No sessions match" (exit 0) or, to the agent, "No matching sessions
+  found". So `slow python?`, `what's the deploy command`, `localhost:8080` or `python3 -m pytest`
+  always came back empty. Punctuation now separates words, as it does when messages are indexed;
+  `"phrases"`, `AND` / `OR` / `NOT` and a trailing `*` work as before. If a query still can't run,
+  it's retried once as plain words; if that fails too, `search` says the query could not be run
+  and exits 1 (`--json` carries an `error`), and `session_search` says so instead of "no match".
+
 ## [0.5.9] - 2026-11-20
 
 ### Fixed
