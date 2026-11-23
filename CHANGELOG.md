@@ -2,6 +2,21 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.12] - 2026-11-23
+
+### Fixed
+- **`doctor` checks the provider package for every LangChain provider (gh #236).** It only
+  checked `openai:*` and `anthropic:*`, so with `ollama:llama3.2` (or `google_genai:`, `groq:`,
+  `mistralai:` ...) and no `langchain-ollama`, `doctor` exited 0 and `doctor --json` said
+  `"ok": true`, while `verify` and `chat` then failed with an ImportError. `doctor` now looks the
+  prefix up in LangChain's own provider map, for the main and the aux model, and a missing
+  package fails it (exit 1) with the line to run, such as `pip install langchain-ollama`. A
+  prefix LangChain doesn't know, or a bare model name, is still not checked.
+- **`doctor` no longer reports another provider's key for those models.** With
+  `google_genai:gemini-2.0-flash` and only `OPENROUTER_API_KEY` set, it printed
+  `OPENROUTER_API_KEY: set`, which read as a passing key check. It now says the key isn't
+  checked for `google_genai:*` models.
+
 ## [0.5.11] - 2026-11-22
 
 ### Fixed
