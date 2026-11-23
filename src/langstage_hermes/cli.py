@@ -405,6 +405,43 @@ def _provider_package(model_for_run: str) -> _ProviderPkg | None:
     return None
 
 
+def _langchain_provider_package(model_for_run: str) -> _ProviderPkg | None:
+    """The provider package LangChain itself maps a model prefix to, for ``doctor``.
+
+    ``_PROVIDER_PACKAGES`` only covers the providers hermes ships a path for, so
+    ``doctor`` used to assert nothing about ``ollama:``, ``google_genai:``,
+    ``groq:`` and the rest, and passed a setup ``verify`` then failed with an
+    ``ImportError`` (gh #236). ``init_chat_model`` resolves those prefixes from
+    ``langchain.chat_models.base._BUILTIN_PROVIDERS`` (``prefix -> (module, class,
+    ...)``). That attribute is private, so the lookup is guarded: if it's missing
+    or shaped differently we return ``None`` and assert nothing, as before. A bare
+    model name (no ``prefix:``) and a prefix LangChain doesn't know also return
+    ``None``. There's no hermes extra for these providers, so the hint is the
+    LangChain distribution itself (``langchain_ollama`` -> ``langchain-ollama``).
+    """
+    if ":" not in model_for_run:
+        return None
+    prefix = model_for_run.split(":", 1)[0].strip()
+    if not prefix:
+        return None
+    try:
+        from langchain.chat_models import base as _lc_base
+
+        entry = getattr(_lc_base, "_BUILTIN_PROVIDERS", {}).get(prefix)
+        module = entry[0] if isinstance(entry, tuple) and entry else None
+    except Exception:
+        return None
+    if not isinstance(module, str) or not module:
+        return None
+    top = module.split(".", 1)[0]
+    return _ProviderPkg(top, f"pip install {top.replace('_', '-')}", f"{prefix}:*")
+
+
+def _doctor_provider_package(model_for_run: str) -> _ProviderPkg | None:
+    """hermes' own entry first (its extras win), then LangChain's map (gh #236)."""
+    return _provider_package(model_for_run) or _langchain_provider_package(model_for_run)
+
+
 def _missing_provider_install_line(model_for_run: str, exc: BaseException) -> str | None:
     """Install guidance when ``exc`` is the model's provider package being absent.
 
@@ -501,8 +538,17 @@ def _doctor_report_model_key(model_for_run: str, *, label: str, as_json: bool = 
             "hint": "export ANTHROPIC_API_KEY=…",
         }
         return True, [model_check, key_check]
+    elif ":" in model_for_run and _model_scheme(model_for_run) != "openrouter":
+        # A provider prefix hermes doesn't know the key variable for (ollama:,
+        # google_genai:, groq:, ...). Don't list ANTHROPIC/OPENAI/OPENROUTER keys
+        # here: a set OPENROUTER_API_KEY next to google_genai:* read as a passing
+        # key check for a key that model never uses (gh #236).
+        scheme = _model_scheme(model_for_run)
+        _echo(f"  API key: not checked for {scheme}:* models (set the key that provider needs)")
+        return False, [model_check, {"name": api_key_name, "ok": True, "detail": f"not checked for {scheme}:* models"}]
     else:
-        # Unknown / custom provider — report present keys without asserting one.
+        # A bare model name (init_chat_model infers the provider) or openrouter:* —
+        # report present keys without asserting one.
         present = []
         for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"):
             if os.getenv(var):
@@ -4030,7 +4076,7 @@ def doctor(as_json: bool) -> None:
     # The prefix→package/extra table lives in _PROVIDER_PACKAGES so chat/verify
     # can't drift from it (gh #78).
     provider_pkg_missing = False
-    _entry = _provider_package(model_for_run)
+    _entry = _doctor_provider_package(model_for_run)
     if _entry is not None:
         if importlib.util.find_spec(_entry.module) is None:
             _emit(f"  ✗ provider package '{_entry.module}' not importable for {model_for_run} — {_entry.install}")
@@ -4051,7 +4097,7 @@ def doctor(as_json: bool) -> None:
     # Same new-provider-scheme rule as the aux key above (gh #158, the package twin
     # of gh #96 / #104). A miss feeds the same exit gate.
     if aux_model and _model_scheme(aux_model) != _model_scheme(model_for_run):
-        _aux_entry = _provider_package(aux_model)
+        _aux_entry = _doctor_provider_package(aux_model)
         if _aux_entry is not None:
             if importlib.util.find_spec(_aux_entry.module) is None:
                 _emit(f"  ✗ provider package '{_aux_entry.module}' not importable for {aux_model} (aux) — {_aux_entry.install}")
