@@ -2,6 +2,17 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.13] - 2026-11-26
+
+### Fixed
+- **`cron run-due` exits 1 when a job in the tick failed (gh #238).** It exited 0 even when a
+  job's agent turn errored, so crontab's MAILTO, a systemd `OnFailure=`, a CI schedule or a
+  healthcheck never saw the failure. Now any job that ends in `error` makes the tick exit 1, with
+  or without `--json`, and stderr gets one line such as
+  `error: 1 of 2 cron job(s) failed: b7d89015b06f`. stdout is unchanged (the text summary, or the
+  `--json` object with each job's status). A tick with nothing due, or with every job ok, still
+  exits 0. The long-running `cron daemon` keeps running after a failed job.
+
 ## [0.5.12] - 2026-11-23
 
 ### Fixed

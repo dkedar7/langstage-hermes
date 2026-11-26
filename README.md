@@ -119,7 +119,7 @@ Every `langstage-hermes` command (and the deprecated `deepagent-hermes` alias, a
 | Code | Meaning |
 |---|---|
 | `0` | success |
-| `1` | failure: `verify` / `doctor` not ready (missing key or provider package, a failed check or round-trip), `chat` can't start (missing key, bad `--agent`, agent build failed), a skill that won't install, an item not found, the cron daemon can't start |
+| `1` | failure: `verify` / `doctor` not ready (missing key or provider package, a failed check or round-trip), `chat` can't start (missing key, bad `--agent`, agent build failed), a skill that won't install, an item not found, the cron daemon can't start, `cron run-due` when any job in the tick failed |
 | `2` | paused on a human-in-the-loop interrupt (reserved; no hermes command exits 2 today) |
 | `64` | usage error: an unknown command or flag, a bad option value, conflicting options (`search --session` without `--around`, `--json` without `--show-config`), an invalid `cron create --schedule` |
 

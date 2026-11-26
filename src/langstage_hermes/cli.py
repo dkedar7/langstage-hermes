@@ -3131,10 +3131,22 @@ def cron_run_due(as_json: bool) -> None:
             for r in results
         ]
         click.echo(_json.dumps({"ran": ran, "count": len(ran)}, default=str))
-        return
-    click.echo(f"Tick complete: {len(results)} job(s) run.")
-    for r in results:
-        click.echo(f"  {r['job_id']}: {'ok' if r['success'] else 'error'}")
+    else:
+        click.echo(f"Tick complete: {len(results)} job(s) run.")
+        for r in results:
+            click.echo(f"  {r['job_id']}: {'ok' if r['success'] else 'error'}")
+    # An external tick loop (crontab, a systemd timer, a CI schedule) reads only the
+    # exit code, so a job whose turn failed must fail the tick: the family's failure
+    # code (ADR 0007), with or without --json. stdout stays the per-job detail; the
+    # one-line summary goes to stderr. Nothing due, or every job ok, stays 0. The
+    # long-running `cron daemon` keeps going after a failed job (gh #238).
+    failed = [r.get("job_id") for r in results if not r.get("success")]
+    if failed:
+        click.echo(
+            f"error: {len(failed)} of {len(results)} cron job(s) failed: {', '.join(map(str, failed))}",
+            err=True,
+        )
+        sys.exit(EXIT_FAIL)
 
 
 @cron.command("daemon")
