@@ -117,9 +117,7 @@ def test_curator_skips_external_skills(team):
     from langstage_hermes.curator import mark_stale_and_archive
 
     before = {p: p.read_bytes() for p in _files(team)}
-    report = mark_stale_and_archive(
-        _agent_library(), stale_days=0, archive_days=0, state_meta_get=lambda name: 0.0, now=10**10
-    )
+    report = mark_stale_and_archive(_agent_library(), stale_days=0, archive_days=0, state_meta_get=lambda name: 0.0, now=10**10)
     assert "team-skill" not in report.get("archived", []) + report.get("marked_stale", [])
     assert {p: p.read_bytes() for p in _files(team)} == before
 
