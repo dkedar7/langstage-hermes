@@ -53,7 +53,17 @@ _SOURCE_OVERRIDE: ContextVar[str | None] = ContextVar("hermes_skill_mutation_sou
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["BundledSkillError", "Skill", "SkillLibrary", "SkillLoadError", "format_load_error", "is_pinned"]
+__all__ = [
+    "BundledSkillError",
+    "ExternalSkillError",
+    "ReadOnlySkillError",
+    "Skill",
+    "SkillLibrary",
+    "SkillLoadError",
+    "format_load_error",
+    "is_pinned",
+    "skill_search_dirs",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +149,20 @@ def _is_bundled_path(path: Path) -> bool:
     return True
 
 
-class BundledSkillError(ValueError):
+class ReadOnlySkillError(ValueError):
+    """Base for refusals to change a skill Hermes doesn't own (bundled or external)."""
+
+    skill_name: str
+
+
+def _same_path(a: Path, b: Path) -> bool:
+    try:
+        return Path(a).resolve() == Path(b).resolve()
+    except OSError:
+        return Path(a) == Path(b)
+
+
+class BundledSkillError(ReadOnlySkillError):
     """Refusal to mutate a skill that ships inside the installed package (gh #154)."""
 
     def __init__(self, name: str, verb: str = "remove") -> None:
@@ -150,6 +173,24 @@ class BundledSkillError(ValueError):
             f"langstage-hermes.toml, or LANGSTAGE_HERMES_SKILLS_DISABLED={name})."
         )
         self.skill_name = name
+
+
+class ExternalSkillError(ReadOnlySkillError):
+    """Refusal to write into ``skills.external_dirs`` (gh #241).
+
+    External dirs are extra *discovery* sources, typically a team-shared skills
+    checkout or a read-only mount. Hermes reads them but never creates, edits,
+    pins or archives anything there: those files belong to that checkout.
+    """
+
+    def __init__(self, name: str, directory: Path, verb: str = "modify") -> None:
+        super().__init__(
+            f"{name!r} comes from skills.external_dirs ({directory}); refusing to {verb} it there "
+            f"(external dirs are read-only to Hermes). Change it in that checkout, or hide it with "
+            f'`skills.disabled` (e.g. `[skills] disabled = ["{name}"]`).'
+        )
+        self.skill_name = name
+        self.directory = directory
 
 
 def _hermes_meta(frontmatter_data: dict[str, Any]) -> dict[str, Any]:
@@ -185,6 +226,43 @@ def _default_search_dirs() -> list[Path]:
     if project_dir.exists():
         dirs.append(project_dir)
     return dirs
+
+
+def skill_search_dirs(cfg: Any, *, home: Path | None = None) -> tuple[list[Path], list[Path]]:
+    """The skill search dirs and which of them are ``skills.external_dirs``.
+
+    Resolution order matches SPEC §10.2 — later wins on name collision:
+    bundled < ``<HERMES_HOME>/skills`` < project shadow < external dirs.
+    External dirs are discovery-only: the library never writes into them
+    (gh #241), so new skills land in the project shadow if there is one, else
+    ``<HERMES_HOME>/skills`` — the same place ``skills install`` puts them.
+    The agent and the CLI both build their library from this one function.
+
+    ``cfg`` is a resolved :class:`~langstage_hermes.config.HermesConfig`;
+    ``home`` overrides ``cfg.hermes_home`` for the user dir.
+    """
+    dirs: list[Path] = []
+    # One source of truth for the packaged tree, so SkillLibrary's bundled guard
+    # (gh #154) recognizes exactly the dir listed here.
+    bundled = _bundled_skills_dir()
+    if bundled.is_dir():
+        dirs.append(bundled)
+    # User-global.
+    dirs.append((home if home is not None else cfg.hermes_home) / "skills")
+    # Project shadow.
+    project = Path.cwd() / ".langstage-hermes" / "skills"
+    if project.is_dir():
+        dirs.append(project)
+    own = list(dirs)
+    # Extra dirs from config. One that is really the user or project dir (an
+    # external_dirs entry pointing at HERMES_HOME/skills) stays writable.
+    external: list[Path] = []
+    for extra in cfg.skills_external_dirs:
+        path = Path(extra).expanduser()
+        dirs.append(path)
+        if not any(_same_path(path, d) for d in own):
+            external.append(path)
+    return dirs, external
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +373,8 @@ class Skill:
     category: str | None = None
     platforms: list[str] | None = None
     version: str | None = None
+    # The skills.external_dirs entry this skill was loaded from, or None (gh #241).
+    external_dir: Path | None = None
 
     @property
     def directory(self) -> Path:
@@ -316,6 +396,11 @@ class Skill:
         """True when this skill ships inside the installed package (read-only; gh #154)."""
         return _is_bundled_path(self.path)
 
+    @property
+    def external(self) -> bool:
+        """True when this skill lives in a ``skills.external_dirs`` entry (read-only; gh #241)."""
+        return self.external_dir is not None
+
 
 # ---------------------------------------------------------------------------
 # SkillLibrary
@@ -336,6 +421,11 @@ class SkillLibrary:
             appends a row capturing the full SKILL.md before+after so
             the change can be diffed and rolled back. Pass ``None`` for
             test fixtures and read-only callers.
+        external_dirs: The entries of ``dirs`` that come from
+            ``skills.external_dirs``. They are searched like any other dir but
+            are read-only: new skills never land there, and patching, pinning
+            or archiving a skill that lives there raises
+            :class:`ExternalSkillError` (gh #241).
 
     The library performs no caching across calls — every ``list()`` /
     ``get()`` re-scans disk. The prompt builder in ``prompt.py`` adds the
@@ -348,8 +438,10 @@ class SkillLibrary:
         *,
         config: dict[str, Any] | None = None,
         audit_log: Any = None,
+        external_dirs: list[Path] | None = None,
     ) -> None:
         self.dirs: list[Path] = [Path(d) for d in (dirs if dirs is not None else _default_search_dirs())]
+        self.external_dirs: list[Path] = [Path(d) for d in (external_dirs or [])]
         self.config: dict[str, Any] = config or {}
         # Typed as Any so audit.py doesn't have to be imported eagerly at
         # library import time — the library is used in read-only contexts
@@ -551,6 +643,14 @@ class SkillLibrary:
         if errors:
             raise ValueError(f"SKILL.md frontmatter for {name!r} is invalid:\n- " + "\n- ".join(errors))
 
+        # An existing skill of this name in an external dir outranks anything we'd
+        # write to the user dir, so writing a copy would silently change nothing;
+        # writing into the external dir would change someone else's checkout (gh #241).
+        existing = self.get(name)
+        if existing is not None and existing.external_dir is not None:
+            raise ExternalSkillError(name, existing.external_dir, verb="overwrite")
+        if target_dir is not None and (ext := self._external_dir_for(Path(target_dir))) is not None:
+            raise ExternalSkillError(name, ext, verb="write")
         base = Path(target_dir) if target_dir is not None else self._default_write_dir()
         if category is not None:
             _check_category(category, existing=_is_segment(category) and (base / category).is_dir())
@@ -620,6 +720,8 @@ class SkillLibrary:
             raise ValueError(f"skill {name!r} not found")
         if skill.bundled:
             raise BundledSkillError(name, verb="modify")
+        if skill.external_dir is not None:
+            raise ExternalSkillError(name, skill.external_dir)
         errors = validate_frontmatter(frontmatter_data, parent_dir_name=skill.name)
         if errors:
             raise ValueError(f"SKILL.md frontmatter for {name!r} is invalid:\n- " + "\n- ".join(errors))
@@ -650,6 +752,8 @@ class SkillLibrary:
             return False
         if skill.bundled:
             raise BundledSkillError(name)
+        if skill.external_dir is not None:
+            raise ExternalSkillError(name, skill.external_dir, verb="archive")
 
         # Snapshot the SKILL.md before moving so the audit log can record
         # the pre-delete content (recovery aid — rollback uses this).
@@ -726,20 +830,35 @@ class SkillLibrary:
     # ------------------------------------------------------------------
 
     def _default_write_dir(self) -> Path:
-        """The last directory in the search list (highest precedence).
+        """The last writable directory in the search list (highest precedence).
 
-        Per SPEC §10.2: user / project / bundled — the caller is expected to
-        order them so that the last entry is the one new skills should land in.
-        Falls back to ``$HERMES_HOME/skills``.
+        Per SPEC §10.2: bundled < user < project — the caller is expected to
+        order them so that the last writable entry is the one new skills should
+        land in. Bundled (inside the package) and ``external_dirs`` (someone
+        else's checkout, gh #241) are never written to, even though external
+        dirs come last for read precedence. Falls back to ``$HERMES_HOME/skills``.
         """
         for directory in reversed(self.dirs):
-            # Prefer a non-bundled dir. Bundled lives inside the package source tree.
-            if directory != _bundled_skills_dir():
+            # Bundled lives inside the package source tree; external dirs are read-only.
+            if directory != _bundled_skills_dir() and not self._is_external_dir(directory):
                 directory.mkdir(parents=True, exist_ok=True)
                 return directory
         fallback = _hermes_home() / "skills"
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
+
+    def _is_external_dir(self, directory: Path) -> bool:
+        return any(_same_path(directory, ext) for ext in self.external_dirs)
+
+    def _external_dir_for(self, path: Path) -> Path | None:
+        """The ``external_dirs`` entry that contains ``path``, or ``None``."""
+        for ext in self.external_dirs:
+            try:
+                Path(path).resolve().relative_to(ext.resolve())
+            except (ValueError, OSError):
+                continue
+            return ext
+        return None
 
     def _find_search_dir_for(self, path: Path) -> Path | None:
         for directory in self.dirs:
@@ -844,6 +963,7 @@ class SkillLibrary:
             category=category,
             platforms=platforms,
             version=version,
+            external_dir=base_dir if self._is_external_dir(base_dir) else None,
         )
 
 

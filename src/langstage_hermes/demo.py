@@ -36,6 +36,7 @@ test suite exercise the identical path a real user takes.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 from dataclasses import dataclass, field
@@ -260,9 +261,10 @@ def run_demo(
         A :class:`DemoResult` describing the generated skill, memory note, and the
         genuine side effects recorded (audit log + FTS5 store).
     """
-    home = Path(home)
+    # Absolute, because the run below changes into ``home``.
+    home = Path(home).absolute()
     home.mkdir(parents=True, exist_ok=True)
-    workspace = Path(workspace) if workspace is not None else home / "workspace"
+    workspace = Path(workspace).absolute() if workspace is not None else home / "workspace"
     workspace.mkdir(parents=True, exist_ok=True)
 
     # HERMES_HOME must be visible to config resolution AND to the memory tool /
@@ -283,32 +285,23 @@ def run_demo(
             overrides={
                 "skills_creation_nudge_interval": nudge_interval,
                 "memory_nudge_interval": nudge_interval,
+                # The demo's skill library is the throwaway home alone: no team
+                # skills checkout from the cwd config (gh #241).
+                "skills_external_dirs": [],
             }
         )
-        agent = create_hermes_agent(
-            cfg,
-            workspace=workspace,
-            session_id=session_id,
-            model=DemoMainModel(nudge_interval=nudge_interval),
-            aux_model=DemoReviewModel(),
-        )
-        state = agent.invoke(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": (
-                            "Investigate why a couple of Python scripts are slow, using the same repeatable "
-                            "procedure each time. When you spot a reusable pattern, persist it for next time."
-                        ),
-                    }
-                ],
-                "session_id": session_id,
-                # Generous budget: nudge_interval tool turns + task + final.
-                "iteration_budget_remaining": nudge_interval + 20,
-            },
-            config={"configurable": {"thread_id": session_id}},
-        )
+        # Build and run from inside the throwaway home, so a project shadow
+        # (``./.langstage-hermes/skills`` in the user's cwd) isn't searched either:
+        # it would outrank the home and receive the demo's skill (gh #241).
+        with contextlib.chdir(home):
+            agent = create_hermes_agent(
+                cfg,
+                workspace=workspace,
+                session_id=session_id,
+                model=DemoMainModel(nudge_interval=nudge_interval),
+                aux_model=DemoReviewModel(),
+            )
+            state = _invoke_demo(agent, session_id=session_id, nudge_interval=nudge_interval)
     finally:
         # Release the SQLite handles (store + audit log) BEFORE the caller
         # removes HERMES_HOME — on Windows an open connection locks state.db and
@@ -325,6 +318,27 @@ def run_demo(
         workspace=workspace,
         nudge_interval=nudge_interval,
         state=state,
+    )
+
+
+def _invoke_demo(agent: Any, *, session_id: str, nudge_interval: int) -> Any:
+    """Run the demo's one scripted turn."""
+    return agent.invoke(
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "Investigate why a couple of Python scripts are slow, using the same repeatable "
+                        "procedure each time. When you spot a reusable pattern, persist it for next time."
+                    ),
+                }
+            ],
+            "session_id": session_id,
+            # Generous budget: nudge_interval tool turns + task + final.
+            "iteration_budget_remaining": nudge_interval + 20,
+        },
+        config={"configurable": {"thread_id": session_id}},
     )
 
 

@@ -21,7 +21,7 @@ from langchain_core.tools import BaseTool, InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
-from langstage_hermes.skills.library import SkillLibrary
+from langstage_hermes.skills.library import ExternalSkillError, SkillLibrary
 from langstage_hermes.skills.prompt import clear_prompt_cache
 from langstage_hermes.skills.validator import validate as validate_frontmatter
 
@@ -401,6 +401,9 @@ def _action_patch(library: SkillLibrary, *, name: str, old_str: str, new_str: st
     skill = library.get(name)
     if skill is None:
         raise ValueError(f"skill {name!r} not found")
+    if skill.external_dir is not None:
+        # Someone else's checkout (skills.external_dirs): never edit it in place (gh #241).
+        raise ExternalSkillError(name, skill.external_dir, verb="patch")
     before_bytes = skill.path.read_bytes()
     full = before_bytes.decode("utf-8")
     if old_str not in full:
