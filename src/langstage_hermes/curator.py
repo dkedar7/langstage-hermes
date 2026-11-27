@@ -129,6 +129,8 @@ def mark_stale_and_archive(
 
     Bundled skills (``skill.bundled``) are skipped entirely — they live inside
     the installed package, which a per-home pass must never mutate (gh #154).
+    So are ``skills.external_dirs`` skills (``skill.external``): a shared
+    checkout is read-only to Hermes (gh #241).
     Pins are read with :func:`~langstage_hermes.skills.library.is_pinned`, the
     same accessor ``Skill.pinned`` uses (gh #119).
 
@@ -163,6 +165,10 @@ def mark_stale_and_archive(
             continue
 
         if getattr(skill, "bundled", False):
+            continue
+        # A skills.external_dirs skill belongs to that checkout: never mark or
+        # archive it from here (gh #241).
+        if getattr(skill, "external", False):
             continue
 
         # ``metadata`` is the full frontmatter; the Hermes extensions live under

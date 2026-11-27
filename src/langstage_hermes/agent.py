@@ -50,7 +50,7 @@ from langstage_hermes.plugins.event_bus import PluginEventBus
 from langstage_hermes.prompts import PromptAssemblyMiddleware
 from langstage_hermes.reflection import ReflectionMiddleware, build_review_subagent
 from langstage_hermes.search.session_search import make_session_search_tool
-from langstage_hermes.skills.library import SkillLibrary, format_load_error
+from langstage_hermes.skills.library import SkillLibrary, format_load_error, skill_search_dirs
 from langstage_hermes.skills.loader import SkillLoaderMiddleware
 from langstage_hermes.skills.tools import make_skill_tools
 from langstage_hermes.store.recorder import HermesStateRecorderMiddleware
@@ -62,31 +62,8 @@ log = logging.getLogger(__name__)
 
 
 def _default_skill_dirs(cfg: HermesConfig) -> list[Path]:
-    """Resolution order matches SPEC §10.2 — later wins on name collision.
-
-    Bundled skills ship inside the wheel at ``langstage_hermes/_bundled_skills/``
-    (not at the repo root). Pre-v0.1.2 this looked three parents up from
-    ``agent.py``, which worked for editable installs but resolved to ``Lib/``
-    on PyPI installs — leaving fresh users with no bundled skills.
-    """
-    dirs: list[Path] = []
-    # One source of truth for the packaged tree, so SkillLibrary's bundled guard
-    # (gh #154) recognizes exactly the dir listed here.
-    from langstage_hermes.skills import library as _skill_library_mod
-
-    bundled = _skill_library_mod._bundled_skills_dir()
-    if bundled.is_dir():
-        dirs.append(bundled)
-    # User-global.
-    dirs.append(cfg.hermes_home / "skills")
-    # Project shadow.
-    project = Path.cwd() / ".langstage-hermes" / "skills"
-    if project.is_dir():
-        dirs.append(project)
-    # Extra dirs from config.
-    for extra in cfg.skills_external_dirs:
-        dirs.append(Path(extra).expanduser())
-    return dirs
+    """Every skill search dir, in precedence order (see :func:`skill_search_dirs`)."""
+    return skill_search_dirs(cfg)[0]
 
 
 def _alias_openrouter_key(model_id: str) -> None:
@@ -146,7 +123,8 @@ def _open_library(cfg: HermesConfig, sid: str, db_path: Path) -> SkillLibrary:
     # Thread the disabled-skill config so skills.disabled / skills.platform_disabled
     # actually exclude a skill from the loaded toolset — without config= the filter
     # in SkillLibrary.list() is dead code and the knob is a silent no-op (gh #74).
-    library = SkillLibrary(_default_skill_dirs(cfg), config=cfg.skills_filter_config(), audit_log=audit_log)
+    dirs, external = skill_search_dirs(cfg)
+    library = SkillLibrary(dirs, config=cfg.skills_filter_config(), audit_log=audit_log, external_dirs=external)
     library.set_mutation_context(session_id=sid, source="agent")
     # Scan once, here, so a SKILL.md with broken frontmatter is reported while the
     # agent is being built — before the REPL banner — rather than never. This is the

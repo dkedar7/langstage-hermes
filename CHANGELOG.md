@@ -2,6 +2,24 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.14] - 2026-11-27
+
+### Fixed
+- **Agent-authored skills no longer land in `skills.external_dirs` (gh #241).** External dirs
+  come last in the search order, and new skills went to the last dir in that order, so with an
+  external dir set (a team skills checkout, a read-only mount) every skill the agent wrote through
+  `skill_manage(create)` or the reflection review went into it. External dirs are now
+  discovery-only: new skills land in the project shadow (`./.langstage-hermes/skills`) if it
+  exists, else `<HERMES_HOME>/skills`, the same place `skills install` puts them. The agent's
+  `skill_manage` (create over an existing name, patch, write_file, pin, unpin, delete), the CLI's
+  `skills remove` and `curator pin`, and the curator's stale/archive pass all refuse to change a
+  skill that lives in an external dir, with a message naming the dir. An external dir that is
+  really `<HERMES_HOME>/skills` or the project shadow stays writable.
+- **`demo` passes with `external_dirs` set or a project shadow present (gh #241).** It failed with
+  "the review subagent did not write a skill" and left its `profile-slow-python` skill in the
+  external dir or in `./.langstage-hermes/skills`. The demo now searches only its throwaway home
+  and writes nothing outside it.
+
 ## [0.5.13] - 2026-11-26
 
 ### Fixed

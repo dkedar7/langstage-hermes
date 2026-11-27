@@ -2167,24 +2167,12 @@ def _skill_library(*, with_audit: bool = True) -> Any:
     from langstage_hermes.skills.library import SkillLibrary
 
     cfg = HermesConfig.resolve()
-    dirs: list[Path] = []
-    # One source of truth for the packaged tree, so SkillLibrary's bundled guard
-    # (gh #154) recognizes exactly the dir listed here.
-    from langstage_hermes.skills import library as _skill_library_mod
+    # The agent's own search order (bundled < user < project < external_dirs), so
+    # list/show/audit see the external skills the agent loads (gh #52) and the CLI
+    # and agent agree that external dirs are read-only (gh #241).
+    from langstage_hermes.skills.library import skill_search_dirs
 
-    bundled = _skill_library_mod._bundled_skills_dir()
-    if bundled.is_dir():
-        dirs.append(bundled)
-    dirs.append(hermes_home() / "skills")
-    project = Path.cwd() / ".langstage-hermes" / "skills"
-    if project.is_dir():
-        dirs.append(project)
-    # config.skills.external_dirs — a first-class discovery source (SPEC §10.2) that
-    # the runtime agent loads (agent.py::_default_skill_dirs). list/show/audit must
-    # search them too, or `audit` (a validation gate) reports a false green for
-    # external skills the agent will happily load. Kept in sync with _default_skill_dirs.
-    for extra in cfg.skills_external_dirs:
-        dirs.append(Path(extra).expanduser())
+    dirs, external = skill_search_dirs(cfg, home=hermes_home())
     audit_log = None
     if with_audit:
         from langstage_hermes.skills.audit import SkillAuditLog
@@ -2194,7 +2182,7 @@ def _skill_library(*, with_audit: bool = True) -> Any:
         audit_log = SkillAuditLog(db_path=str(db_path))
     # Thread the disabled-skill config so `skills list`/`show` honor
     # skills.disabled / skills.platform_disabled instead of ignoring them (gh #74).
-    lib = SkillLibrary(dirs=dirs, config=cfg.skills_filter_config(), audit_log=audit_log)
+    lib = SkillLibrary(dirs=dirs, config=cfg.skills_filter_config(), audit_log=audit_log, external_dirs=external)
     if audit_log is not None:
         lib.set_mutation_context(source="cli")
     return lib
@@ -2458,14 +2446,15 @@ def skills_install(path: Path) -> None:
 
 def _skills_remove(name: str) -> None:
     """Archive an installed skill and record a rollback-able delete mutation."""
-    from langstage_hermes.skills.library import BundledSkillError
+    from langstage_hermes.skills.library import ReadOnlySkillError
 
     lib = _skill_library()
     try:
         removed = lib.delete(name)
-    except BundledSkillError as exc:
+    except ReadOnlySkillError as exc:
         # A bundled skill lives inside the installed package — removing it would
-        # delete it for every HERMES_HOME on this interpreter (gh #154).
+        # delete it for every HERMES_HOME on this interpreter (gh #154). An
+        # external_dirs skill belongs to that checkout (gh #241).
         click.echo(click.style(str(exc), fg="yellow"))
         sys.exit(1)
     if removed:
