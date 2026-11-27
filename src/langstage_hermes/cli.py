@@ -36,6 +36,8 @@ from typing import Any, NamedTuple, NoReturn
 
 import click
 
+from langstage_hermes.keyhint import describe_error, with_key_hint
+
 # ── exit codes ─────────────────────────────────────────────────────
 # The LangStage family scheme (core ADR 0007,
 # https://github.com/dkedar7/langstage-core/blob/main/docs/adr/0007-family-exit-codes.md):
@@ -1498,7 +1500,8 @@ def _run_agent_turn_agui(agent: Any, user_text: str, state: dict[str, Any]) -> N
                 elif ftype == "interrupt":
                     paused = frame
                 elif ftype == "error":
-                    click.echo(click.style(f"Agent stream failed: {frame.get('error')}", fg="red"))
+                    # Core >= 1.0.69 already adds the key hint here; with_key_hint adds it once.
+                    click.echo(click.style(f"Agent stream failed: {with_key_hint(str(frame.get('error')))}", fg="red"))
             if text_open:
                 click.echo()
                 text_open = False
@@ -1525,7 +1528,7 @@ def _run_agent_turn_agui(agent: Any, user_text: str, state: dict[str, Any]) -> N
                 click.echo(click.style(f"  ✓ auto-approved (/yolo): {names}", fg="yellow"))
             resume = approve["resume"]
     except Exception as exc:
-        click.echo(click.style(f"Agent stream failed: {exc}", fg="red"))
+        click.echo(click.style(f"Agent stream failed: {with_key_hint(str(exc), exc)}", fg="red"))
 
 
 def _clip(value: Any, limit: int = 300) -> str:
@@ -3595,7 +3598,7 @@ def _verify_json(*, model_id: str | None, keep_workspace: bool) -> NoReturn:
                                 conn.close()
                             _add("fts5_store", True, f"{n_sess} session(s), {n_msgs} message(s) recorded")
                 except Exception as e:
-                    _add("round_trip", False, f"model invoke failed: {type(e).__name__}: {e}")
+                    _add("round_trip", False, f"model invoke failed: {describe_error(e)}")
         finally:
             if not keep_workspace:
                 shutil.rmtree(workspace, ignore_errors=True)
@@ -3792,7 +3795,7 @@ def verify(model_id: str | None, keep_workspace: bool, as_json: bool) -> None:
                 config={"configurable": {"thread_id": "verify-001"}},
             )
         except Exception as e:
-            click.echo(click.style(f"  ✗ model invoke failed: {type(e).__name__}: {e}", fg="red"))
+            click.echo(click.style(f"  ✗ model invoke failed: {describe_error(e)}", fg="red"))
             click.echo(click.style("    (auth error? rate limit? check the API key + model id)", fg="bright_black"))
             sys.exit(EXIT_FAIL)
         invoke_s = time.perf_counter() - t0

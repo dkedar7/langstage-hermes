@@ -316,7 +316,11 @@ def _build_cron_response(job: dict[str, Any], *, prompt: str) -> tuple[bool, str
         )
     except Exception as e:
         _log_cron_failure("Cron job %s: agent invoke failed", job.get("id"), exc=e)
-        return False, f"[agent invoke failed: {e}]"
+        # Name an unset provider key: with no key, the error is only "Connection
+        # error." (gh #240).
+        from langstage_hermes.keyhint import with_key_hint
+
+        return False, f"[agent invoke failed: {with_key_hint(str(e), e)}]"
 
     messages = (result or {}).get("messages") or []
     # Return content of the last AIMessage (or any non-empty message tail).

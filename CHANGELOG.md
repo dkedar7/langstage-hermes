@@ -2,6 +2,19 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.15] - 2026-11-27
+
+### Fixed
+- **Hermes' own error lines name an unset provider key (gh #240).** With no key, the Anthropic
+  client fails with a bare "Connection error.", which reads like a network problem.
+  langstage-core 1.0.69 adds `(hint: ANTHROPIC_API_KEY is not set)` to the lines core formats,
+  but Hermes formats its own, so a cron job logged `[agent invoke failed: Connection error.]`.
+  Cron job errors (in `cron run-due` output and the run history), `verify`'s `model invoke failed`
+  line (text and `--json`), and chat's `Agent stream failed` line now carry the hint, for example
+  `[agent invoke failed: Connection error. (hint: ANTHROPIC_API_KEY is not set)]`. The hint
+  covers the providers core knows, and appears only when the key is unset or blank; it names the
+  variable, never a value. With a core older than 1.0.69 the lines are unchanged.
+
 ## [0.5.14] - 2026-11-27
 
 ### Fixed
