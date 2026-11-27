@@ -97,6 +97,20 @@ def test_cron_job_error_names_the_unset_key(monkeypatch, tmp_hermes_home):
     assert text == f"[agent invoke failed: Connection error. {HINT}]"
 
 
+def test_cron_failure_log_line_names_the_unset_key(monkeypatch, tmp_hermes_home, caplog):
+    """The stderr WARNING (what crontab mail shows) carries the hint too."""
+    import logging
+
+    from langstage_hermes.cron.scheduler import _build_cron_response
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("LANGSTAGE_DEBUG", raising=False)
+    _stub_agent(monkeypatch)
+    with caplog.at_level(logging.WARNING, logger="langstage_hermes.cron.scheduler"):
+        _build_cron_response({"id": "j1"}, prompt="hi")
+    assert f"Cron job j1: agent invoke failed: Connection error. {HINT}" in caplog.text
+
+
 def test_cron_job_error_has_no_hint_when_the_key_is_set(monkeypatch, tmp_hermes_home):
     from langstage_hermes.cron.scheduler import _build_cron_response
 
