@@ -89,7 +89,11 @@ def _log_cron_failure(msg: str, *args: Any, exc: BaseException) -> None:
     if _debug_enabled():
         logger.error(msg, *args, exc_info=True)
     else:
-        logger.warning("%s: %s", msg % args if args else msg, exc)
+        # The same missing-key hint the job's recorded error carries (gh #240): this
+        # line is what crontab mail and journald show.
+        from langstage_hermes.keyhint import with_key_hint
+
+        logger.warning("%s: %s", msg % args if args else msg, with_key_hint(str(exc), exc))
 
 
 # ── tick lock ──────────────────────────────────────────────────────

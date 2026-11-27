@@ -2,6 +2,14 @@
 
 All notable changes to `langstage-hermes` (formerly `deepagent-hermes`) will be documented in this file.
 
+## [0.5.16] - 2026-11-27
+
+### Fixed
+- **The cron failure warning names an unset provider key too (gh #240 follow-up).** 0.5.15 added
+  the hint to the job's recorded error, but the one-line stderr warning that crontab mail and
+  journald show still read `Cron job <id>: agent invoke failed: Connection error.`. It now ends in
+  `(hint: ANTHROPIC_API_KEY is not set)` as well.
+
 ## [0.5.15] - 2026-11-27
 
 ### Fixed
